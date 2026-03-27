@@ -72,12 +72,12 @@ func (p *AgentPool) Get(agentID string) (*AgentConn, bool) {
 }
 
 // List — возвращает список всех подключённых агентов.
-func (p *AgentPool) List() []AgentConn {
+func (p *AgentPool) List() []*AgentConn {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	result := make([]AgentConn, 0, len(p.agents))
-	for _, a := range p.agents {
-		result = append(result, *a)
+	result := make([]*AgentConn, 0, len(p.agents))
+	for _, ag := range p.agents {
+		result = append(result, ag)
 	}
 	return result
 }
@@ -118,6 +118,11 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/agents/files/write", r.handleFileWrite)
 	apiMux.HandleFunc("/api/v1/agents/files/list", r.handleFileList)
 	apiMux.HandleFunc("/api/v1/agents/sysinfo", r.handleSysInfo)
+	apiMux.HandleFunc("/api/v1/agents/task", r.handleTaskSubmit)
+	apiMux.HandleFunc("/api/v1/agents/task/cancel", r.handleTaskCancel)
+	apiMux.HandleFunc("/api/v1/agents/skills/push", r.handleSkillPush)
+	apiMux.HandleFunc("/api/v1/agents/skills/list", r.handleSkillList)
+	apiMux.HandleFunc("/api/v1/agents/skills/delete", r.handleSkillDelete)
 
 	// Auth middleware
 	authMux := r.authMiddleware(apiMux)
@@ -262,15 +267,15 @@ func (r *Relay) handleListAgents(w http.ResponseWriter, req *http.Request) {
 	}
 
 	list := make([]agentInfo, len(agents))
-	for i, a := range agents {
+	for i, ac := range agents {
 		list[i] = agentInfo{
-			ID:        a.ID,
-			Hostname:  a.Hostname,
-			OS:        a.OS,
-			Arch:      a.Arch,
-			Version:   a.Version,
-			Connected: a.Connected.Format(time.RFC3339),
-			LastSeen:  a.LastSeen.Format(time.RFC3339),
+			ID:        ac.ID,
+			Hostname:  ac.Hostname,
+			OS:        ac.OS,
+			Arch:      ac.Arch,
+			Version:   ac.Version,
+			Connected: ac.Connected.Format(time.RFC3339),
+			LastSeen:  ac.LastSeen.Format(time.RFC3339),
 		}
 	}
 
@@ -479,6 +484,175 @@ func (r *Relay) authMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, req)
 	})
+}
+
+// === Вспомогательные функции ===
+
+func (r *Relay) handleTaskSubmit(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		AgentID      string `json:"agent_id"`
+		SkillID      string `json:"skill_id,omitempty"`
+		Description  string `json:"description"`
+		LLMProvider  string `json:"llm_provider,omitempty"`
+		LLMModel     string `json:"llm_model,omitempty"`
+		LLMAPIKey    string `json:"llm_api_key,omitempty"`
+		MaxSteps     int    `json:"max_steps,omitempty"`
+		MaxDuration  int    `json:"max_duration_sec,omitempty"`
+		AutoApprove  bool   `json:"auto_approve_safe,omitempty"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	if body.AgentID == "" || body.Description == "" {
+		writeError(w, http.StatusBadRequest, "agent_id и description обязательны")
+		return
+	}
+
+	agent, ok := r.pool.Get(body.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	taskID := uuid.New().String()
+
+	msg := protocol.NewMessage(protocol.MsgTask)
+	msg.Payload = protocol.TaskPayload{
+		TaskID:       taskID,
+		SkillID:      body.SkillID,
+		Description:  body.Description,
+		LLMProvider:  body.LLMProvider,
+		LLMModel:     body.LLMModel,
+		LLMAPIKey:    body.LLMAPIKey,
+		MaxSteps:     body.MaxSteps,
+		MaxDuration:  body.MaxDuration,
+		AutoApprove:  body.AutoApprove,
+	}
+
+	if err := agent.SendMessage(msg); err != nil {
+		writeError(w, http.StatusBadGateway, "ошибка: "+err.Error())
+		return
+	}
+
+	writeJSON(w, map[string]string{
+		"status":   "submitted",
+		"task_id":  taskID,
+		"agent_id": body.AgentID,
+	})
+}
+
+func (r *Relay) handleTaskCancel(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		AgentID string `json:"agent_id"`
+		TaskID  string `json:"task_id"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	agent, ok := r.pool.Get(body.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	msg := protocol.NewMessage(protocol.MsgTaskCancel)
+	msg.Payload = map[string]string{"task_id": body.TaskID}
+	agent.SendMessage(msg)
+
+	writeJSON(w, map[string]string{"status": "cancel_sent", "task_id": body.TaskID})
+}
+
+func (r *Relay) handleSkillPush(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		AgentID     string `json:"agent_id"`
+		SkillID     string `json:"skill_id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Instructions string `json:"instructions"`
+		ToolsAllowed []string `json:"tools_allowed"`
+		ForceUpdate bool   `json:"force_update,omitempty"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	if body.AgentID == "" || body.SkillID == "" || body.Instructions == "" {
+		writeError(w, http.StatusBadRequest, "agent_id, skill_id и instructions обязательны")
+		return
+	}
+
+	agent, ok := r.pool.Get(body.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	msg := protocol.NewMessage(protocol.MsgSkillPush)
+	msg.Payload = protocol.SkillPushPayload{
+		SkillID:       body.SkillID,
+		Name:          body.Name,
+		Description:   body.Description,
+		Instructions:  body.Instructions,
+		ToolsAllowed:  body.ToolsAllowed,
+		ForceUpdate:   body.ForceUpdate,
+	}
+	agent.SendMessage(msg)
+
+	writeJSON(w, map[string]string{"status": "pushed", "skill_id": body.SkillID})
+}
+
+func (r *Relay) handleSkillList(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		AgentID string `json:"agent_id"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	agent, ok := r.pool.Get(body.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	msg := protocol.NewMessage(protocol.MsgSkillList)
+	agent.SendMessage(msg)
+
+	writeJSON(w, map[string]string{"status": "requested", "agent_id": body.AgentID})
+}
+
+func (r *Relay) handleSkillDelete(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		AgentID string `json:"agent_id"`
+		SkillID string `json:"skill_id"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	agent, ok := r.pool.Get(body.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	msg := protocol.NewMessage(protocol.MsgSkillDelete)
+	msg.Payload = map[string]string{"skill_id": body.SkillID}
+	agent.SendMessage(msg)
+
+	writeJSON(w, map[string]string{"status": "delete_requested", "skill_id": body.SkillID})
 }
 
 // === Вспомогательные функции ===

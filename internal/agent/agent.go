@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -24,22 +25,44 @@ type Agent struct {
 	logger *slog.Logger
 
 	// Подсистемы
-	executor *Executor
-	sandbox  *Sandbox
-	approval *Approver
+	executor    *Executor
+	sandbox     *Sandbox
+	approval    *Approver
+	taskManager *TaskManager
+	skills      *SkillStore
+	llm         *LLMClient
 }
 
 // NewAgent — создаёт новый агент с конфигурацией.
 func NewAgent(cfg *config.Config) *Agent {
 	logger := slog.Default()
-	return &Agent{
+
+	// Инициализируем skill store
+	configDir, _ := config.ConfigDir()
+	skills, err := NewSkillStore(configDir)
+	if err != nil {
+		logger.Warn("ошибка инициализации skill store", "err", err)
+		skills, _ = NewSkillStore(os.TempDir())
+	}
+
+	// LLM клиент
+	llm := NewLLMClient(cfg.LLM)
+
+	a := &Agent{
 		cfg:      cfg,
 		done:     make(chan struct{}),
 		logger:   logger,
 		executor: NewExecutor(cfg),
 		sandbox:  NewSandbox(&cfg.Sandbox),
 		approval: NewApprover(&cfg.Approval),
+		skills:   skills,
+		llm:      llm,
 	}
+
+	// Task manager (нужен agent, поэтому после создания)
+	a.taskManager = NewTaskManager(a, llm, skills)
+
+	return a
 }
 
 // Connect — подключается к реле и запускает основной цикл.
@@ -143,6 +166,18 @@ func (a *Agent) handleMessage(msg protocol.Message) {
 
 	case protocol.MsgSysInfo:
 		a.handleSysInfo(msg)
+
+	case protocol.MsgTask:
+		a.handleTask(msg)
+
+	case protocol.MsgTaskCancel:
+		a.handleTaskCancel(msg)
+
+	case protocol.MsgSkillPush:
+		a.handleSkillPush(msg)
+
+	case protocol.MsgSkillDelete:
+		a.handleSkillDelete(msg)
 
 	case protocol.MsgHeartbeatAck:
 		// Пинг получен, всё ок
@@ -293,6 +328,106 @@ func (a *Agent) sendError(inReplyTo string, errMsg string) {
 		Message: errMsg,
 	}
 	a.write(msg)
+}
+
+// handleTask — обрабатывает автономную задачу (L2).
+func (a *Agent) handleTask(msg protocol.Message) {
+	var payload protocol.TaskPayload
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		return
+	}
+
+	task := &Task{
+		ID:          payload.TaskID,
+		SkillID:     payload.SkillID,
+		Description: payload.Description,
+		LLMConfig: config.LLMConfig{
+			Provider: payload.LLMProvider,
+			Model:    payload.LLMModel,
+			APIKey:   payload.LLMAPIKey,
+		},
+		TaskConfig: config.TaskConfig{
+			MaxSteps:       payload.MaxSteps,
+			MaxDuration:    payload.MaxDuration,
+			AutoApproveSafe: payload.AutoApprove,
+		},
+	}
+
+	if err := a.taskManager.SubmitTask(task); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("ошибка задачи: %v", err))
+		return
+	}
+
+	a.logger.Info("автономная задача принята", "task_id", payload.TaskID, "skill", payload.SkillID)
+}
+
+// handleTaskCancel — отменяет задачу.
+func (a *Agent) handleTaskCancel(msg protocol.Message) {
+	var payload struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		return
+	}
+
+	if err := a.taskManager.CancelTask(payload.TaskID); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("ошибка отмены: %v", err))
+		return
+	}
+}
+
+// handleSkillPush — принимает скилл от реле.
+func (a *Agent) handleSkillPush(msg protocol.Message) {
+	var payload protocol.SkillPushPayload
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		return
+	}
+
+	// Проверяем — не перезаписываем ли существующий скилл
+	if !payload.ForceUpdate {
+		if _, exists := a.skills.Get(payload.SkillID); exists {
+			a.sendError(msg.ID, fmt.Sprintf("скилл %s уже существует (используйте force_update)", payload.SkillID))
+			return
+		}
+	}
+
+	skill := &Skill{
+		ID:           payload.SkillID,
+		Name:         payload.Name,
+		Description:  payload.Description,
+		Instructions: payload.Instructions,
+		ToolsAllowed: payload.ToolsAllowed,
+		LLMProvider:  payload.LLMProvider,
+		LLMModel:     payload.LLMModel,
+	}
+
+	if err := a.skills.Save(skill); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("ошибка сохранения скилла: %v", err))
+		return
+	}
+
+	a.logger.Info("скилл получен", "id", payload.SkillID, "name", payload.Name)
+}
+
+// handleSkillDelete — удаляет скилл.
+func (a *Agent) handleSkillDelete(msg protocol.Message) {
+	var payload struct {
+		SkillID string `json:"skill_id"`
+	}
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		return
+	}
+
+	if err := a.skills.Delete(payload.SkillID); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("ошибка удаления: %v", err))
+		return
+	}
+
+	a.logger.Info("скилл удалён", "id", payload.SkillID)
 }
 
 // unmarshalPayload — десериализует payload сообщения.

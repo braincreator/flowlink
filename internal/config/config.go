@@ -23,6 +23,12 @@ type Config struct {
 	Label        string `json:"label"`         // человекочитаемое имя (default: hostname)
 	WorkDir      string `json:"work_dir"`      // рабочая директория (default: cwd)
 
+	// LLM — настройки для автономного агента (L2)
+	LLM LLMConfig `json:"llm"`
+
+	// Task — настройки автономных задач
+	Task TaskConfig `json:"task"`
+
 	// Sandbox — ограничения прав
 	Sandbox SandboxConfig `json:"sandbox"`
 
@@ -84,6 +90,8 @@ func DefaultConfig() Config {
 		RelayURL:     "wss://relay.flowmasters.ru/ws",
 		HeartbeatSec: 30,
 		WorkDir:      "",
+		LLM:          DefaultLLMConfig(),
+		Task:         DefaultTaskConfig(),
 		Sandbox: SandboxConfig{
 			MaxFileSize:    100 * 1024 * 1024, // 100MB
 			MaxExecTimeout: 300,               // 5 минут

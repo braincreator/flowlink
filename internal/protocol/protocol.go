@@ -40,6 +40,17 @@ const (
 	MsgConfigUpdate  MessageType = "config_update"   // Реле → Агент: обновить конфиг
 	MsgConfigAck     MessageType = "config_ack"      // Агент → Реле: конфиг обновлён
 
+	// === Автономные задачи (L2) ===
+	MsgTask          MessageType = "task"            // Реле → Агент: автономная задача
+	MsgTaskProgress  MessageType = "task_progress"   // Агент → Реле: прогресс задачи
+	MsgTaskDone      MessageType = "task_done"       // Агент → Реле: задача завершена
+	MsgTaskCancel    MessageType = "task_cancel"     // Реле → Агент: отменить задачу
+
+	// === Скиллы ===
+	MsgSkillPush     MessageType = "skill_push"      // Реле → Агент: отправить скилл
+	MsgSkillList     MessageType = "skill_list"      // Агент → Реле: список скиллов
+	MsgSkillDelete   MessageType = "skill_delete"    // Реле → Агент: удалить скилл
+
 	// === Ошибка ===
 	MsgError         MessageType = "error"           // Любой → Любой: ошибка
 )
@@ -175,6 +186,55 @@ type SystemInfoPayload struct {
 type ErrorPayload struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// TaskPayload — автономная задача от реле к агенту.
+type TaskPayload struct {
+	TaskID        string          `json:"task_id"`
+	SkillID       string          `json:"skill_id,omitempty"`
+	Description   string          `json:"description"`
+	LLMProvider   string          `json:"llm_provider,omitempty"`
+	LLMModel      string          `json:"llm_model,omitempty"`
+	LLMAPIKey     string          `json:"llm_api_key,omitempty"` // шифруется
+	MaxSteps      int             `json:"max_steps,omitempty"`
+	MaxDuration   int             `json:"max_duration_sec,omitempty"`
+	AutoApprove   bool            `json:"auto_approve_safe,omitempty"`
+}
+
+// TaskProgressPayload — прогресс задачи от агента к реле.
+type TaskProgressPayload struct {
+	TaskID     string `json:"task_id"`
+	StepNum    int    `json:"step_num"`
+	TotalSteps int    `json:"total_steps,omitempty"`
+	Tool       string `json:"tool,omitempty"`
+	Status     string `json:"status"` // "step_start", "step_done", "task_done", "task_error"
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// SkillPushPayload — отправка скилла от реле к агенту.
+type SkillPushPayload struct {
+	SkillID       string `json:"skill_id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Instructions  string `json:"instructions"`
+	ToolsAllowed  []string `json:"tools_allowed"`
+	LLMProvider   string `json:"llm_provider,omitempty"`
+	LLMModel      string `json:"llm_model,omitempty"`
+	ForceUpdate   bool   `json:"force_update,omitempty"`
+}
+
+// SkillListPayload — список скиллов на агенте.
+type SkillListPayload struct {
+	Skills []SkillInfo `json:"skills"`
+}
+
+// SkillInfo — краткая информация о скилле.
+type SkillInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // NewMessage — создаёт новое сообщение с UUID и timestamp.
