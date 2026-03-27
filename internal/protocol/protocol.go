@@ -19,12 +19,14 @@ const (
 	MsgHeartbeatAck  MessageType = "heartbeat_ack"   // Реле → Агент: понг
 
 	// === Выполнение команд ===
-	MsgExecRequest   MessageType = "exec_request"    // Реле → Агент: выполнить команду
-	MsgExecOutput    MessageType = "exec_output"     // Агент → Реле: stdout/stderr chunk
-	MsgExecDone      MessageType = "exec_done"       // Агент → Реле: команда завершена
-	MsgExecApprove   MessageType = "exec_approve"    // Агент → Реле: клиент разрешил
-	MsgExecReject    MessageType = "exec_reject"     // Агент → Реле: клиент отклонил
-	MsgNeedsApproval MessageType = "needs_approval"  // Агент → Реле: нужна апруваль
+	MsgExecRequest     MessageType = "exec_request"     // Реле → Агент: выполнить команду
+	MsgExecOutput      MessageType = "exec_output"      // Агент → Реле: stdout/stderr chunk
+	MsgExecDone        MessageType = "exec_done"        // Агент → Реле: команда завершена
+	MsgExecApprove     MessageType = "exec_approve"     // Агент → Реле: клиент разрешил
+	MsgExecReject      MessageType = "exec_reject"      // Агент → Реле: клиент отклонил
+	MsgNeedsApproval   MessageType = "needs_approval"   // Агент → Реле: нужна апруваль
+	MsgApprovalRequest MessageType = "approval_request" // Агент → Реле: запрос подтверждения (v2)
+	MsgApprovalResponse MessageType = "approval_response" // Реле → Агент: ответ на подтверждение (v2)
 
 	// === Файловые операции ===
 	MsgFileRead      MessageType = "file_read"       // Реле → Агент: прочитать файл
@@ -126,6 +128,23 @@ type NeedsApprovalPayload struct {
 	Command   string `json:"command"`
 	Reason    string `json:"reason"`     // почему нужна апруваль
 	Risk      string `json:"risk"`       // "low" | "medium" | "high"
+}
+
+// ApprovalRequestPayload — запрос на подтверждение (v2 с 3 режимами).
+type ApprovalRequestPayload struct {
+	RequestID string `json:"request_id"`
+	Command   string `json:"command"`
+	Risk      string `json:"risk"`       // "low" | "medium" | "high"
+	Mode      string `json:"mode"`       // "auto" | "soft_ask" | "hard_ask"
+	Timestamp int64  `json:"timestamp"`
+}
+
+// ApprovalResponsePayload — ответ на запрос подтверждения.
+type ApprovalResponsePayload struct {
+	RequestID string `json:"request_id"`
+	Approved  bool   `json:"approved"`   // true = approved, false = rejected
+	Reason    string `json:"reason,omitempty"`
+	From      string `json:"from,omitempty"` // кто подтвердил (OpenClaw/user)
 }
 
 // FileReadPayload — запрос на чтение файла.

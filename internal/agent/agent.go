@@ -27,10 +27,14 @@ type Agent struct {
 	// Подсистемы
 	executor    *Executor
 	sandbox     *Sandbox
-	approval    *Approver
+	approval    *ApproverV2 // обновлённый approver v2
 	taskManager *TaskManager
 	skills      *SkillStore
 	llm         *RemoteLLM // LLM через реле (НЕ напрямую)
+	backup      *BackupEngine  // добавлен Backup Engine
+	killSwitch  *KillSwitch   // добавлен Kill Switch
+
+	notifyCh   chan protocol.Message // канал для уведомлений к реле
 
 	// Pending LLM responses
 	pendingLLM map[string]*pendingLLMResponse
@@ -48,17 +52,27 @@ func NewAgent(cfg *config.Config) *Agent {
 		skills, _ = NewSkillStore(os.TempDir())
 	}
 
-	// LLM клиент — через реле к хосту оператора
+	// Инициализируем Backup Engine
+	backup := NewBackupEngine(cfg.Backup)
+
+	// Инициализируем Kill Switch
+	killSwitch := NewKillSwitch()
+
+	// Инициализируем Approver V2
+	approval := NewApproverV2(cfg.Approval)
 
 	agent := &Agent{
-		cfg:      cfg,
-		done:     make(chan struct{}),
-		logger:   logger,
-		executor: NewExecutor(cfg),
-		sandbox:  NewSandbox(&cfg.Sandbox),
-		approval: NewApprover(&cfg.Approval),
-		skills:   skills,
-		llm:      nil, // инициализируется ниже
+		cfg:        cfg,
+		done:       make(chan struct{}),
+		logger:     logger,
+		executor:    NewExecutor(cfg),
+		sandbox:     NewSandbox(&cfg.Sandbox),
+		approval:    approval,
+		backup:     backup,
+		killSwitch:  killSwitch,
+		skills:     skills,
+		notifyCh:   make(chan protocol.Message, 100),
+		llm:        nil, // инициализируется ниже
 	}
 
 	// LLM через реле (нужен agent)
@@ -67,6 +81,16 @@ func NewAgent(cfg *config.Config) *Agent {
 
 	// Task manager (нужен agent, поэтому после создания)
 	agent.taskManager = NewTaskManager(agent, llm, skills)
+
+	// Установка функции уведомлений для kill switch
+	killSwitch.SetNotifyFn(func(event string, details map[string]any) {
+		agent.notifyKillSwitchEvent(event, details)
+	})
+
+	// Установка функции уведомлений для approval
+	approval.SetNotifyFn(func(req *ApprovalRequest) {
+		agent.notifyApprovalRequest(req)
+	})
 
 	return agent
 }
@@ -233,50 +257,61 @@ func (a *Agent) handleExecRequest(msg protocol.Message) {
 		return
 	}
 
+	// Проверка Kill Switch
+	if err := a.killSwitch.CheckCommand(payload.Command); err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("заблокировано kill switch: %s", err))
+		a.logger.Warn("команда заблокирована kill switch", "command", payload.Command, "err", err)
+		return
+	}
+
 	// Проверка sandbox
 	if !a.sandbox.AllowCommand(payload.Command) {
 		a.sendError(msg.ID, "команда заблокирована sandbox-ом")
 		return
 	}
 
-	// Проверка approval
-	if a.approval.NeedsApproval(payload.Command) {
-		// Отправляем запрос на апруваль
-		approveMsg := protocol.NewMessage(protocol.MsgNeedsApproval)
-		approveMsg.Payload = protocol.NeedsApprovalPayload{
-			RequestID: payload.RequestID,
-			Command:   payload.Command,
-			Reason:    "Требуется подтверждение пользователя",
-			Risk:      a.approval.AssessRisk(payload.Command),
-		}
-		if err := a.write(approveMsg); err != nil {
-			a.sendError(msg.ID, fmt.Sprintf("ошибка запроса апруваля: %v", err))
-			return
-		}
-
-		// Спрашиваем в терминале
-		approved := a.approval.AskTTY(payload.Command)
-		if !approved {
-			rejectMsg := protocol.NewMessage(protocol.MsgExecReject)
-			rejectMsg.Payload = map[string]string{"request_id": payload.RequestID}
-			a.write(rejectMsg)
-			return
+	// Проверка на деструктивность и создание бэкапа
+	if IsDestructive(payload.Command) && a.backup != nil {
+		affectedPaths := DetectAffectedPaths(payload.Command)
+		if len(affectedPaths) > 0 {
+			snapshotID, err := a.backup.CreateBefore(affectedPaths, payload.Command)
+			if err != nil {
+				a.logger.Warn("ошибка создания бэкапа", "err", err, "paths", affectedPaths)
+				// Продолжаем без бэкапа (упрощение)
+			} else {
+				a.logger.Info("бэкап создан", "snapshot_id", snapshotID, "paths", len(affectedPaths))
+			}
 		}
 	}
 
-	// Выполняем команду
-	a.executor.ExecAsync(payload, func(output protocol.ExecOutputPayload) {
-		msg := protocol.NewMessage(protocol.MsgExecOutput)
-		output.RequestID = payload.RequestID
-		msg.Payload = output
-		a.write(msg)
-	}, func(done protocol.ExecDonePayload) {
-		msg := protocol.NewMessage(protocol.MsgExecDone)
-		done.RequestID = payload.RequestID
-		msg.Payload = done
-		a.write(msg)
-	})
+	// Проверка approval (3 режима)
+	decision, requestID, err := a.approval.CheckApproval(payload.Command)
+	if err != nil {
+		a.sendError(msg.ID, fmt.Sprintf("ошибка approval: %v", err))
+		return
+	}
+
+	switch decision {
+	case DecisionRejected:
+		a.sendError(msg.ID, fmt.Sprintf("команда отклонена: %s", payload.Command))
+		a.logger.Warn("команда отклонена approval", "command", payload.Command)
+		return
+	case DecisionTimedOut:
+		a.sendError(msg.ID, fmt.Sprintf("таймаут ожидания подтверждения: %s", payload.Command))
+		a.logger.Warn("таймаут approval", "command", payload.Command)
+		return
+	case DecisionPending:
+		// Ждём подтверждения через реле
+		// Запрос уже отправлен через notifyFn в approval
+		a.logger.Info("ожидание подтверждения", "request_id", requestID, "command", payload.Command)
+		return
+	case DecisionApproved:
+		// Выполняем команду
+		a.executeCommand(payload)
+	}
 }
+
+
 
 // handleSysInfo — собирает и отправляет системную информацию.
 func (a *Agent) handleSysInfo(msg protocol.Message) {
@@ -473,4 +508,58 @@ func unmarshalPayload(data any, v any) error {
 	// В реальном коде: json.Unmarshal из raw JSON
 	// Упрощение для компиляции
 	return nil
+}
+
+// notifyKillSwitchEvent — отправляет уведомление о событии kill switch через реле.
+func (a *Agent) notifyKillSwitchEvent(event string, details map[string]any) {
+	msg := protocol.NewMessage(protocol.MsgApprovalRequest)
+	msg.Payload = map[string]any{
+		"event":   event,
+		"details": details,
+		"source":  "kill_switch",
+	}
+	a.write(msg)
+}
+
+// notifyApprovalRequest — отправляет запрос на подтверждение через реле.
+func (a *Agent) notifyApprovalRequest(req *ApprovalRequest) {
+	msg := protocol.NewMessage(protocol.MsgApprovalRequest)
+	msg.Payload = protocol.ApprovalRequestPayload{
+		RequestID: req.ID,
+		Command:   req.Command,
+		Risk:      req.Risk,
+		Mode:      string(req.Mode),
+		Timestamp: req.RequestedAt.Unix(),
+	}
+	a.write(msg)
+}
+
+// executeCommand — выполняет команду и отправляет результат.
+func (a *Agent) executeCommand(payload protocol.ExecRequestPayload) {
+	output, err := a.executor.Exec(payload.Command)
+	if err != nil {
+		a.sendError(payload.RequestID, fmt.Sprintf("ошибка выполнения: %v", err))
+		return
+	}
+
+	// Отправляем результат
+	resp := protocol.NewMessage(protocol.MsgExecDone)
+	resp.Payload = protocol.ExecDonePayload{
+		RequestID: payload.RequestID,
+		ExitCode:  0,
+		Duration:  0, // TODO: измерить время
+	}
+	a.write(resp)
+
+	// Отправляем вывод
+	if output != "" {
+		outMsg := protocol.NewMessage(protocol.MsgExecOutput)
+		outMsg.Payload = protocol.ExecOutputPayload{
+			RequestID: payload.RequestID,
+			Data:      output,
+			Stream:    "stdout",
+			Timestamp: time.Now().Unix(),
+		}
+		a.write(outMsg)
+	}
 }

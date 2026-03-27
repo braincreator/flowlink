@@ -126,6 +126,15 @@ func (e *Executor) ExecAsync(
 	}()
 }
 
+// Exec — выполняет команду синхронно, возвращает вывод и ошибку.
+func (e *Executor) Exec(command string) (string, error) {
+	stdout, stderr, exitCode := e.ExecSync(command, "", 60)
+	if exitCode != 0 {
+		return "", fmt.Errorf("exit code %d: %s", exitCode, stderr)
+	}
+	return stdout, nil
+}
+
 // ExecSync — выполняет команду синхронно, возвращает вывод и exit code.
 func (e *Executor) ExecSync(command string, dir string, timeout int) (stdout string, stderr string, exitCode int) {
 	shell := "/bin/sh"

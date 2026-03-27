@@ -26,8 +26,11 @@ type Config struct {
 	// Sandbox — ограничения прав
 	Sandbox SandboxConfig `json:"sandbox"`
 
-	// Approval — настройки подтверждения
-	Approval ApprovalConfig `json:"approval"`
+	// Approval — настройки подтверждения (v2 с 3 режимами)
+	Approval ApprovalConfigV2 `json:"approval"`
+
+	// Backup — настройки резервного копирования
+	Backup BackupConfig `json:"backup"`
 }
 
 // SandboxConfig — ограничения для команд и файлов.
@@ -44,17 +47,40 @@ type SandboxConfig struct {
 	AllowSudo bool `json:"allow_sudo"`
 }
 
-// ApprovalConfig — настройки апруваль (подтверждения) команд.
+// ApprovalConfig — старая конфигурация (deprecated, используйте ApprovalConfigV2).
 type ApprovalConfig struct {
-	// Mode: "auto" | "ask" | "deny"
-	// auto — всё выполняется автоматически
-	// ask — спрашивать для опасных команд
-	// deny — ничего не выполнять без явного разрешения
-	Mode string `json:"mode"`
-	// DangerousPatterns — команды, которые всегда требуют подтверждения
-	DangerousPatterns []string `json:"dangerous_patterns"`
-	// AutoApprovePatterns — команды, которые выполняются без подтверждения
+	Mode                string   `json:"mode"`
+	DangerousPatterns   []string `json:"dangerous_patterns"`
 	AutoApprovePatterns []string `json:"auto_approve_patterns"`
+}
+
+// ApprovalConfigV2 — настройки подтверждения команд (3 режима).
+type ApprovalConfigV2 struct {
+	// Mode: "auto" | "soft_ask" | "hard_ask"
+	// auto — безопасные команды выполняются сразу
+	// soft_ask — средний риск → уведомление + выполнение
+	// hard_ask — высокий риск → ждёт подтверждения
+	Mode string `json:"mode"`
+	// SoftAskNotify — отправлять уведомление при soft_ask (default: true)
+	SoftAskNotify bool `json:"soft_ask_notify"`
+	// HardAskTimeout — таймаут ожидания подтверждения в секундах (default: 3600)
+	HardAskTimeout int `json:"hard_ask_timeout_sec"`
+	// MaxRetries — максимум повторных запросов при hard_ask (default: 3)
+	MaxRetries int `json:"max_retries"`
+}
+
+// BackupConfig — настройки резервного копирования.
+type BackupConfig struct {
+	// MaxSnapshots — максимальное количество снапшотов (default: 50)
+	MaxSnapshots int `json:"max_snapshots"`
+	// MaxTotalSize — максимальный общий размер бэкапов в байтах (default: 5GB)
+	MaxTotalSize int64 `json:"max_total_size"`
+	// RetentionDays — срок хранения в днях (default: 7)
+	RetentionDays int `json:"retention_days"`
+	// BackupDir — директория для хранения бэкапов (default: ~/.flowlink/backups)
+	BackupDir string `json:"backup_dir"`
+	// Enabled — включено ли авто-резервное копирование (default: true)
+	Enabled bool `json:"enabled"`
 }
 
 // RelayConfig — конфигурация реле-сервера.
@@ -92,6 +118,8 @@ type LLMBackendConfig struct {
 
 // DefaultConfig — конфигурация по умолчанию для агента.
 func DefaultConfig() Config {
+	home, _ := os.UserHomeDir()
+	
 	return Config{
 		RelayURL:     "wss://relay.flowmasters.ru/ws",
 		HeartbeatSec: 30,
@@ -107,27 +135,18 @@ func DefaultConfig() Config {
 				":(){ :|:& };:", // fork bomb
 			},
 		},
-		Approval: ApprovalConfig{
-			Mode: "ask",
-			DangerousPatterns: []string{
-				"rm *", "rm -r*", "rmdir*",
-				"sudo*",
-				"shutdown*", "reboot*", "halt*", "poweroff*",
-				"chmod 777*", "chown*",
-				"curl*|*sh", "wget*|*sh", // pipe to shell
-				"mkfs*", "fdisk*", "parted*",
-				"crontab*",
-				"systemctl*",
-				"iptables*", "ufw*",
-			},
-			AutoApprovePatterns: []string{
-				"ls*", "cat*", "head*", "tail*", "wc*",
-				"pwd", "whoami", "hostname", "uname*",
-				"df*", "du*", "free*", "top*", "ps*",
-				"docker ps*", "docker images*",
-				"echo*", "date", "uptime",
-				"git status*", "git log*",
-			},
+		Approval: ApprovalConfigV2{
+			Mode:           "auto", // по умолчанию auto для удобства
+			SoftAskNotify:  true,
+			HardAskTimeout: 3600, // 1 час
+			MaxRetries:     3,
+		},
+		Backup: BackupConfig{
+			MaxSnapshots:  50,
+			MaxTotalSize:  5 * 1024 * 1024 * 1024, // 5GB
+			RetentionDays: 7,
+			BackupDir:     filepath.Join(home, ".flowlink", "backups"),
+			Enabled:       true,
 		},
 	}
 }

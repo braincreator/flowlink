@@ -3,7 +3,6 @@ package agent
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/braincreator/flowlink/internal/config"
@@ -118,80 +117,27 @@ func matchGlob(command, pattern string) bool {
 	return cmd == pat
 }
 
-// Approver — обрабатывает подтверждения (approval) для опасных команд.
-type Approver struct {
-	cfg *config.ApprovalConfig
-}
+// ExecSafe — безопасное выполнение команды с интеграцией KillSwitch и Backup.
+func (e *Executor) ExecSafe(cmd string, backup *BackupEngine, ks *KillSwitch) (output string, err error) {
+	// Проверка Kill Switch
+	if err := ks.CheckCommand(cmd); err != nil {
+		return "", fmt.Errorf("kill switch: %w", err)
+	}
 
-// NewApprover — создаёт новый approver.
-func NewApprover(cfg *config.ApprovalConfig) *Approver {
-	return &Approver{cfg: cfg}
-}
-
-// NeedsApproval — определяет, нужна ли команда подтверждения.
-func (a *Approver) NeedsApproval(command string) bool {
-	switch a.cfg.Mode {
-	case "auto":
-		return false
-	case "deny":
-		return true
-	case "ask":
-		// Проверяем auto-approve паттерны
-		for _, pattern := range a.cfg.AutoApprovePatterns {
-			if matchGlob(command, pattern) {
-				return false
+	// Проверка на деструктивность и создание бэкапа
+	if IsDestructive(cmd) {
+		affectedPaths := DetectAffectedPaths(cmd)
+		if len(affectedPaths) > 0 {
+			snapshotID, backupErr := backup.CreateBefore(affectedPaths, cmd)
+			if backupErr != nil {
+				// Логируем ошибку, но продолжаем (backup не должен блокировать выполнение)
+				slog.Warn("ошибка создания бэкапа", "err", backupErr, "paths", affectedPaths)
+			} else {
+				slog.Info("бэкап создан", "snapshot_id", snapshotID, "command", cmd)
 			}
 		}
-		// Проверяем dangerous паттерны
-		for _, pattern := range a.cfg.DangerousPatterns {
-			if matchGlob(command, pattern) {
-				return true
-			}
-		}
-		// По умолчанию — не спрашиваем
-		return false
-	default:
-		return false
-	}
-}
-
-// AssessRisk — оценивает уровень риска команды.
-func (a *Approver) AssessRisk(command string) string {
-	highRiskPatterns := []string{
-		"rm -rf", "sudo", "shutdown", "reboot", "mkfs",
-		"chmod 777", "dd if=", "curl*|*sh", "wget*|*sh",
 	}
 
-	for _, pattern := range highRiskPatterns {
-		if matchGlob(command, pattern) {
-			return "high"
-		}
-	}
-
-	mediumRiskPatterns := []string{
-		"rm ", "rmdir", "chmod", "chown",
-		"crontab", "systemctl", "iptables", "ufw",
-	}
-
-	for _, pattern := range mediumRiskPatterns {
-		if matchGlob(command, pattern) {
-			return "medium"
-		}
-	}
-
-	return "low"
-}
-
-// AskTTY — спрашивает подтверждение в терминале.
-// Возвращает true если пользователь разрешил.
-func (a *Approver) AskTTY(command string) bool {
-	fmt.Fprintf(os.Stderr, "\n⚠️  FlowLink: запрос на выполнение команды\n")
-	fmt.Fprintf(os.Stderr, "   Команда: %s\n", command)
-	fmt.Fprintf(os.Stderr, "   Риск: %s\n\n", a.AssessRisk(command))
-	fmt.Fprintf(os.Stderr, "   Выполнить? [y/N]: ")
-
-	var response string
-	fmt.Scanln(&response)
-
-	return strings.ToLower(strings.TrimSpace(response)) == "y"
+	// Существующая логика sandbox
+	return e.Exec(cmd)
 }
