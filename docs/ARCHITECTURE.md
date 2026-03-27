@@ -1,291 +1,280 @@
-# FlowLink — Архитектура
+# Architecture
 
-## Обзор
+## Component Diagram
 
-FlowLink решает проблему удалённого управления машинами клиентов через AI.
-Агент устанавливается одной командой, подключается к реле, и OpenClaw может
-выполнять команды, читать/писать файлы, собирать системную информацию.
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        Client Machine                                │
+│                                                                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                      flowlink (agent)                          │  │
+│  │                                                                │  │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │  │
+│  │  │ Executor │  │ Sandbox  │  │ Backup   │  │ KillSwitch   │  │  │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────┘  │  │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │  │
+│  │  │ Approver │  │ Skill    │  │ Task     │  │ RemoteLLM    │  │  │
+│  │  │ V2       │  │ Store    │  │ Manager  │  │              │  │  │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────┘  │  │
+│  └──────────────────────────┬─────────────────────────────────────┘  │
+└─────────────────────────────┼────────────────────────────────────────┘
+                              │ WSS (outbound)
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                         Relay Server (VPS)                           │
+│                                                                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐│
+│  │ Agent    │  │ Auth     │  │ Rate     │  │ Audit                ││
+│  │ Pool     │  │ Manager  │  │ Limiter  │  │ Logger               ││
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────────────┘│
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐│
+│  │ LLM      │  │ Event    │  │ Registry │  │ Billing              ││
+│  │ Proxy    │  │ Bus      │  │ (Multi-  │  │ (Plans, Usage,       ││
+│  │          │  │ (SSE)    │  │  tenancy)│  │  Invoices)           ││
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────────────┘│
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                    HTTP API + MCP Server                     │   │
+│  │                    + Web Dashboard                           │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
----
+## Internal Packages
 
-## Язык: Go
+```
+internal/
+├── agent/          # Agent daemon: executor, sandbox, approval, backup, kill switch
+├── billing/        # Plans, usage tracking, invoices, payments
+├── config/         # Configuration loading (agent + relay)
+├── dashboard/      # Web Dashboard SPA (embedded)
+├── protocol/       # WebSocket message types and serialization
+├── relay/          # Relay server: WSS, HTTP API, MCP, auth, audit, registry
+├── tgbot/          # Telegram Bot (long polling)
+└── transport/      # WebSocket transport layer
+```
 
-**Почему Go:**
-- Статический бинарник, **ноль зависимостей** на клиенте
-- Кросс-компиляция (GOOS/GOARCH) — один код для macOS, Linux, Windows
-- Маленький размер (~5MB)
-- Отличная стандартная библиотека (crypto, net, os/exec)
-- gorilla/websocket для WSS
-- Эффективные горутины для конкурентности
-- Быстрая компиляция
+## WebSocket Protocol
 
-**Почему не Rust:**
-- Длиннее разработка (borrow checker, lifetime)
-- Избыточно для сетевого демона
-- Rust идеален для CPU-bound, Go — для I/O-bound (наш случай)
+All messages are JSON-encoded. Agents connect outbound (WSS) to the relay, which pierces NAT.
 
-**Почему не Python:**
-- Требует интерпретатор на клиенте
-- Нельзя упаковать в один бинарник без боли (PyInstaller)
-- Медленнее для I/O
-
----
-
-## Транспорт
-
-### Почему WSS (WebSocket Secure), а не SSH:
-
-| Критерий | WSS | SSH | HTTP Polling |
-|----------|-----|-----|-------------|
-| Пробивает NAT | ✅ (outbound) | ❌ (inbound) | ✅ |
-| Бидирекциональный | ✅ | ✅ | ❌ |
-| Реалтайм | ✅ | ✅ | ❌ (latency) |
-| Простота клиента | ✅ | ❌ (сервер) | ✅ |
-| TLS | ✅ | ✅ | ✅ |
-| Proxy-friendly | ✅ | 🟡 | ✅ |
-
-**WSS outbound** = клиент подключается ИЗ машины к реле. NAT не проблема.
-
----
-
-## Протокол
-
-### Формат сообщений
-
-Все сообщения — JSON через WSS:
+### Message Format
 
 ```json
 {
-  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "id": "uuid-v4",
   "type": "exec_request",
-  "agent_id": "abc123def456",
-  "session_id": "",
+  "agent_id": "abc-123",
+  "session_id": "optional-session",
   "payload": { ... },
   "timestamp": 1712345678,
   "error": ""
 }
 ```
 
-### Жизненный цикл
+### Message Types
+
+#### Connection
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `connect` | Agent → Relay | Registration with hostname, OS, arch, version |
+| `connected` | Relay → Agent | Confirmation with assigned agent_id |
+| `disconnect` | Either | Graceful disconnect |
+| `heartbeat` | Agent → Relay | Keep-alive ping (every 30s) |
+| `heartbeat_ack` | Relay → Agent | Keep-alive pong |
+
+#### Command Execution
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `exec_request` | Relay → Agent | Execute shell command |
+| `exec_output` | Agent → Relay | stdout/stderr chunk (streaming) |
+| `exec_done` | Agent → Relay | Command completed (exit code, duration) |
+| `exec_approve` | Agent → Relay | Client approved execution |
+| `exec_reject` | Agent → Relay | Client rejected execution |
+| `needs_approval` | Agent → Relay | Execution requires approval |
+| `approval_request` | Agent → Relay | V2 approval request |
+| `approval_response` | Relay → Agent | V2 approval response |
+
+#### File Operations
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `file_read` | Relay → Agent | Read file content |
+| `file_write` | Relay → Agent | Write file content |
+| `file_list` | Relay → Agent | List directory |
+| `file_response` | Agent → Relay | File operation result |
+
+#### System
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `sys_info` | Relay → Agent | Request system information |
+| `sys_info_resp` | Agent → Relay | CPU, RAM, disk, uptime |
+| `config_update` | Relay → Agent | Update agent configuration |
+| `config_ack` | Agent → Relay | Configuration updated |
+
+#### Autonomous Tasks (L2)
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `task` | Relay → Agent | Submit autonomous task |
+| `task_progress` | Agent → Relay | Task progress update |
+| `task_done` | Agent → Relay | Task completed |
+| `task_cancel` | Relay → Agent | Cancel task |
+
+#### Skills
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `skill_push` | Relay → Agent | Deploy skill to agent |
+| `skill_list` | Agent → Relay | List installed skills |
+| `skill_delete` | Relay → Agent | Remove skill |
+
+#### LLM Proxy
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `llm_request` | Agent → Relay | LLM request (proxied) |
+| `llm_response` | Relay → Agent | LLM response |
+
+#### Error
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `error` | Either | Error with message |
+
+### Example: Command Execution Flow
 
 ```
-1. Агент → Реле:    connect     {agent_id, token, hostname, os, arch}
-2. Реле → Агент:    connected   {agent_id, relay_id, heartbeat_interval}
-3. Агент → Реле:    heartbeat   (каждые 30 сек)
-4. Реле → Агент:    heartbeat_ack
-5. OpenClaw → Реле: HTTP POST /api/v1/agents/exec {agent_id, command}
-6. Реле → Агент:    exec_request {command, timeout, dir, env}
-7. Агент → Реле:    needs_approval {command, risk} (если опасная команда)
-8. Клиент (TTY):    "Выполнить? [y/N]" → Y
-9. Агент → Реле:    exec_approve
-10. Агент → Реле:   exec_output {stdout chunk}
-11. Агент → Реле:   exec_done {exit_code, duration}
-12. Реле → OpenClaw: HTTP response
+1. OpenClaw → POST /api/v1/agents/exec → Relay
+2. Relay → WSS exec_request → Agent
+3. Agent → Sandbox check → Approver check
+   ├─ auto: execute immediately
+   ├─ soft_ask: execute + notify client
+   └─ hard_ask: wait for approval
+4. Agent → WSS exec_output (chunks) → Relay → SSE → OpenClaw
+5. Agent → WSS exec_done → Relay → HTTP response → OpenClaw
 ```
 
----
+## Configuration Format
 
-## Безопасность
+### Agent Config (`~/.flowlink/config.yaml`)
 
-### Модель угроз
+```yaml
+agent_id: "auto-generated-uuid"
+token: "pairwise-auth-token"
+relay_url: "wss://relay.example.com/ws"
+heartbeat_sec: 30
+label: "my-server"
+work_dir: "/home/deploy"
 
-| Угроза | Защита |
-|--------|--------|
-| Перехват трафика | TLS (WSS) |
-| Подмена агента | Pairwise токены |
-| Подмена реле | Certificate pinning (TODO) |
-| Опасные команды | Sandbox + Approval |
-| Чтение файлов | Directory whitelist |
-| DoS (длинная команда) | Timeout + max output size |
-| Повторная атака | Nonce в сообщениях (TODO) |
+sandbox:
+  allowed_dirs: ["/home/deploy", "/var/www"]
+  blocked_patterns: ["rm -rf /*", "mkfs.*", ":(){ :|:& };:"]
+  max_file_size: 104857600    # 100 MB
+  max_exec_timeout: 300        # 5 min
+  allow_sudo: false
 
-### Слой 1: Аутентификация
+approval:
+  mode: "soft_ask"             # auto | soft_ask | hard_ask
+  soft_ask_notify: true
+  hard_ask_timeout_sec: 3600
+  max_retries: 3
 
-- Каждый агент генерирует уникальный `agent_id` + `token` при `--init`
-- Токен проверяется реле при подключении
-- HTTP API защищён Bearer токеном (`FLOWLINK_API_TOKEN`)
+backup:
+  enabled: true
+  max_snapshots: 50
+  max_total_size: 5368709120   # 5 GB
+  retention_days: 7
+  backup_dir: "~/.flowlink/backups"
+```
 
-### Слой 2: Sandbox
+### Relay Config (`relay.yaml`)
 
-- **Blocked patterns:** `rm -rf /*`, `mkfs*`, fork bomb, `dd if=*`
-- **AllowSudo:** по умолчанию false
-- **MaxFileSize:** 100MB для файловых операций
-- **MaxExecTimeout:** 5 минут
-- **AllowedDirs:** ограничение доступа к директориям
+```yaml
+wss_addr: ":8443"
+api_addr: ":8080"
 
-### Слой 3: Approval
+tls_mode: "letsencrypt"        # self-signed | letsencrypt | manual
+tls_domain: "relay.example.com"
+tls_cache: "/var/lib/flowlink/tls-cache"
+tls_cert: ""                   # for manual mode
+tls_key: ""                    # for manual mode
 
-Три режима:
-- `auto` — всё выполняется без спроса
-- `ask` (default) — опасные команды требуют Y/N в терминале клиента
-- `deny` — ничего не выполняется без разрешения
+api_token: "your-secret-token"
 
-Оценка риска:
-- **high:** `rm -rf`, `sudo`, `shutdown`, `curl|sh`, `chmod 777`
-- **medium:** `rm`, `chmod`, `systemctl`, `iptables`
-- **low:** всё остальное
+data_dir: "/var/lib/flowlink"
+rate_limit_rpm: 60
+```
 
----
+## Data Storage
 
-## Конфигурация
+FlowLink uses file-based storage (no external database required).
 
-### Агент (`~/.flowlink/config.json`)
+```
+/var/lib/flowlink/
+├── clients/                   # Client registry
+│   ├── {client_id}.json       # Client info + plan
+│   └── ...
+├── agents/                    # Agent registry
+│   ├── {agent_id}.json        # Agent metadata + token
+│   └── ...
+├── audit/                     # Audit logs (JSONL)
+│   └── audit-2026-03-27.jsonl
+├── billing/                   # Billing data
+│   ├── usage-{client_id}.jsonl
+│   └── invoices/
+└── tls-cache/                 # Let's Encrypt certificates
+```
+
+## Authorization (JWT Flow)
+
+```
+1. Agent starts → connects to WSS with pairwise token
+2. Relay validates token → registers in AgentPool
+3. API request → Authorization: Bearer <JWT>
+4. Middleware validates JWT → extracts client_id
+5. Rate limiter checks request count
+6. Handler executes → AuditLogger records action
+```
+
+### Token Types
+
+| Token | Scope | Lifetime |
+|-------|-------|----------|
+| Pairwise token | Agent ↔ Relay (WSS) | Permanent (rotated on re-register) |
+| API token | HTTP API (admin) | Permanent (config) |
+| JWT | API requests | 24h (refreshable) |
+
+## MCP Protocol
+
+FlowLink exposes an MCP server at `POST /mcp` using Streamable HTTP transport.
+
+### Connection
 
 ```json
 {
-  "agent_id": "abc123...",
-  "token": "def456...",
-  "relay_url": "wss://relay.flowmasters.ru/ws",
-  "label": "MacBook Саня",
-  "heartbeat_sec": 30,
-  "approval": {
-    "mode": "ask",
-    "dangerous_patterns": ["rm *", "sudo*", ...],
-    "auto_approve_patterns": ["ls*", "cat*", "pwd", ...]
-  },
-  "sandbox": {
-    "allowed_dirs": [],
-    "blocked_patterns": ["rm -rf /*", ...],
-    "max_file_size": 104857600,
-    "max_exec_timeout": 300,
-    "allow_sudo": false
+  "mcpServers": {
+    "flowlink": {
+      "url": "https://relay.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-token"
+      }
+    }
   }
 }
 ```
 
-### Реле (`relay.json`)
+### Available Tools
 
-```json
-{
-  "wss_addr": ":8443",
-  "api_addr": ":8080",
-  "api_token": "your-secret-token",
-  "heartbeat_timeout_sec": 90,
-  "max_agents": 100,
-  "allowed_tokens": {
-    "client-token-1": "agent-id-1",
-    "client-token-2": ""
-  }
-}
-```
-
----
-
-## Деплой
-
-### Реле на VPS (Timeweb, 477₽/мес)
-
-```bash
-# 1. Собрать
-make build-relay
-
-# 2. Скопировать
-scp bin/flowlink-relay root@vps:~/
-
-# 3. Запустить с systemd
-ssh root@vps << 'EOF'
-cat > /etc/systemd/system/flowlink-relay.service << UNIT
-[Unit]
-Description=FlowLink Relay
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/root/flowlink-relay -api-token YOUR_TOKEN
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-systemctl daemon-reload
-systemctl enable flowlink-relay
-systemctl start flowlink-relay
-EOF
-
-# 4. SSL через Caddy (автоматический)
-# Caddyfile:
-# relay.flowmasters.ru {
-#     reverse_proxy /ws localhost:8443
-#     reverse_proxy /api localhost:8080
-# }
-```
-
-### Агент у клиента
-
-```bash
-# Одна команда
-curl -sSL https://install.flowmasters.ru | bash
-
-# Или сборка из source
-go install github.com/braincreator/flowlink/cmd/agent@latest
-flowlink --init --relay wss://relay.flowmasters.ru/ws
-flowlink agent start
-```
-
----
-
-## OpenClaw Integration
-
-### HTTP API (через exec curl)
-
-```bash
-# Список агентов
-API_TOKEN="your-token" RELAY="http://relay.flowmasters.ru:8080"
-
-# GET /api/v1/agents
-curl -sH "Authorization: Bearer $API_TOKEN" $RELAY/api/v1/agents | jq
-
-# POST /api/v1/agents/exec
-curl -sX POST -H "Authorization: Bearer $API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id":"abc","command":"docker ps"}' \
-  $RELAY/api/v1/agents/exec | jq
-
-# POST /api/v1/agents/sysinfo
-curl -sX POST -H "Authorization: Bearer $API_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id":"abc"}' \
-  $RELAY/api/v1/agents/sysinfo | jq
-```
-
-### OpenClaw Skill (планируется)
-
-```
-flowlink list                    → список агентов
-flowlink exec <agent> <command>  → выполнить команду
-flowlink read <agent> <path>     → прочитать файл
-flowlink write <agent> <path>    → записать файл
-flowlink info <agent>            → системная информация
-```
-
----
-
-## Roadmap
-
-### MVP (v0.1) — сейчас
-- [x] Протокол (JSON/WSS)
-- [x] Агент (connect, exec, files, sysinfo)
-- [x] Реле (WSS + HTTP API)
-- [x] Sandbox + Approval
-- [x] Install script
-- [x] Кросс-компиляция
-
-### v0.2
-- [ ] Event streaming (SSE для real-time вывода команд)
-- [ ] Файловый трансфер (upload/download больших файлов)
-- [ ] TLS certificate pinning
-- [ ] Systemd/LaunchAgent автозапуск
-
-### v0.3
-- [ ] OpenClaw skill (flowlink)
-- [ ] Web UI для мониторинга агентов
-- [ ] Multi-relay (балансировка)
-- [ ] Audit log
-
-### v1.0
-- [ ] End-to-end шифрование (E2EE)
-- [ ] Групповые команды (на несколько агентов)
-- [ ] Remote shell (интерактивный терминал)
-- [ ] Мобильный companion app
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `flowlink_agents` | `status` (all/online) | List connected agents |
+| `flowlink_exec` | `agent_id`, `command`, `timeout_sec` | Execute command |
+| `flowlink_read` | `agent_id`, `path` | Read file |
+| `flowlink_write` | `agent_id`, `path`, `content` | Write file |
+| `flowlink_list` | `agent_id`, `dir` | List directory |
+| `flowlink_sysinfo` | `agent_id` | System information |
+| `flowlink_task` | `agent_id`, `task`, `description` | Submit autonomous task |
+| `flowlink_task_status` | `agent_id`, `task_id` | Task status |

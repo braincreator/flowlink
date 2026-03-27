@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>flowlink — Open-source серверное управление</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0a;color:#e0e0e0;line-height:1.6}
+a{color:#22c55e;text-decoration:none}
+a:hover{text-decoration:underline}
+.container{max-width:960px;margin:0 auto;padding:0 24px}
+
+/* Nav */
+nav{display:flex;justify-content:space-between;align-items:center;padding:20px 0;border-bottom:1px solid #1a1a1a}
+nav .logo{font-size:20px;font-weight:700;color:#fff}
+nav .nav-links a{color:#999;margin-left:20px;font-size:14px}
+nav .nav-links a:hover{color:#22c55e}
+
+/* Hero */
+.hero{text-align:center;padding:80px 0 60px}
+.hero h1{font-size:clamp(36px,6vw,56px);font-weight:800;color:#fff;margin-bottom:16px}
+.hero p{font-size:18px;color:#888;max-width:540px;margin:0 auto 32px}
+.hero-buttons{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-block;padding:12px 28px;border-radius:8px;font-size:15px;font-weight:600;transition:opacity .2s}
+.btn:hover{opacity:.85;text-decoration:none}
+.btn-primary{background:#22c55e;color:#0a0a0a}
+.btn-secondary{background:#1a1a1a;color:#e0e0e0;border:1px solid #333}
+
+/* Server emoji */
+.server-icon{font-size:48px;margin-bottom:24px;display:block}
+
+/* Sections */
+section{padding:60px 0}
+h2{text-align:center;font-size:28px;color:#fff;margin-bottom:40px}
+
+/* Features */
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
+.feature-card{background:#111;border:1px solid #1a1a1a;border-radius:12px;padding:28px;transition:border-color .2s}
+.feature-card:hover{border-color:#22c55e}
+.feature-card .icon{font-size:28px;margin-bottom:12px}
+.feature-card h3{font-size:16px;color:#fff;margin-bottom:8px}
+.feature-card p{font-size:14px;color:#888}
+
+/* Steps */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:32px;counter-reset:step}
+.step{text-align:center;counter-increment:step;position:relative}
+.step::before{content:counter(step);display:block;width:40px;height:40px;border-radius:50%;background:#22c55e;color:#0a0a0a;font-weight:700;font-size:18px;line-height:40px;margin:0 auto 16px}
+.step h3{font-size:16px;color:#fff;margin-bottom:8px}
+.step p{font-size:14px;color:#888}
+
+/* Pricing */
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px}
+.pricing-card{background:#111;border:1px solid #1a1a1a;border-radius:12px;padding:24px;text-align:center}
+.pricing-card.featured{border-color:#22c55e;transform:scale(1.03)}
+.pricing-card h3{font-size:18px;color:#fff;margin-bottom:4px}
+.pricing-card .price{font-size:24px;font-weight:700;color:#22c55e;margin-bottom:16px}
+.pricing-card ul{list-style:none;font-size:14px;color:#888}
+.pricing-card li{padding:6px 0;border-bottom:1px solid #1a1a1a}
+.pricing-card li:last-child{border:none}
+
+/* Code block */
+.install-block{background:#111;border:1px solid #1a1a1a;border-radius:12px;padding:24px;margin-top:24px;position:relative}
+.install-block .terminal-header{display:flex;gap:6px;margin-bottom:12px}
+.install-block .dot{width:10px;height:10px;border-radius:50%;background:#333}
+.install-block code{font-family:'SF Mono',Menlo,monospace;font-size:14px;color:#22c55e;word-break:break-all}
+
+/* Footer */
+footer{border-top:1px solid #1a1a1a;padding:32px 0;text-align:center;color:#666;font-size:14px}
+footer a{color:#888}
+</style>
+</head>
+<body>
+<div class="container">
+
+<nav>
+  <span class="logo">⚡ flowlink</span>
+  <div class="nav-links">
+    <a href="#features">Возможности</a>
+    <a href="#pricing">Цены</a>
+    <a href="https://github.com/braincreator/flowlink" target="_blank">GitHub</a>
+  </div>
+</nav>
+
+<section class="hero" id="hero">
+  <span class="server-icon">🖥️</span>
+  <h1>flowlink</h1>
+  <p>Open-source серверное управление.<br>Альтернатива FleetDeck и Dexposure.</p>
+  <div class="hero-buttons">
+    <a href="#install" class="btn btn-primary">Установить</a>
+    <a href="https://github.com/braincreator/flowlink" target="_blank" class="btn btn-secondary">GitHub →</a>
+  </div>
+</section>
+
+<section id="features">
+  <h2>Возможности</h2>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="icon">🖥️</div>
+      <h3>Удалённое управление</h3>
+      <p>Выполняйте команды на любых серверах через единый relay</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🔒</div>
+      <h3>Безопасность</h3>
+      <p>JWT, TLS, sandbox, audit log</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🤖</div>
+      <h3>AI Integration</h3>
+      <p>MCP Server для подключения к OpenClaw, Claude, GPT</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">📱</div>
+      <h3>Telegram Bot</h3>
+      <p>Управление серверами из Telegram</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">💰</div>
+      <h3>SaaS Ready</h3>
+      <p>Встроенная биллинговая система с 4 тарифами</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">📊</div>
+      <h3>Dashboard</h3>
+      <p>Веб-интерфейс с тёмной темой</p>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <h2>Как это работает</h2>
+  <div class="steps">
+    <div class="step">
+      <h3>Разворачиваете relay</h3>
+      <p>На своём сервере</p>
+    </div>
+    <div class="step">
+      <h3>Устанавливаете agent</h3>
+      <p>На каждый управляемый сервер</p>
+    </div>
+    <div class="step">
+      <h3>Управляете</h3>
+      <p>Через Web, Telegram, API или MCP</p>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <h2>Тарифы</h2>
+  <div class="pricing-grid">
+    <div class="pricing-card">
+      <h3>Free</h3>
+      <div class="price">0 ₽</div>
+      <ul>
+        <li>1 agent</li>
+        <li>100 cmd/mo</li>
+      </ul>
+    </div>
+    <div class="pricing-card">
+      <h3>Starter</h3>
+      <div class="price">990 ₽</div>
+      <ul>
+        <li>3 agents</li>
+        <li>1K cmd/mo</li>
+      </ul>
+    </div>
+    <div class="pricing-card featured">
+      <h3>Business</h3>
+      <div class="price">4 990 ₽</div>
+      <ul>
+        <li>25 agents</li>
+        <li>10K cmd/mo</li>
+      </ul>
+    </div>
+    <div class="pricing-card">
+      <h3>Enterprise</h3>
+      <div class="price">19 990 ₽</div>
+      <ul>
+        <li>100 agents</li>
+        <li>Unlimited</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <h2>Быстрый старт</h2>
+  <div class="install-block">
+    <div class="terminal-header"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <code>curl -fsSL https://raw.githubusercontent.com/braincreator/flowlink/main/scripts/install.sh | bash</code>
+  </div>
+</section>
+
+<footer>
+  <p>
+    <a href="https://github.com/braincreator/flowlink" target="_blank">GitHub</a> ·
+    MIT License ·
+    2026
+  </p>
+</footer>
+
+</div>
+</body>
+</html>

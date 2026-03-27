@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  relay:
+    build: .
+    container_name: flowlink-relay
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    volumes:
+      - flowlink-data:/root/.flowlink
+    environment:
+      - FLOWLINK_TLS_MODE=self-signed
+      - FLOWLINK_AUTH_SECRET=change-me-in-production
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    container_name: flowlink-bot
+    depends_on:
+      - relay
+    environment:
+      - FLOWLINK_RELAY_URL=http://relay:8080
+      - FLOWLINK_TG_TOKEN=${TG_BOT_TOKEN}
+    restart: unless-stopped
+
+volumes:
+  flowlink-data:
