@@ -414,10 +414,10 @@ func TestBackupEngine_Diff(t *testing.T) {
 	}
 
 	// Изменяем файл
-	time.Sleep(200 * time.Millisecond)
-	os.WriteFile(testFile, []byte("modified"), 0644)
-	// Убеждаемся что mtime обновился
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+	os.WriteFile(testFile, []byte("modified content here"), 0644)
+	// Гарантируем mtime > snapshot timestamp
+	os.Chtimes(testFile, time.Now().Add(time.Second), time.Now().Add(time.Second))
 
 	// Проверяем diff
 	changes, err := engine.Diff(snapshotID)
