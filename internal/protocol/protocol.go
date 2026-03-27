@@ -51,6 +51,10 @@ const (
 	MsgSkillList     MessageType = "skill_list"      // Агент → Реле: список скиллов
 	MsgSkillDelete   MessageType = "skill_delete"    // Реле → Агент: удалить скилл
 
+	// === LLM через реле ===
+	MsgLLMRequest    MessageType = "llm_request"      // Агент → Реле: запрос к LLM
+	MsgLLMResponse   MessageType = "llm_response"     // Реле → Агент: ответ от LLM
+
 	// === Ошибка ===
 	MsgError         MessageType = "error"           // Любой → Любой: ошибка
 )

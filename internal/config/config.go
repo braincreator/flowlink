@@ -23,12 +23,6 @@ type Config struct {
 	Label        string `json:"label"`         // человекочитаемое имя (default: hostname)
 	WorkDir      string `json:"work_dir"`      // рабочая директория (default: cwd)
 
-	// LLM — настройки для автономного агента (L2)
-	LLM LLMConfig `json:"llm"`
-
-	// Task — настройки автономных задач
-	Task TaskConfig `json:"task"`
-
 	// Sandbox — ограничения прав
 	Sandbox SandboxConfig `json:"sandbox"`
 
@@ -79,9 +73,21 @@ type RelayConfig struct {
 	// Агенты
 	AllowedTokens map[string]string `json:"allowed_tokens"` // token → agent_id whitelist
 
+	// LLM Proxy — бэкенды для проксирования LLM запросов
+	LLMBackends []LLMBackendConfig `json:"llm_backends"`
+
 	// Настройки
 	HeartbeatTimeout int `json:"heartbeat_timeout_sec"` // таймаут пинга (default: 90)
 	MaxAgents        int `json:"max_agents"`           // макс кол-во агентов (0 = unlimited)
+}
+
+// LLMBackendConfig — конфигурация LLM backend для реле.
+type LLMBackendConfig struct {
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	APIKey   string `json:"api_key,omitempty"`
+	Priority int    `json:"priority"` // 1 = высший
+	Provider string `json:"provider"` // "openai_compatible", "groq", "ollama"
 }
 
 // DefaultConfig — конфигурация по умолчанию для агента.
@@ -90,8 +96,6 @@ func DefaultConfig() Config {
 		RelayURL:     "wss://relay.flowmasters.ru/ws",
 		HeartbeatSec: 30,
 		WorkDir:      "",
-		LLM:          DefaultLLMConfig(),
-		Task:         DefaultTaskConfig(),
 		Sandbox: SandboxConfig{
 			MaxFileSize:    100 * 1024 * 1024, // 100MB
 			MaxExecTimeout: 300,               // 5 минут

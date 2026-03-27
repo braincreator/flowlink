@@ -1,0 +1,9 @@
+package agent
+
+// truncate — обрезает строку до maxLen символов.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}

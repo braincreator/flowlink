@@ -59,9 +59,28 @@ func main() {
 		"version", version.Version,
 		"wss", cfg.WSSAddr,
 		"api", cfg.APIAddr,
+		"llm_backends", len(cfg.LLMBackends),
 	)
 
 	r := relay.NewRelay(cfg)
+
+	// Инициализируем LLM proxy если есть бэкенды
+	if len(cfg.LLMBackends) > 0 {
+		backends := make([]relay.LLMBackend, len(cfg.LLMBackends))
+		for i, b := range cfg.LLMBackends {
+			backends[i] = relay.LLMBackend{
+				Name:     b.Name,
+				URL:      b.URL,
+				APIKey:   b.APIKey,
+				Priority: b.Priority,
+				Provider: b.Provider,
+			}
+		}
+		r.SetLLMProxy(relay.NewLLMProxy(backends))
+		slog.Info("LLM proxy настроен", "backends", len(backends))
+	} else {
+		slog.Warn("LLM backends не настроены — автономные задачи (L2) не будут работать")
+	}
 	if err := r.Start(); err != nil {
 		slog.Error("ошибка запуска реле", "err", err)
 		os.Exit(1)

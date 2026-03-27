@@ -18,9 +18,10 @@ import (
 
 // Relay — реле-сервер, связывающий агентов и OpenClaw.
 type Relay struct {
-	cfg    *config.RelayConfig
-	logger *slog.Logger
-	pool   *AgentPool
+	cfg       *config.RelayConfig
+	logger    *slog.Logger
+	pool      *AgentPool
+	llmProxy  *LLMProxy
 }
 
 // AgentConn — подключённый агент.
@@ -105,6 +106,11 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 	}
 }
 
+// SetLLMProxy — устанавливает LLM proxy.
+func (r *Relay) SetLLMProxy(proxy *LLMProxy) {
+	r.llmProxy = proxy
+}
+
 // Start — запускает WSS-сервер для агентов.
 func (r *Relay) Start() error {
 	// WSS endpoint для агентов
@@ -123,6 +129,9 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/agents/skills/push", r.handleSkillPush)
 	apiMux.HandleFunc("/api/v1/agents/skills/list", r.handleSkillList)
 	apiMux.HandleFunc("/api/v1/agents/skills/delete", r.handleSkillDelete)
+	apiMux.HandleFunc("/api/v1/llm/chat", r.handleLLMChat)
+	apiMux.HandleFunc("/api/v1/llm/backends", r.handleLLMBackends)
+	apiMux.HandleFunc("/api/v1/llm/health", r.handleLLMHealth)
 
 	// Auth middleware
 	authMux := r.authMiddleware(apiMux)

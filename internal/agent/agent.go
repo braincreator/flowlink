@@ -30,7 +30,10 @@ type Agent struct {
 	approval    *Approver
 	taskManager *TaskManager
 	skills      *SkillStore
-	llm         *LLMClient
+	llm         *RemoteLLM // LLM через реле (НЕ напрямую)
+
+	// Pending LLM responses
+	pendingLLM map[string]*pendingLLMResponse
 }
 
 // NewAgent — создаёт новый агент с конфигурацией.
@@ -45,10 +48,9 @@ func NewAgent(cfg *config.Config) *Agent {
 		skills, _ = NewSkillStore(os.TempDir())
 	}
 
-	// LLM клиент
-	llm := NewLLMClient(cfg.LLM)
+	// LLM клиент — через реле к хосту оператора
 
-	a := &Agent{
+	agent := &Agent{
 		cfg:      cfg,
 		done:     make(chan struct{}),
 		logger:   logger,
@@ -56,13 +58,17 @@ func NewAgent(cfg *config.Config) *Agent {
 		sandbox:  NewSandbox(&cfg.Sandbox),
 		approval: NewApprover(&cfg.Approval),
 		skills:   skills,
-		llm:      llm,
+		llm:      nil, // инициализируется ниже
 	}
 
-	// Task manager (нужен agent, поэтому после создания)
-	a.taskManager = NewTaskManager(a, llm, skills)
+	// LLM через реле (нужен agent)
+	llm := NewRemoteLLM(agent)
+	agent.llm = llm
 
-	return a
+	// Task manager (нужен agent, поэтому после создания)
+	agent.taskManager = NewTaskManager(agent, llm, skills)
+
+	return agent
 }
 
 // Connect — подключается к реле и запускает основной цикл.
@@ -170,6 +176,10 @@ func (a *Agent) handleMessage(msg protocol.Message) {
 	case protocol.MsgTask:
 		a.handleTask(msg)
 
+	case protocol.MsgLLMRequest:
+		// Игнорируем — LLM запросы обрабатываются через handleLLMResponse
+		// Агент отправляет MsgLLMRequest, реле отправляет MsgLLMResponse
+
 	case protocol.MsgTaskCancel:
 		a.handleTaskCancel(msg)
 
@@ -178,6 +188,9 @@ func (a *Agent) handleMessage(msg protocol.Message) {
 
 	case protocol.MsgSkillDelete:
 		a.handleSkillDelete(msg)
+
+	case protocol.MsgLLMResponse:
+		a.handleLLMResponse(msg)
 
 	case protocol.MsgHeartbeatAck:
 		// Пинг получен, всё ок
@@ -342,15 +355,10 @@ func (a *Agent) handleTask(msg protocol.Message) {
 		ID:          payload.TaskID,
 		SkillID:     payload.SkillID,
 		Description: payload.Description,
-		LLMConfig: config.LLMConfig{
-			Provider: payload.LLMProvider,
-			Model:    payload.LLMModel,
-			APIKey:   payload.LLMAPIKey,
-		},
 		TaskConfig: config.TaskConfig{
-			MaxSteps:       payload.MaxSteps,
-			MaxDuration:    payload.MaxDuration,
-			AutoApproveSafe: payload.AutoApprove,
+			SkillID:      payload.SkillID,
+			MaxSteps:     payload.MaxSteps,
+			ApprovalMode: "auto",
 		},
 	}
 

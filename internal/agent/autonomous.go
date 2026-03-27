@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -12,12 +13,17 @@ import (
 	"github.com/braincreator/flowlink/internal/protocol"
 )
 
+// LLMMessage — сообщение для LLM чата.
+type LLMMessage struct {
+	Role    string `json:"role"`    // "system", "user", "assistant"
+	Content string `json:"content"`
+}
+
 // Task — автономная задача, которую агент выполняет с помощью LLM.
 type Task struct {
 	ID          string    `json:"id"`
 	SkillID     string    `json:"skill_id"`
 	Description string    `json:"description"`
-	LLMConfig   config.LLMConfig `json:"llm_config,omitempty"`
 	TaskConfig  config.TaskConfig  `json:"task_config,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	StartedAt   time.Time `json:"started_at,omitempty"`
@@ -55,13 +61,13 @@ type TaskManager struct {
 	mu      sync.Mutex
 	tasks   map[string]*Task
 	agent   *Agent
-	llm     *LLMClient
+	llm     *RemoteLLM
 	skills  *SkillStore
 	logger  *slog.Logger
 }
 
 // NewTaskManager — создаёт менеджер задач.
-func NewTaskManager(agent *Agent, llm *LLMClient, skills *SkillStore) *TaskManager {
+func NewTaskManager(agent *Agent, llm *RemoteLLM, skills *SkillStore) *TaskManager {
 	return &TaskManager{
 		tasks:  make(map[string]*Task),
 		agent:  agent,
@@ -91,9 +97,6 @@ func (tm *TaskManager) SubmitTask(task *Task) error {
 	if task.TaskConfig.MaxSteps == 0 {
 		task.TaskConfig = config.DefaultTaskConfig()
 	}
-	if task.LLMConfig.Provider != "" && task.LLMConfig.APIKey != "" {
-		tm.llm = NewLLMClient(task.LLMConfig)
-	}
 
 	task.Status = "pending"
 	task.CreatedAt = time.Now()
@@ -118,11 +121,10 @@ func (tm *TaskManager) runTask(task *Task) {
 		"description", task.Description,
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(),
-		time.Duration(task.TaskConfig.MaxDuration)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	// Загружаем скилл
+	// Загружаем скилл и строим system prompt
 	var systemPrompt string
 	if task.SkillID != "" {
 		if skill, ok := tm.skills.Get(task.SkillID); ok {
@@ -152,7 +154,7 @@ func (tm *TaskManager) runTask(task *Task) {
 	for step := 1; step <= task.TaskConfig.MaxSteps; step++ {
 		select {
 		case <-ctx.Done():
-			tm.finishTask(task, "timeout", fmt.Sprintf("таймаут задачи (%d сек)", task.TaskConfig.MaxDuration))
+			tm.finishTask(task, "timeout", "таймаут задачи")
 			return
 		default:
 		}
@@ -164,11 +166,10 @@ func (tm *TaskManager) runTask(task *Task) {
 			Status:  "step_start",
 		})
 
-		// Вызываем LLM
+		// Вызываем LLM через реле
 		resp, err := tm.llm.Chat(messages)
 		if err != nil {
 			tm.logger.Error("ошибка LLM", "step", step, "err", err)
-			// Добавляем ошибку в контекст и пробуем ещё раз
 			messages = append(messages, LLMMessage{
 				Role:    "assistant",
 				Content: fmt.Sprintf("Ошибка вызова LLM: %v. Попробуй ещё раз.", err),
@@ -177,7 +178,8 @@ func (tm *TaskManager) runTask(task *Task) {
 		}
 
 		llmContent := strings.TrimSpace(resp.Content)
-		tm.logger.Debug("LLM ответ", "step", step, "tokens_in", resp.TokensIn, "tokens_out", resp.TokensOut)
+		tm.logger.Debug("LLM ответ", "step", step, "backend", resp.Backend,
+			"tokens_in", resp.TokensIn, "tokens_out", resp.TokensOut)
 
 		// Проверяем — это tool_call или текстовый ответ?
 		tool, args, ok := ParseToolCall(llmContent)
@@ -188,14 +190,12 @@ func (tm *TaskManager) runTask(task *Task) {
 				tm.finishTask(task, "done", "")
 				return
 			}
-
-			// Добавляем в контекст и продолжаем
 			messages = append(messages, LLMMessage{Role: "assistant", Content: llmContent})
 			continue
 		}
 
 		// Выполняем инструмент
-		stepResult := tm.executeTool(ctx, tool, args, task.TaskConfig.StepTimeout)
+		stepResult := tm.executeTool(ctx, tool, args, 120)
 		taskStep := TaskStep{
 			Number:    step,
 			Tool:      tool,
@@ -228,11 +228,8 @@ func (tm *TaskManager) runTask(task *Task) {
 			resultText = stepResult.output
 		}
 
-		// Добавляем в контекст: что мы попросили, что получили
-		messages = append(messages, LLMMessage{
-			Role:    "assistant",
-			Content: llmContent,
-		})
+		// Добавляем в контекст
+		messages = append(messages, LLMMessage{Role: "assistant", Content: llmContent})
 		messages = append(messages, LLMMessage{
 			Role:    "user",
 			Content: fmt.Sprintf("Результат выполнения %s:\n```\n%s\n```", tool, resultText),
@@ -255,14 +252,6 @@ type toolResult struct {
 func (tm *TaskManager) executeTool(ctx context.Context, tool, args string, timeout int) toolResult {
 	start := time.Now()
 
-	// Контекст с таймаутом шага
-	if timeout == 0 {
-		timeout = 120
-	}
-	stepCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
-	_ = stepCtx
-	defer cancel()
-
 	switch tool {
 	case "exec":
 		stdout, stderr, exitCode := tm.agent.executor.ExecSync(args, "", timeout)
@@ -277,12 +266,7 @@ func (tm *TaskManager) executeTool(ctx context.Context, tool, args string, timeo
 		if exitCode != 0 {
 			errMsg = fmt.Sprintf("exit code %d", exitCode)
 		}
-		return toolResult{
-			output:   output,
-			err:      errMsg,
-			exitCode: exitCode,
-			duration: time.Since(start).Milliseconds(),
-		}
+		return toolResult{output: output, err: errMsg, exitCode: exitCode, duration: time.Since(start).Milliseconds()}
 
 	case "read_file":
 		resp := ReadFile(protocol.FileReadPayload{Path: args})
@@ -292,7 +276,6 @@ func (tm *TaskManager) executeTool(ctx context.Context, tool, args string, timeo
 		return toolResult{output: resp.Content, duration: time.Since(start).Milliseconds()}
 
 	case "write_file":
-		// Формат: write_file: path\ncontent
 		parts := strings.SplitN(args, "\n", 2)
 		if len(parts) < 2 {
 			return toolResult{err: "формат: write_file: path\\ncontent", duration: time.Since(start).Milliseconds()}
@@ -323,10 +306,7 @@ func (tm *TaskManager) executeTool(ctx context.Context, tool, args string, timeo
 		return toolResult{output: sb.String(), duration: time.Since(start).Milliseconds()}
 
 	default:
-		return toolResult{
-			err:      fmt.Sprintf("неизвестный инструмент: %s", tool),
-			duration: time.Since(start).Milliseconds(),
-		}
+		return toolResult{err: fmt.Sprintf("неизвестный инструмент: %s", tool), duration: time.Since(start).Milliseconds()}
 	}
 }
 
@@ -339,22 +319,13 @@ func (tm *TaskManager) finishTask(task *Task, status, errMsg string) {
 	task.CompletedAt = time.Now()
 	task.Error = errMsg
 
-	tm.logger.Info("задача завершена",
-		"task_id", task.ID,
-		"status", status,
-		"steps", len(task.Steps),
-		"error", errMsg,
-	)
+	tm.logger.Info("задача завершена", "task_id", task.ID, "status", status, "steps", len(task.Steps), "error", errMsg)
 
-	// Отправляем финальный прогресс
 	finalStatus := "task_done"
 	if status == "error" {
 		finalStatus = "task_error"
 	}
-	tm.sendProgress(task.ID, TaskProgress{
-		Status: finalStatus,
-		Error:  errMsg,
-	})
+	tm.sendProgress(task.ID, TaskProgress{Status: finalStatus, Error: errMsg})
 }
 
 // sendProgress — отправляет прогресс на реле.
@@ -402,20 +373,54 @@ func (tm *TaskManager) CancelTask(taskID string) error {
 // isTaskComplete — проверяет, завершил ли LLM задачу.
 func isTaskComplete(content string) bool {
 	lower := strings.ToLower(content)
-	indicators := []string{
-		"задача выполнена",
-		"task completed",
-		"готово",
-		"done.",
-		"всё готово",
-		"работа завершена",
-	}
+	indicators := []string{"задача выполнена", "task completed", "готово", "done.", "всё готово", "работа завершена"}
 	for _, indicator := range indicators {
 		if strings.Contains(lower, indicator) {
 			return true
 		}
 	}
 	return false
+}
+
+// BuildSystemPrompt — строит system prompt из скилла.
+func BuildSystemPrompt(skill *Skill, sysInfo string) string {
+	var sb strings.Builder
+	sb.WriteString(skill.Instructions)
+	sb.WriteString("\n\n## System Info\n")
+	sb.WriteString(sysInfo)
+	if len(skill.ToolsAllowed) > 0 {
+		sb.WriteString("\n\n## Allowed Tools\n")
+		sb.WriteString(strings.Join(skill.ToolsAllowed, ", "))
+	}
+	return sb.String()
+}
+
+// ParseToolCall — парсит вызов инструмента из ответа LLM.
+// Формат: "TOOL: tool_name\nargs" или "```tool:tool_name\nargs\n```"
+func ParseToolCall(content string) (tool, args string, ok bool) {
+	// Формат 1: "TOOL: exec\nls -la"
+	if idx := strings.Index(content, "TOOL: "); idx >= 0 {
+		rest := content[idx+6:]
+		if nl := strings.Index(rest, "\n"); nl >= 0 {
+			return strings.TrimSpace(rest[:nl]), strings.TrimSpace(rest[nl+1:]), true
+		}
+		return strings.TrimSpace(rest), "", true
+	}
+
+	// Формат 2: внутри code block "```tool:exec\nls -la\n```"
+	if idx := strings.Index(content, "```tool:"); idx >= 0 {
+		rest := content[idx+7:]
+		if nl := strings.Index(rest, "\n"); nl >= 0 {
+			toolName := strings.TrimSpace(rest[:nl])
+			argsPart := rest[nl+1:]
+			if end := strings.Index(argsPart, "```"); end >= 0 {
+				return toolName, strings.TrimSpace(argsPart[:end]), true
+			}
+			return toolName, strings.TrimSpace(argsPart), true
+		}
+	}
+
+	return "", "", false
 }
 
 // Вспомогательные функции
@@ -425,12 +430,13 @@ func getOSInfo() string {
 }
 
 func getHostname() string {
-	h, _ := getHostnameSafe()
+	h, _ := os.Hostname()
 	return h
 }
 
-func getHostnameSafe() (string, error) {
-	// Импортируем os
-	import_os_hostname := ""
-	return import_os_hostname, nil
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
