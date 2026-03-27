@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlowLink Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f1117;--surface:#1a1d27;--surface2:#252836;--border:#2e3142;--text:#e1e4ed;--dim:#8b8fa3;--accent:#6366f1;--accent2:#818cf8;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--blue:#3b82f6;--radius:8px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex}
+nav{width:220px;background:var(--surface);border-right:1px solid var(--border);padding:20px 0;display:flex;flex-direction:column;flex-shrink:0}
+nav .logo{padding:0 20px 20px;font-size:18px;font-weight:700;color:var(--accent2);letter-spacing:-.5px}
+nav a{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--dim);text-decoration:none;font-size:14px;transition:.15s}
+nav a:hover,nav a.active{color:var(--text);background:var(--surface2)}
+nav a.active{border-right:3px solid var(--accent)}
+nav .badge{background:var(--accent);color:#fff;font-size:11px;padding:2px 7px;border-radius:10px;margin-left:auto}
+main{flex:1;padding:24px;overflow-y:auto;max-height:100vh}
+h1{font-size:22px;margin-bottom:20px;font-weight:600}
+h2{font-size:16px;margin-bottom:12px;font-weight:600}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat .label{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.stat .value{font-size:28px;font-weight:700}
+.stat .sub{font-size:12px;color:var(--dim);margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;color:var(--dim);font-weight:500;border-bottom:1px solid var(--border);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:10px 12px;border-bottom:1px solid var(--border)}
+tr:hover td{background:var(--surface2)}
+.badge-on{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.badge-on.green{background:#22c55e22;color:var(--green)}
+.badge-on.red{background:#ef444422;color:var(--red)}
+.badge-on.yellow{background:#eab30822;color:var(--yellow)}
+button{padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;transition:.15s}
+button:hover{background:var(--border)}
+button.primary{background:var(--accent);border-color:var(--accent)}
+button.primary:hover{background:var(--accent2)}
+button.danger{background:#ef444433;border-color:var(--red);color:var(--red)}
+button.danger:hover{background:#ef444455}
+button.sm{padding:4px 10px;font-size:12px}
+input,select,textarea{padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;width:100%}
+textarea{font-family:'SF Mono',Menlo,monospace;resize:vertical}
+select{cursor:pointer}
+.filters{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.filters input,.filters select{width:auto;min-width:180px}
+pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(--radius);padding:16px;font-size:13px;font-family:'SF Mono',Menlo,monospace;max-height:400px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin-top:12px}
+.bar-chart{display:flex;align-items:flex-end;gap:4px;height:80px;margin-top:8px}
+.bar-chart .bar{flex:1;background:var(--accent);border-radius:3px 3px 0 0;min-height:2px;transition:.3s;opacity:.7}
+.bar-chart .bar:hover{opacity:1}
+.bar-chart .bar span{display:block;font-size:9px;color:var(--dim);text-align:center;margin-top:4px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:90%;max-width:500px}
+.modal h3{margin-bottom:16px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.empty{text-align:center;color:var(--dim);padding:40px;font-size:14px}
+.exec-layout{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:768px){nav{display:none}main{padding:16px}.exec-layout{grid-template-columns:1fr}}
+.cmd-history{max-height:300px;overflow-y:auto}
+.cmd-history .item{padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-family:monospace;font-size:12px}
+.cmd-history .item:hover{background:var(--surface2)}
+.page{display:none}.page.active{display:block}
+.loading{opacity:.5;pointer-events:none}
+.tag{display:inline-block;padding:2px 8px;background:var(--surface2);border-radius:4px;font-size:11px;margin-right:4px;color:var(--dim)}
+</style>
+</head>
+<body>
+<nav>
+  <div class="logo">⚡ FlowLink</div>
+  <a href="#/" data-page="overview" class="active">📊 Обзор</a>
+  <a href="#/agents" data-page="agents">🖥 Агенты</a>
+  <a href="#/clients" data-page="clients">👥 Клиенты</a>
+  <a href="#/exec" data-page="exec">⌨️ Выполнение</a>
+  <a href="#/audit" data-page="audit">📋 Аудит</a>
+  <a href="#/settings" data-page="settings">⚙️ Настройки</a>
+</nav>
+<main>
+<!-- OVERVIEW -->
+<div id="page-overview" class="page active">
+  <h1>Обзор системы</h1>
+  <div class="grid4" id="stats-grid"></div>
+  <div class="card">
+    <h2>Команды за последние 24ч (по часам)</h2>
+    <div class="bar-chart" id="hourly-chart"></div>
+  </div>
+</div>
+<!-- AGENTS -->
+<div id="page-agents" class="page">
+  <h1>Агенты</h1>
+  <div class="filters">
+    <select id="agent-filter-client"><option value="">Все клиенты</option></select>
+    <button onclick="loadAgents()">Обновить</button>
+  </div>
+  <div class="card" style="padding:0;overflow:auto">
+    <table><thead><tr><th>Имя</th><th>OS</th><th>Статус</th><th>Последний визит</th><th>Теги</th><th>Действия</th></tr></thead>
+    <tbody id="agents-tbody"></tbody></table>
+    <div class="empty" id="agents-empty" style="display:none">Нет агентов</div>
+  </div>
+</div>
+<!-- CLIENTS -->
+<div id="page-clients" class="page">
+  <h1>Клиенты</h1>
+  <div class="filters">
+    <button class="primary" onclick="showCreateClientModal()">+ Новый клиент</button>
+    <button onclick="loadClients()">Обновить</button>
+  </div>
+  <div class="card" style="padding:0;overflow:auto">
+    <table><thead><tr><th>Имя</th><th>Email</th><th>Тариф</th><th>Агенты</th><th>Статус</th><th>Действия</th></tr></thead>
+    <tbody id="clients-tbody"></tbody></table>
+    <div class="empty" id="clients-empty" style="display:none">Нет клиентов</div>
+  </div>
+</div>
+<!-- EXEC -->
+<div id="page-exec" class="page">
+  <h1>Выполнение команд</h1>
+  <div class="exec-layout">
+    <div class="card">
+      <h2>Команда</h2>
+      <select id="exec-agent" style="margin-bottom:12px"><option value="">Выберите агента</option></select>
+      <textarea id="exec-cmd" rows="4" placeholder="Введите команду..."></textarea>
+      <div style="margin-top:12px"><button class="primary" onclick="execCmd()">▶ Выполнить</button></div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Результат</h2>
+        <pre class="output" id="exec-output">Ожидание команды...</pre>
+      </div>
+      <div class="card">
+        <h2>История</h2>
+        <div class="cmd-history" id="cmd-history"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- AUDIT -->
+<div id="page-audit" class="page">
+  <h1>Аудит лог</h1>
+  <div class="filters">
+    <input id="audit-agent" placeholder="ID агента">
+    <select id="audit-action"><option value="">Все действия</option><option value="exec">exec</option><option value="read_file">read_file</option><option value="write_file">write_file</option></select>
+    <input id="audit-from" type="date"><input id="audit-to" type="date">
+    <button class="primary" onclick="loadAudit()">Поиск</button>
+    <button onclick="exportCSV()">📥 CSV</button>
+  </div>
+  <div class="card" style="padding:0;overflow:auto">
+    <table><thead><tr><th>Время</th><th>Агент</th><th>Действие</th><th>Команда</th><th>Результат</th><th>Длительность</th></tr></thead>
+    <tbody id="audit-tbody"></tbody></table>
+    <div class="empty" id="audit-empty" style="display:none">Нет записей</div>
+  </div>
+</div>
+<!-- SETTINGS -->
+<div id="page-settings" class="page">
+  <h1>Настройки</h1>
+  <div class="card">
+    <h2>Конфигурация реле</h2>
+    <div id="settings-config"><pre class="output" style="margin:0">Загрузка...</pre></div>
+  </div>
+  <div class="card">
+    <h2>API Токены</h2>
+    <div id="settings-tokens"></div>
+  </div>
+</div>
+</main>
+<div id="modal-root"></div>
+<script>
+const API='/api';
+const $=s=>document.querySelector(s);
+const $$=s=>document.querySelectorAll(s);
+
+// === API ===
+async function api(path,opts={}){
+  const r=await fetch(API+path,{headers:{'Content-Type':'application/json',...opts.headers},...opts});
+  return r.json();
+}
+
+// === Router ===
+function route(){
+  const hash=location.hash||'#/';
+  $$('.page').forEach(p=>p.classList.remove('active'));
+  $$('nav a').forEach(a=>a.classList.remove('active'));
+  const page=hash.replace('#/','').replace(/\/.*/,'')||'overview';
+  const el=$(`#page-${page}`);
+  if(el){el.classList.add('active');$$(`nav a[data-page="${page}"]`).forEach(a=>a.classList.add('active'))}
+  const loaders={overview:loadOverview,agents:loadAgents,clients:loadClients,exec:loadExecAgents,audit:loadAudit,settings:loadSettings};
+  if(loaders[page])loaders[page]();
+}
+window.addEventListener('hashchange',route);
+
+// === Overview ===
+async function loadOverview(){
+  try{
+    const [stats,agents,clients]=await Promise.all([
+      api('/overview'),
+      api('/agents'),
+      api('/clients')
+    ]);
+    const agentList=stats.agents||[];
+    const clientList=stats.clients||[];
+    const online=stats.online_agents||agentList.filter(a=>a.is_online).length;
+    const now=new Date();
+    const last24=now.getTime()-24*3600*1000;
+
+    // Hourly chart data
+    const entries=stats.stats?.entries||[];
+    const hourly=new Array(24).fill(0);
+    entries.forEach(e=>{
+      const t=new Date(e.timestamp||e.Timestamp);
+      if(t.getTime()>last24)hourly[t.getHours()]++;
+    });
+
+    $('#stats-grid').innerHTML=`
+      <div class="card stat"><div class="label">Статус</div><div class="value" style="color:var(--green)">● Онлайн</div></div>
+      <div class="card stat"><div class="label">Агенты</div><div class="value">${agentList.length} <span style="font-size:14px;color:var(--dim)">${online} онлайн</span></div></div>
+      <div class="card stat"><div class="label">Команд за 24ч</div><div class="value">${stats.last_24h_count||stats.Last24hCount||0}</div></div>
+      <div class="card stat"><div class="label">Клиенты</div><div class="value">${clientList.length}</div></div>`;
+
+    const maxH=Math.max(...hourly,1);
+    $('#hourly-chart').innerHTML=hourly.map((v,i)=>`<div class="bar" style="height:${Math.max(2,v/maxH*100)}%"><span>${i}</span></div>`).join('');
+  }catch(e){console.error(e)}
+}
+
+// === Agents ===
+async function loadAgents(){
+  try{
+    const [agents,clients]=await Promise.all([api('/agents'),api('/clients')]);
+    const agentList=r.agents||[];
+    const clientList=r.clients||[];
+    const clientFilter=$('#agent-filter-client').value;
+
+    // Populate client filter
+    const sel=$('#agent-filter-client');
+    if(sel.options.length<=1){
+      clientList.forEach(c=>{const o=document.createElement('option');o.value=c.id||c.ID;o.textContent=c.name||c.Name;sel.appendChild(o)});
+    }
+
+    const filtered=clientFilter?agentList.filter(a=>(a.client_id||a.ClientID)===clientFilter):agentList;
+    const tbody=$('#agents-tbody');
+    if(!filtered.length){tbody.innerHTML='';$('#agents-empty').style.display='block';return}
+    $('#agents-empty').style.display='none';
+
+    tbody.innerHTML=filtered.map(a=>{
+      const id=a.id;const host=a.label||id.slice(0,8);
+      const os=a.os||'-';const online=a.is_online||false;
+      const seen=a.last_seen_at||'';
+      const tags=(a.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
+      const seenStr=seen?timeAgo(new Date(seen)):'никогда';
+      return `<tr><td>${host}</td><td>${os}</td><td><span class="badge-on ${online?'green':'red'}">${online?'Онлайн':'Оффлайн'}</span></td><td>${seenStr}</td><td>${tags}</td><td><button class="sm" onclick="execOnAgent('${id}','${host}')">⌨</button></td></tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+
+// === Clients ===
+async function loadClients(){
+  try{
+    const r=await api('/clients');
+    const list=r.clients||r||[];
+    const tbody=$('#clients-tbody');
+    if(!list.length){tbody.innerHTML='';$('#clients-empty').style.display='block';return}
+    $('#clients-empty').style.display='none';
+    tbody.innerHTML=list.map(c=>{
+      const id=c.id;const name=c.name;const email=c.email||'-';
+      const plan=c.plan||'starter';const active=c.is_active!==false;
+      return `<tr><td>${name}</td><td>${email}</td><td><span class="tag">${plan}</span></td><td>${c.max_agents||0}</td><td><span class="badge-on ${active?'green':'red'}">${active?'Активен':'Неактивен'}</span></td><td><button class="sm" onclick="viewClient('${id}')">👁</button></td></tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+
+// === Exec ===
+async function loadExecAgents(){
+  try{
+    const r=await api('/agents');const list=r.agents||[];
+    const sel=$('#exec-agent');
+    sel.innerHTML='<option value="">Выберите агента</option>';
+    list.forEach(a=>{
+      const id=a.id||a.ID;const name=a.label||a.hostname||a.Hostname||id.slice(0,8);
+      const online=a.is_online||a.IsOnline||false;
+      sel.innerHTML+=`<option value="${id}" ${!online?'disabled':''}>${name} (${online?'●':'○'})</option>`;
+    });
+    loadCmdHistory();
+  }catch(e){console.error(e)}
+}
+
+async function execCmd(){
+  const agent=$('#exec-agent').value;
+  const cmd=$('#exec-cmd').value.trim();
+  if(!agent||!cmd)return;
+  $('#exec-output').textContent='Выполнение...';
+  try{
+    const r=await api('/agents/exec',{method:'POST',body:JSON.stringify({agent_id:agent,command:cmd})});
+    const out=r.output||r.stdout||JSON.stringify(r,null,2);
+    $('#exec-output').textContent=out;
+    saveCmdHistory(agent,cmd);
+  }catch(e){$('#exec-output').textContent='Ошибка: '+e.message}
+}
+
+function execOnAgent(id,name){location.hash='#/exec';setTimeout(()=>{$('#exec-agent').value=id},100)}
+
+function saveCmdHistory(agent,cmd){
+  const h=JSON.parse(localStorage.getItem('fl_cmd_history')||'[]');
+  h.unshift({agent,cmd,time:Date.now()});
+  if(h.length>50)h.length=50;
+  localStorage.setItem('fl_cmd_history',JSON.stringify(h));
+  loadCmdHistory();
+}
+function loadCmdHistory(){
+  const h=JSON.parse(localStorage.getItem('fl_cmd_history')||'[]');
+  $('#cmd-history').innerHTML=h.map(x=>`<div class="item" onclick="document.getElementById('exec-cmd').value='${x.cmd.replace(/'/g,"\\'")}'"><span style="color:var(--dim)">${x.agent}</span> ${x.cmd.slice(0,60)}</div>`).join('')||'<div class="empty">Нет истории</div>';
+}
+
+// === Audit ===
+async function loadAudit(){
+  try{
+    const q={limit:100};
+    const af=$('#audit-agent').value.trim();if(af)q.agent_id=af;
+    const aa=$('#audit-action').value;if(aa)q.action=aa;
+    const from=$('#audit-from').value;if(from)q.from=from+'T00:00:00Z';
+    const to=$('#audit-to').value;if(to)q.to=to+'T23:59:59Z';
+
+    const r=await api('/audit?'+new URLSearchParams(q));
+    const list=r.entries||r||[];
+    const tbody=$('#audit-tbody');
+    if(!list.length){tbody.innerHTML='';$('#audit-empty').style.display='block';return}
+    $('#audit-empty').style.display='none';
+    tbody.innerHTML=list.map(e=>{
+      const ts=e.timestamp||e.Timestamp;const aid=e.agent_id||e.AgentID||'-';
+      const action=e.action||e.Action;const cmd=(e.command||e.Command||'').slice(0,50);
+      const result=e.result||e.Result;
+      const dur=e.duration_ms||e.DurationMs||0;
+      const rc=result==='success'?'green':result==='error'?'red':'yellow';
+      return `<tr><td>${formatTime(new Date(ts))}</td><td>${aid.slice(0,8)}</td><td>${action}</td><td title="${(e.command||e.Command||'')}">${cmd}</td><td><span class="badge-on ${rc}">${result}</span></td><td>${dur}ms</td></tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+
+async function exportCSV(){
+  window.open(API+'/audit/export?format=csv','_blank');
+}
+
+// === Settings ===
+async function loadSettings(){
+  try{
+    const cfg=await api('/config');
+    $('#settings-config').innerHTML=`<pre class="output" style="margin:0">${JSON.stringify(cfg,null,2)}</pre>`;
+  }catch(e){
+    $('#settings-config').innerHTML=`<pre class="output" style="margin:0;color:var(--dim)">Не удалось загрузить конфигурацию. Проверьте endpoint /api/v1/config</pre>`;
+  }
+  try{
+    const r=await api('/clients');const list=r.clients||r||[];
+    $('#settings-tokens').innerHTML=list.map(c=>{
+      const name=c.name||c.Name;const token=c.api_token||c.APIToken||'-';
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border)"><strong>${name}</strong><br><code style="font-size:12px;color:var(--dim)">${token}</code></div>`;
+    }).join('')||'<div class="empty">Нет клиентов</div>';
+  }catch(e){$('#settings-tokens').innerHTML='<div class="empty">Ошибка загрузки</div>'}
+}
+
+// === Modals ===
+function showModal(html){
+  $('#modal-root').innerHTML=`<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`;
+}
+function closeModal(){$('#modal-root').innerHTML=''}
+
+function showCreateClientModal(){
+  showModal(`<h3>Новый клиент</h3>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <input id="mc-name" placeholder="Имя"><input id="mc-email" placeholder="Email">
+      <select id="mc-plan"><option value="starter">Starter (3 агента)</option><option value="business">Business (25 агентов)</option><option value="enterprise">Enterprise (100 агентов)</option></select>
+    </div>
+    <div class="modal-actions"><button onclick="closeModal()">Отмена</button><button class="primary" onclick="createClient()">Создать</button></div>`);
+}
+async function createClient(){
+  const name=$('#mc-name').value;const email=$('#mc-email').value;const plan=$('#mc-plan').value;
+  if(!name)return;
+  await api('/clients',{method:'POST',body:JSON.stringify({name,email,plan})});
+  closeModal();loadClients();
+}
+
+function viewClient(id){
+  api('/clients/'+id).then(c=>{
+    showModal(`<h3>${c.name||c.Name}</h3>
+      <p style="color:var(--dim);margin-bottom:12px">ID: ${id}</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
+        <div>Email: <strong>${c.email||c.Email||'-'}</strong></div>
+        <div>Тариф: <strong>${c.plan||c.Plan}</strong></div>
+        <div>Агенты: <strong>${c.agent_count||c.MaxAgents||0}</strong></div>
+        <div>Токен: <code style="font-size:11px">${(c.api_token||c.APIToken||'-').slice(0,20)}...</code></div>
+      </div>
+      <div class="modal-actions"><button onclick="closeModal()">Закрыть</button></div>`);
+  });
+}
+
+// === Utils ===
+function timeAgo(d){const s=Math.floor((Date.now()-d.getTime())/1000);if(s<60)return s+'с';if(s<3600)return Math.floor(s/60)+'м';if(s<86400)return Math.floor(s/3600)+'ч';return Math.floor(s/86400)+'д'}
+function formatTime(d){return d.toLocaleString('ru-RU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+
+// === Init ===
+route();
+</script>
+</body>
+</html>

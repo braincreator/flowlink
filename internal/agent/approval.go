@@ -3,6 +3,8 @@
 package agent
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -352,5 +354,7 @@ func (a *ApproverV2) AskTTY(command string) bool {
 
 // generateRequestID — генерирует уникальный ID запроса.
 func generateRequestID() string {
-	return fmt.Sprintf("req_%d", time.Now().UnixNano())
+	b := make([]byte, 4)
+	cryptorand.Read(b)
+	return fmt.Sprintf("req_%d_%s", time.Now().UnixNano(), hex.EncodeToString(b))
 }

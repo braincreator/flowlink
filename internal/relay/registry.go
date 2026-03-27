@@ -264,6 +264,17 @@ func (r *Registry) ListAgents(clientID string) []*AgentRegistration {
 	return result
 }
 
+// ListAllAgents — возвращает список всех агентов.
+func (r *Registry) ListAllAgents() []*AgentRegistration {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]*AgentRegistration, 0, len(r.agents))
+	for _, a := range r.agents {
+		result = append(result, a)
+	}
+	return result
+}
+
 // UnregisterAgent — удаляет агента из реестра.
 func (r *Registry) UnregisterAgent(id string) error {
 	r.mu.Lock()

@@ -14,7 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/braincreator/flowlink/internal/billing"
 	"github.com/braincreator/flowlink/internal/config"
+	"github.com/braincreator/flowlink/internal/dashboard"
 	"github.com/braincreator/flowlink/internal/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -22,14 +24,18 @@ import (
 
 // Relay — реле-сервер, связывающий агенты и OpenClaw.
 type Relay struct {
-	cfg        *config.RelayConfig
-	logger     *slog.Logger
-	pool       *AgentPool
-	llmProxy   *LLMProxy
-	auth       *AuthManager
-	rateLimit  *RateLimiter
-	audit      *AuditLogger
-	registry   *Registry // реестр клиентов и агентов (multi-tenancy)
+	cfg         *config.RelayConfig
+	logger      *slog.Logger
+	pool        *AgentPool
+	llmProxy    *LLMProxy
+	auth        *AuthManager
+	rateLimit   *RateLimiter
+	audit       *AuditLogger
+	registry    *Registry            // реестр клиентов и агентов (multi-tenancy)
+	planStore   *billing.PlanStore   // тарифные планы
+	usage       *billing.UsageTracker
+	invoices    *billing.InvoiceStore
+	eventBus   *EventBus   // шина событий для SSE-уведомлений
 }
 
 // AgentConn — подключённый агент.
@@ -131,6 +137,12 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 	registryDir := filepath.Join(os.Getenv("HOME"), ".flowlink", "registry")
 	registry := NewRegistry(registryDir, logger)
 
+	// Инициализируем биллинг
+	billingDir := filepath.Join(os.Getenv("HOME"), ".flowlink", "billing")
+	planStore := billing.NewPlanStore()
+	usageTracker := billing.NewUsageTracker(billingDir, planStore, logger)
+	invoiceStore := billing.NewInvoiceStore(billingDir, planStore, logger)
+
 	return &Relay{
 		cfg:       cfg,
 		logger:    logger,
@@ -139,6 +151,10 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		rateLimit: NewRateLimiter(30, 200, logger), // 30/min, 200/hour
 		audit:     audit,
 		registry:  registry,
+		eventBus:  NewEventBus(logger),
+		planStore: planStore,
+		usage:     usageTracker,
+		invoices:  invoiceStore,
 	}
 }
 
@@ -170,6 +186,9 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/llm/health", r.handleLLMHealth)
 	apiMux.HandleFunc("/mcp", r.handleMCP)
 
+	// SSE events endpoint (должен быть ДО audit, т.к. middleware chain применяется к apiMux)
+	apiMux.HandleFunc("/api/v1/events", r.handleSSE)
+
 	// Audit log endpoints
 	apiMux.HandleFunc("/api/v1/audit", r.handleAuditQuery)
 	apiMux.HandleFunc("/api/v1/audit/export", r.handleAuditExport)
@@ -180,6 +199,14 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/clients/", r.handleClientByID)              // GET /api/v1/clients/{id}, POST /api/v1/clients/{id}/agents
 	apiMux.HandleFunc("/api/v1/agents/register", r.handleAgentRegister)    // POST — зарегистрировать агента
 	apiMux.HandleFunc("/api/v1/agents/delete/", r.handleAgentDelete)       // DELETE /api/v1/agents/delete/{id}
+
+	// Billing endpoints
+	apiMux.HandleFunc("/api/v1/billing/usage", r.handleBillingUsage)
+	apiMux.HandleFunc("/api/v1/billing/plan", r.handleBillingPlan)
+	apiMux.HandleFunc("/api/v1/billing/plan/change", r.handleBillingPlanChange)
+	apiMux.HandleFunc("/api/v1/billing/invoices", r.handleBillingInvoices)
+	apiMux.HandleFunc("/api/v1/billing/invoices/", r.handleBillingInvoicePay)
+	apiMux.HandleFunc("/api/v1/billing/payment-methods", r.handleBillingPaymentMethods)
 
 	// Middleware chain
 	authCfg := AuthMiddlewareConfig{
@@ -195,6 +222,10 @@ func (r *Relay) Start() error {
 		RateLimitMiddleware(r.rateLimit, r.logger),
 		AuthMiddleware(authCfg),
 	)(apiMux)
+
+	// Dashboard
+	dashProvider := &dashboardProvider{r: r}
+	http.Handle("/dashboard/", http.StripPrefix("/dashboard", dashboard.NewHandler(dashProvider)))
 
 	// Инициализируем TLS если нужно
 	var tlsConfig *tls.Config
@@ -315,6 +346,18 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	r.logger.Info("агент подключён", "agent", payload.AgentID,
 		"hostname", payload.Hostname, "os", payload.OS)
 
+	// Публикуем событие подключения
+	r.eventBus.Publish(Event{
+		Type:    EventAgentConnected,
+		AgentID: payload.AgentID,
+		Data: map[string]interface{}{
+			"hostname": payload.Hostname,
+			"os":       payload.OS,
+			"arch":     payload.Arch,
+			"version":  payload.ClientVer,
+		},
+	})
+
 	// Обновляем статус в реестре
 	if r.registry != nil {
 		r.registry.UpdateAgentOnlineStatus(payload.AgentID, true)
@@ -339,6 +382,12 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 			r.registry.UpdateAgentOnlineStatus(payload.AgentID, false)
 		}
 		r.logger.Info("агент отключён", "agent", payload.AgentID)
+
+		// Публикуем событие отключения
+		r.eventBus.Publish(Event{
+			Type:    EventAgentDisconnected,
+			AgentID: payload.AgentID,
+		})
 	}()
 
 	for {
@@ -493,6 +542,16 @@ func (r *Relay) handleExecCommand(w http.ResponseWriter, req *http.Request) {
 			})
 		}
 
+		r.eventBus.Publish(Event{
+			Type:    EventError,
+			AgentID: body.AgentID,
+			ClientID: getClientID(req),
+			Data: map[string]interface{}{
+				"action": "exec",
+				"error":  err.Error(),
+			},
+		})
+
 		writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
 		return
 	}
@@ -511,6 +570,17 @@ func (r *Relay) handleExecCommand(w http.ResponseWriter, req *http.Request) {
 			ClientIP:   getClientIP(req),
 		})
 	}
+
+	// Публикуем событие старта выполнения
+	r.eventBus.Publish(Event{
+		Type:    EventExecStart,
+		AgentID: body.AgentID,
+		ClientID: getClientID(req),
+		Data: map[string]interface{}{
+			"command":    body.Command,
+			"request_id": msg.Payload.(protocol.ExecRequestPayload).RequestID,
+		},
+	})
 
 	writeJSON(w, map[string]string{
 		"status":    "sent",
@@ -1117,6 +1187,157 @@ func (r *Relay) handleAgentDelete(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, map[string]string{"status": "deleted", "agent_id": agentID})
 }
 
+// === Billing HTTP Handlers ===
+
+// handleBillingUsage — GET /api/v1/billing/usage?client_id=X
+func (r *Relay) handleBillingUsage(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		return
+	}
+	clientID := req.URL.Query().Get("client_id")
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id обязателен")
+		return
+	}
+	// Определяем план клиента
+	planID := "free"
+	if client, ok := r.registry.GetClient(clientID); ok {
+		planID = client.Plan
+	}
+	usage := r.usage.GetUsage(clientID, currentBillingMonth())
+	checks := map[string]billing.LimitCheck{
+		"commands": r.usage.CheckLimit(clientID, billing.ResourceCommands, planID),
+		"agents":   r.usage.CheckLimit(clientID, billing.ResourceAgents, planID),
+		"backups":  r.usage.CheckLimit(clientID, billing.ResourceBackups, planID),
+		"storage":  r.usage.CheckLimit(clientID, billing.ResourceStorage, planID),
+	}
+	writeJSON(w, map[string]any{
+		"usage":  usage,
+		"limits": checks,
+	})
+}
+
+// handleBillingPlan — GET /api/v1/billing/plan?client_id=X
+func (r *Relay) handleBillingPlan(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		return
+	}
+	clientID := req.URL.Query().Get("client_id")
+	if clientID == "" {
+		// Возвращаем все планы
+		writeJSON(w, map[string]any{
+			"plans": r.planStore.ListPlans(),
+		})
+		return
+	}
+	planID := "free"
+	if client, ok := r.registry.GetClient(clientID); ok {
+		planID = client.Plan
+	}
+	plan, ok := r.planStore.GetPlan(planID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "план не найден")
+		return
+	}
+	writeJSON(w, plan)
+}
+
+// handleBillingPlanChange — POST /api/v1/billing/plan/change
+func (r *Relay) handleBillingPlanChange(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		return
+	}
+	var body struct {
+		ClientID string `json:"client_id"`
+		PlanID   string `json:"plan_id"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+	if body.ClientID == "" || body.PlanID == "" {
+		writeError(w, http.StatusBadRequest, "client_id и plan_id обязательны")
+		return
+	}
+	if _, ok := r.planStore.GetPlan(body.PlanID); !ok {
+		writeError(w, http.StatusBadRequest, "план не найден")
+		return
+	}
+	client, ok := r.registry.GetClient(body.ClientID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "клиент не найден")
+		return
+	}
+	client.Plan = body.PlanID
+	writeJSON(w, map[string]any{
+		"status":   "changed",
+		"plan_id":  body.PlanID,
+		"client_id": body.ClientID,
+	})
+}
+
+// handleBillingInvoices — GET /api/v1/billing/invoices?client_id=X
+func (r *Relay) handleBillingInvoices(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		return
+	}
+	clientID := req.URL.Query().Get("client_id")
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id обязателен")
+		return
+	}
+	invoices := r.invoices.ListInvoices(clientID)
+	writeJSON(w, map[string]any{
+		"invoices": invoices,
+		"count":    len(invoices),
+	})
+}
+
+// handleBillingInvoicePay — POST /api/v1/billing/invoices/{id}/pay
+func (r *Relay) handleBillingInvoicePay(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		return
+	}
+	invoiceID := strings.TrimPrefix(req.URL.Path, "/api/v1/billing/invoices/")
+	invoiceID = strings.TrimSuffix(invoiceID, "/pay")
+	if invoiceID == "" {
+		writeError(w, http.StatusBadRequest, "invoice_id обязателен")
+		return
+	}
+	if err := r.invoices.MarkPaid(invoiceID); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"status": "paid", "invoice_id": invoiceID})
+}
+
+// handleBillingPaymentMethods — GET /api/v1/billing/payment-methods?client_id=X
+func (r *Relay) handleBillingPaymentMethods(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		return
+	}
+	clientID := req.URL.Query().Get("client_id")
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id обязателен")
+		return
+	}
+	methods := r.invoices.ListPaymentMethods(clientID)
+	writeJSON(w, map[string]any{
+		"payment_methods": methods,
+		"count":           len(methods),
+	})
+}
+
+func currentBillingMonth() string {
+	return time.Now().Format("2006-01")
+}
+
 func writeJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
@@ -1169,4 +1390,64 @@ func getClientIP(req *http.Request) string {
 		return addr[:idx]
 	}
 	return addr
+}
+
+// dashboardProvider — реализует dashboard.DataProvider для избежания import cycle.
+type dashboardProvider struct {
+	r *Relay
+}
+
+func (dp *dashboardProvider) DashboardAgents() []dashboard.AgentInfo {
+	agents := dp.r.registry.ListAllAgents()
+	connected := dp.r.pool.List()
+	onlineSet := make(map[string]bool)
+	for _, c := range connected {
+		onlineSet[c.ID] = true
+	}
+	result := make([]dashboard.AgentInfo, len(agents))
+	for i, a := range agents {
+		result[i] = dashboard.AgentInfo{
+			ID: a.ID, ClientID: a.ClientID, Label: a.Label,
+			Tags: a.Tags, OS: a.OS, Arch: a.Arch, Version: a.Version,
+			IsOnline: onlineSet[a.ID],
+			LastSeenAt: a.LastSeenAt.Format("2006-01-02T15:04:05Z07:00"),
+		}
+	}
+	return result
+}
+
+func (dp *dashboardProvider) DashboardClients() []dashboard.ClientInfo {
+	clients := dp.r.registry.ListClients()
+	result := make([]dashboard.ClientInfo, len(clients))
+	for i, c := range clients {
+		result[i] = dashboard.ClientInfo{
+			ID: c.ID, Name: c.Name, Email: c.Email,
+			Plan: c.Plan, APIToken: c.APIToken,
+			MaxAgents: c.MaxAgents, IsActive: c.IsActive,
+		}
+	}
+	return result
+}
+
+func (dp *dashboardProvider) DashboardAuditStats() *dashboard.AuditStatsInfo {
+	stats, err := dp.r.audit.Stats()
+	if err != nil {
+		return &dashboard.AuditStatsInfo{}
+	}
+	recent, _ := dp.r.audit.Recent(100)
+	entries := make([]dashboard.AuditEntryInfo, len(recent))
+	for i, e := range recent {
+		entries[i] = dashboard.AuditEntryInfo{
+			Timestamp:  e.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
+			AgentID:    e.AgentID,
+			Action:     e.Action,
+			Command:    e.Command,
+			Result:     e.Result,
+			DurationMs: e.DurationMs,
+		}
+	}
+	return &dashboard.AuditStatsInfo{
+		TotalEntries: stats.TotalEntries, ByAction: stats.ByAction,
+		Last24hCount: stats.Last24hCount, Entries: entries,
+	}
 }
