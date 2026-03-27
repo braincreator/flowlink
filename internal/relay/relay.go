@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Relay — реле-сервер, связывающий агентов и OpenClaw.
+// Relay — реле-сервер, связывающий агенты и OpenClaw.
 type Relay struct {
 	cfg        *config.RelayConfig
 	logger     *slog.Logger
@@ -27,6 +29,7 @@ type Relay struct {
 	auth       *AuthManager
 	rateLimit  *RateLimiter
 	audit      *AuditLogger
+	registry   *Registry // реестр клиентов и агентов (multi-tenancy)
 }
 
 // AgentConn — подключённый агент.
@@ -124,6 +127,10 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		logger.Error("ошибка инициализации audit logger", "err", err)
 	}
 	
+	// Инициализируем реестр (multi-tenancy)
+	registryDir := filepath.Join(os.Getenv("HOME"), ".flowlink", "registry")
+	registry := NewRegistry(registryDir, logger)
+
 	return &Relay{
 		cfg:       cfg,
 		logger:    logger,
@@ -131,6 +138,7 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		auth:      NewAuthManager(logger),
 		rateLimit: NewRateLimiter(30, 200, logger), // 30/min, 200/hour
 		audit:     audit,
+		registry:  registry,
 	}
 }
 
@@ -166,6 +174,12 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/audit", r.handleAuditQuery)
 	apiMux.HandleFunc("/api/v1/audit/export", r.handleAuditExport)
 	apiMux.HandleFunc("/api/v1/audit/stats", r.handleAuditStats)
+
+	// Registry endpoints (multi-tenancy)
+	apiMux.HandleFunc("/api/v1/clients", r.handleClients)                  // POST — создать, GET — список
+	apiMux.HandleFunc("/api/v1/clients/", r.handleClientByID)              // GET /api/v1/clients/{id}, POST /api/v1/clients/{id}/agents
+	apiMux.HandleFunc("/api/v1/agents/register", r.handleAgentRegister)    // POST — зарегистрировать агента
+	apiMux.HandleFunc("/api/v1/agents/delete/", r.handleAgentDelete)       // DELETE /api/v1/agents/delete/{id}
 
 	// Middleware chain
 	authCfg := AuthMiddlewareConfig{
@@ -239,6 +253,11 @@ func (r *Relay) Start() error {
 	return http.ListenAndServe(r.cfg.APIAddr, handler)
 }
 
+// HandleAgentWSForTest — экспортированная версия handleAgentWS для тестов.
+func (r *Relay) HandleAgentWSForTest(w http.ResponseWriter, req *http.Request) {
+	r.handleAgentWS(w, req)
+}
+
 // handleAgentWS — обрабатывает WSS-подключение от агента.
 func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	upgrader := websocket.Upgrader{
@@ -296,6 +315,11 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	r.logger.Info("агент подключён", "agent", payload.AgentID,
 		"hostname", payload.Hostname, "os", payload.OS)
 
+	// Обновляем статус в реестре
+	if r.registry != nil {
+		r.registry.UpdateAgentOnlineStatus(payload.AgentID, true)
+	}
+
 	// Отправляем подтверждение
 	resp := protocol.NewMessage(protocol.MsgConnected)
 	resp.Payload = protocol.ConnectedPayload{
@@ -310,6 +334,10 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	defer func() {
 		r.pool.Remove(payload.AgentID)
 		conn.Close()
+		// Обновляем статус в реестре
+		if r.registry != nil {
+			r.registry.UpdateAgentOnlineStatus(payload.AgentID, false)
+		}
 		r.logger.Info("агент отключён", "agent", payload.AgentID)
 	}()
 
@@ -339,7 +367,18 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 }
 
 // authenticateAgent — проверяет токен агента.
+// Сначала проверяет реестр (multi-tenancy), затем fallback на старые методы.
 func (r *Relay) authenticateAgent(agentID, token string) bool {
+	// Вариант 0: Проверка через реестр (multi-tenancy)
+	if r.registry != nil {
+		if agent, ok := r.registry.GetAgentByToken(token); ok && agent.ClientID != "" {
+			// Проверяем что клиент активен
+			if client, ok := r.registry.GetClient(agent.ClientID); ok && client.IsActive {
+				return true
+			}
+		}
+	}
+
 	// Вариант 1: Проверка через AuthManager (динамические токены)
 	if r.auth != nil {
 		valid, err := r.auth.ValidateAgentToken(agentID, token)
@@ -914,6 +953,168 @@ func (r *Relay) handleAuditStats(w http.ResponseWriter, req *http.Request) {
 	}
 
 	writeJSON(w, stats)
+}
+
+// === Registry HTTP Handlers (Multi-tenancy) ===
+
+// handleClients — POST: создать клиента, GET: список клиентов.
+func (r *Relay) handleClients(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodPost:
+		var body struct {
+			Name  string `json:"name"`
+			Email string `json:"email"`
+			Plan  string `json:"plan"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "неверный JSON")
+			return
+		}
+		if body.Name == "" {
+			writeError(w, http.StatusBadRequest, "name обязателен")
+			return
+		}
+		if body.Plan == "" {
+			body.Plan = "starter"
+		}
+
+		client, err := r.registry.CreateClient(body.Name, body.Email, body.Plan)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, client)
+
+	case http.MethodGet:
+		clients := r.registry.ListClients()
+		writeJSON(w, map[string]any{
+			"clients": clients,
+			"count":   len(clients),
+		})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+	}
+}
+
+// handleClientByID — GET: клиент по ID, POST: зарегистрировать агента для клиента.
+// Маршрутизация по пути: /api/v1/clients/{id} или /api/v1/clients/{id}/agents
+func (r *Relay) handleClientByID(w http.ResponseWriter, req *http.Request) {
+	// Извлекаем clientID из пути: /api/v1/clients/{id}/... или /api/v1/clients/{id}
+	path := strings.TrimPrefix(req.URL.Path, "/api/v1/clients/")
+	parts := strings.SplitN(path, "/", 2)
+	clientID := parts[0]
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id обязателен")
+		return
+	}
+
+	// /api/v1/clients/{id}/agents
+	if len(parts) == 2 && parts[1] == "agents" {
+		switch req.Method {
+		case http.MethodGet:
+			agents := r.registry.ListAgents(clientID)
+			writeJSON(w, map[string]any{
+				"agents": agents,
+				"count":  len(agents),
+			})
+		case http.MethodPost:
+			var body struct {
+				Label string   `json:"label"`
+				Tags  []string `json:"tags"`
+				OS    string   `json:"os"`
+				Arch  string   `json:"arch"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, "неверный JSON")
+				return
+			}
+			if body.Label == "" {
+				writeError(w, http.StatusBadRequest, "label обязателен")
+				return
+			}
+			if body.Tags == nil {
+				body.Tags = []string{}
+			}
+
+			agent, err := r.registry.RegisterAgent(clientID, body.Label, body.Tags, body.OS, body.Arch)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeJSON(w, agent)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		}
+		return
+	}
+
+	// /api/v1/clients/{id}
+	if req.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		return
+	}
+
+	client, ok := r.registry.GetClient(clientID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "клиент не найден")
+		return
+	}
+	writeJSON(w, client)
+}
+
+// handleAgentRegister — POST: зарегистрировать агента (альтернативный endpoint).
+func (r *Relay) handleAgentRegister(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		return
+	}
+
+	var body struct {
+		ClientID string   `json:"client_id"`
+		Label    string   `json:"label"`
+		Tags     []string `json:"tags"`
+		OS       string   `json:"os"`
+		Arch     string   `json:"arch"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+	if body.ClientID == "" || body.Label == "" {
+		writeError(w, http.StatusBadRequest, "client_id и label обязательны")
+		return
+	}
+	if body.Tags == nil {
+		body.Tags = []string{}
+	}
+
+	agent, err := r.registry.RegisterAgent(body.ClientID, body.Label, body.Tags, body.OS, body.Arch)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, agent)
+}
+
+// handleAgentDelete — DELETE: удалить агента по ID.
+func (r *Relay) handleAgentDelete(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		return
+	}
+
+	agentID := strings.TrimPrefix(req.URL.Path, "/api/v1/agents/delete/")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id обязателен")
+		return
+	}
+
+	if err := r.registry.UnregisterAgent(agentID); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"status": "deleted", "agent_id": agentID})
 }
 
 func writeJSON(w http.ResponseWriter, data any) {

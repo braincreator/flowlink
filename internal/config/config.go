@@ -108,6 +108,16 @@ type RelayConfig struct {
 	// Настройки
 	HeartbeatTimeout int `json:"heartbeat_timeout_sec"` // таймаут пинга (default: 90)
 	MaxAgents        int `json:"max_agents"`           // макс кол-во агентов (0 = unlimited)
+
+	// Telegram Bot — настройки бота для управления через Telegram
+	TelegramBot *TelegramBotConfig `json:"telegram_bot,omitempty"`
+}
+
+// TelegramBotConfig — конфигурация Telegram-бота.
+type TelegramBotConfig struct {
+	Token      string   `json:"token"`       // Telegram Bot Token
+	AllowedIDs []int64  `json:"allowed_ids"` // Telegram user IDs (ограничение доступа)
+	NotifyOn   []string `json:"notify_on"`   // ["exec", "backup", "error", "approval"]
 }
 
 // LLMBackendConfig — конфигурация LLM backend для реле.

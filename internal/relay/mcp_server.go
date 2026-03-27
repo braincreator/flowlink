@@ -211,6 +211,11 @@ func mcpTools() []mcpTool {
 
 // === MCP HTTP Handler ===
 
+// HandleMCPForTest — экспортированная версия handleMCP для тестов.
+func (r *Relay) HandleMCPForTest(w http.ResponseWriter, req *http.Request) {
+	r.handleMCP(w, req)
+}
+
 // handleMCP — основной MCP endpoint (Streamable HTTP transport).
 // POST: JSON-RPC request → JSON-RPC response
 // GET: SSE stream (для notifications)
