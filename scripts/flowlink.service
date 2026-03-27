@@ -1,0 +1,28 @@
+[Unit]
+Description=FlowLink Agent
+Documentation=https://github.com/braincreator/flowlink
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/flowlink agent start
+Restart=always
+RestartSec=5
+Environment=FLOWLINK_HOME=/root/.flowlink
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/.flowlink
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65535
+MemoryMax=512M
+TasksMax=100
+
+[Install]
+WantedBy=multi-user.target

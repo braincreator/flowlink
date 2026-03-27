@@ -90,8 +90,11 @@ type RelayConfig struct {
 	APIAddr string `json:"api_addr"` // ":8080" — HTTP API для OpenClaw
 
 	// TLS
-	TLSCert string `json:"tls_cert"` // путь к сертификату (пусто = автогенерация)
-	TLSKey  string `json:"tls_key"`  // путь к ключу
+	TLSMode   string `json:"tls_mode"`   // "self-signed", "letsencrypt", "manual"
+	TLSCert   string `json:"tls_cert"`   // путь к сертификату (для manual/self-signed)
+	TLSKey    string `json:"tls_key"`    // путь к ключу (для manual/self-signed)
+	TLSDomain string `json:"tls_domain"` // домен для Let's Encrypt
+	TLSCache  string `json:"tls_cache"`  // кэш директория для Let's Encrypt (/var/lib/flowlink/tls-cache)
 
 	// Auth
 	APIToken string `json:"api_token"` // токен для HTTP API

@@ -3,10 +3,12 @@
 package relay
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,10 +20,13 @@ import (
 
 // Relay — реле-сервер, связывающий агентов и OpenClaw.
 type Relay struct {
-	cfg       *config.RelayConfig
-	logger    *slog.Logger
-	pool      *AgentPool
-	llmProxy  *LLMProxy
+	cfg        *config.RelayConfig
+	logger     *slog.Logger
+	pool       *AgentPool
+	llmProxy   *LLMProxy
+	auth       *AuthManager
+	rateLimit  *RateLimiter
+	audit      *AuditLogger
 }
 
 // AgentConn — подключённый агент.
@@ -98,12 +103,34 @@ func (a *AgentConn) SendMessage(msg protocol.Message) error {
 	return a.conn.WriteJSON(msg)
 }
 
+// SetCallback — устанавливает callback для request_id.
+func (a *AgentConn) SetCallback(requestID string, callback func(any)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.callbacks == nil {
+		a.callbacks = make(map[string]func(any))
+	}
+	a.callbacks[requestID] = callback
+}
+
 // NewRelay — создаёт новый реле-сервер.
 func NewRelay(cfg *config.RelayConfig) *Relay {
+	logger := slog.Default()
+
+	// Инициализируем audit logger
+	audit, err := NewAuditLogger("")
+	if err != nil {
+		logger.Error("ошибка инициализации audit logger", "err", err)
+	}
+	
 	return &Relay{
-		cfg:    cfg,
-		logger: slog.Default(),
-		pool:   NewAgentPool(),
+		cfg:       cfg,
+		logger:    logger,
+		pool:      NewAgentPool(),
+		auth:      NewAuthManager(logger),
+		rateLimit: NewRateLimiter(30, 200, logger), // 30/min, 200/hour
+		audit:     audit,
 	}
 }
 
@@ -135,24 +162,81 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/llm/health", r.handleLLMHealth)
 	apiMux.HandleFunc("/mcp", r.handleMCP)
 
-	// Auth middleware
-	authMux := r.authMiddleware(apiMux)
+	// Audit log endpoints
+	apiMux.HandleFunc("/api/v1/audit", r.handleAuditQuery)
+	apiMux.HandleFunc("/api/v1/audit/export", r.handleAuditExport)
+	apiMux.HandleFunc("/api/v1/audit/stats", r.handleAuditStats)
+
+	// Middleware chain
+	authCfg := AuthMiddlewareConfig{
+		AuthManager: r.auth,
+		StaticToken: r.cfg.APIToken,
+		Logger:      r.logger,
+	}
+
+	handler := Chain(
+		RecoveryMiddleware(r.logger),
+		RequestLoggerMiddleware(r.logger),
+		CORSMiddleware(nil, r.logger), // nil = разрешаем все origins
+		RateLimitMiddleware(r.rateLimit, r.logger),
+		AuthMiddleware(authCfg),
+	)(apiMux)
+
+	// Инициализируем TLS если нужно
+	var tlsConfig *tls.Config
+	if r.cfg.TLSMode != "" {
+		mode := TLSMode(r.cfg.TLSMode)
+		certManager := NewCertManager(
+			mode,
+			r.cfg.TLSCert,
+			r.cfg.TLSKey,
+			r.cfg.TLSDomain,
+			r.cfg.TLSCache,
+		)
+
+		var err error
+		tlsConfig, err = certManager.GetTLSConfig()
+		if err != nil {
+			r.logger.Error("ошибка конфигурации TLS", "err", err)
+			return err
+		}
+		r.logger.Info("TLS настроен", "mode", mode)
+	}
 
 	// Запуск
 	r.logger.Info("запуск реле-сервера",
 		"wss", r.cfg.WSSAddr,
 		"api", r.cfg.APIAddr,
+		"tls_mode", r.cfg.TLSMode,
 	)
 
+	// WSS сервер
 	go func() {
-		r.logger.Info("WSS сервер запущен", "addr", r.cfg.WSSAddr)
-		if err := http.ListenAndServe(r.cfg.WSSAddr, nil); err != nil {
+		var wssServer *http.Server
+		if tlsConfig != nil {
+			wssServer = &http.Server{
+				Addr:      r.cfg.WSSAddr,
+				TLSConfig: tlsConfig,
+			}
+			r.logger.Info("WSS сервер запущен (TLS)", "addr", r.cfg.WSSAddr)
+		} else {
+			wssServer = &http.Server{
+				Addr: r.cfg.WSSAddr,
+			}
+			r.logger.Info("WSS сервер запущен (без TLS)", "addr", r.cfg.WSSAddr)
+		}
+
+		if err := wssServer.ListenAndServe(); err != nil {
 			r.logger.Error("WSS сервер ошибка", "err", err)
 		}
 	}()
 
+	// HTTP API сервер
 	r.logger.Info("HTTP API запущен", "addr", r.cfg.APIAddr)
-	return http.ListenAndServe(r.cfg.APIAddr, authMux)
+	if tlsConfig != nil {
+		return http.ListenAndServeTLS(r.cfg.APIAddr, "", "", handler)
+	}
+	return http.ListenAndServe(r.cfg.APIAddr, handler)
 }
 
 // handleAgentWS — обрабатывает WSS-подключение от агента.
@@ -256,6 +340,15 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 
 // authenticateAgent — проверяет токен агента.
 func (r *Relay) authenticateAgent(agentID, token string) bool {
+	// Вариант 1: Проверка через AuthManager (динамические токены)
+	if r.auth != nil {
+		valid, err := r.auth.ValidateAgentToken(agentID, token)
+		if err == nil && valid {
+			return true
+		}
+	}
+
+	// Вариант 2: Проверка через whitelist в конфиге (статические токены)
 	if r.cfg.AllowedTokens == nil {
 		return true // нет whitelist = принимаем всех (для dev)
 	}
@@ -307,6 +400,8 @@ func (r *Relay) handleListAgents(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Relay) handleExecCommand(w http.ResponseWriter, req *http.Request) {
+	startTime := time.Now()
+
 	var body struct {
 		AgentID  string `json:"agent_id"`
 		Command  string `json:"command"`
@@ -343,8 +438,39 @@ func (r *Relay) handleExecCommand(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := agent.SendMessage(msg); err != nil {
+		// Логируем ошибку
+		if r.audit != nil {
+			r.audit.Log(AuditEntry{
+				Timestamp:  startTime,
+				AgentID:   body.AgentID,
+				ClientID:  getClientID(req),
+				Action:     "exec",
+				Command:   body.Command,
+				RiskLevel:  "medium",
+				Result:     "error",
+				DurationMs: time.Since(startTime).Milliseconds(),
+				Error:      err.Error(),
+				ClientIP:   getClientIP(req),
+			})
+		}
+
 		writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
 		return
+	}
+
+	// Логируем успешную отправку
+	if r.audit != nil {
+		r.audit.Log(AuditEntry{
+			Timestamp:  startTime,
+			AgentID:   body.AgentID,
+			ClientID:  getClientID(req),
+			Action:     "exec",
+			Command:   body.Command,
+			RiskLevel:  "medium",
+			Result:     "success",
+			DurationMs: time.Since(startTime).Milliseconds(),
+			ClientIP:   getClientIP(req),
+		})
 	}
 
 	writeJSON(w, map[string]string{
@@ -477,34 +603,6 @@ func (r *Relay) handleSysInfo(w http.ResponseWriter, req *http.Request) {
 	}
 
 	writeJSON(w, map[string]string{"status": "sent", "agent_id": body.AgentID})
-}
-
-// authMiddleware — проверяет Bearer токен для HTTP API.
-func (r *Relay) authMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if r.cfg.APIToken == "" {
-			next.ServeHTTP(w, req)
-			return
-		}
-
-		token := req.Header.Get("Authorization")
-		if token == "" {
-			writeError(w, http.StatusUnauthorized, "токен не указан")
-			return
-		}
-
-		// Убираем "Bearer " префикс
-		if len(token) > 7 && token[:7] == "Bearer " {
-			token = token[7:]
-		}
-
-		if token != r.cfg.APIToken {
-			writeError(w, http.StatusUnauthorized, "неверный токен")
-			return
-		}
-
-		next.ServeHTTP(w, req)
-	})
 }
 
 // === Вспомогательные функции ===
@@ -678,6 +776,146 @@ func (r *Relay) handleSkillDelete(w http.ResponseWriter, req *http.Request) {
 
 // === Вспомогательные функции ===
 
+// GenerateAgentToken — генерирует токен для агента (публичный метод).
+func (r *Relay) GenerateAgentToken(agentID string, expiresInSeconds int64) (string, error) {
+	return r.auth.GenerateAgentToken(agentID, expiresInSeconds)
+}
+
+// GenerateAPIToken — генерирует API токен (публичный метод).
+func (r *Relay) GenerateAPIToken(clientID string, expiresInSeconds int64) (string, error) {
+	return r.auth.GenerateAPIToken(clientID, expiresInSeconds)
+}
+
+// RotateAgentTokens — ротация токена агента (публичный метод).
+func (r *Relay) RotateAgentTokens(agentID string, expiresInSeconds int64) (string, error) {
+	return r.auth.RotateTokens(agentID, expiresInSeconds)
+}
+
+// RevokeToken — отзыв токена (публичный метод).
+func (r *Relay) RevokeToken(token string) error {
+	return r.auth.RevokeToken(token)
+}
+
+// === Audit Log Handlers ===
+
+func (r *Relay) handleAuditQuery(w http.ResponseWriter, req *http.Request) {
+	if r.audit == nil {
+		writeError(w, http.StatusServiceUnavailable, "audit logger не инициализирован")
+		return
+	}
+
+	// Парсим query parameters
+	query := AuditQuery{
+		AgentID:   req.URL.Query().Get("agent_id"),
+		ClientID:  req.URL.Query().Get("client_id"),
+		Action:    req.URL.Query().Get("action"),
+		RiskLevel: req.URL.Query().Get("risk_level"),
+		Result:    req.URL.Query().Get("result"),
+	}
+
+	// Limit и offset
+	if limit := req.URL.Query().Get("limit"); limit != "" {
+		if l, err := parseInt(limit); err == nil {
+			query.Limit = l
+		}
+	}
+	if offset := req.URL.Query().Get("offset"); offset != "" {
+		if o, err := parseInt(offset); err == nil {
+			query.Offset = o
+		}
+	}
+
+	// Date range
+	if from := req.URL.Query().Get("from"); from != "" {
+		if t, err := time.Parse(time.RFC3339, from); err == nil {
+			query.From = &t
+		}
+	}
+	if to := req.URL.Query().Get("to"); to != "" {
+		if t, err := time.Parse(time.RFC3339, to); err == nil {
+			query.To = &t
+		}
+	}
+
+	// Запрашиваем
+	entries, err := r.audit.Query(query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ошибка запроса: "+err.Error())
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"entries": entries,
+		"count":   len(entries),
+	})
+}
+
+func (r *Relay) handleAuditExport(w http.ResponseWriter, req *http.Request) {
+	if r.audit == nil {
+		writeError(w, http.StatusServiceUnavailable, "audit logger не инициализирован")
+		return
+	}
+
+	format := req.URL.Query().Get("format")
+	if format == "" {
+		format = "json"
+	}
+
+	query := AuditQuery{
+		AgentID:   req.URL.Query().Get("agent_id"),
+		ClientID:  req.URL.Query().Get("client_id"),
+		Action:    req.URL.Query().Get("action"),
+		RiskLevel: req.URL.Query().Get("risk_level"),
+		Result:    req.URL.Query().Get("result"),
+	}
+
+	// Date range
+	if from := req.URL.Query().Get("from"); from != "" {
+		if t, err := time.Parse(time.RFC3339, from); err == nil {
+			query.From = &t
+		}
+	}
+	if to := req.URL.Query().Get("to"); to != "" {
+		if t, err := time.Parse(time.RFC3339, to); err == nil {
+			query.To = &t
+		}
+	}
+
+	// Экспортируем
+	data, err := r.audit.Export(format, query)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "ошибка экспорта: "+err.Error())
+		return
+	}
+
+	// Устанавливаем content type и filename
+	switch format {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=audit-export.csv")
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Disposition", "attachment; filename=audit-export.json")
+	}
+
+	w.Write(data)
+}
+
+func (r *Relay) handleAuditStats(w http.ResponseWriter, req *http.Request) {
+	if r.audit == nil {
+		writeError(w, http.StatusServiceUnavailable, "audit logger не инициализирован")
+		return
+	}
+
+	stats, err := r.audit.Stats()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ошибка статистики: "+err.Error())
+		return
+	}
+
+	writeJSON(w, stats)
+}
+
 func writeJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
@@ -695,4 +933,39 @@ func writeError(w http.ResponseWriter, code int, message string) {
 func jsonMarshal(v any) []byte {
 	data, _ := json.Marshal(v)
 	return data
+}
+
+func parseInt(s string) (int, error) {
+	var result int
+	_, err := fmt.Sscanf(s, "%d", &result)
+	return result, err
+}
+
+func getClientID(req *http.Request) string {
+	// Из JWT токена или Authorization header
+	auth := req.Header.Get("Authorization")
+	if auth != "" {
+		// Убираем "Bearer " prefix
+		if len(auth) > 7 && strings.ToLower(auth[:7]) == "bearer " {
+			return auth[7:]
+		}
+		return auth
+	}
+	return ""
+}
+
+func getClientIP(req *http.Request) string {
+	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	if xri := req.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+	// Убираем порт
+	addr := req.RemoteAddr
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		return addr[:idx]
+	}
+	return addr
 }

@@ -13,14 +13,16 @@ import (
 
 func main() {
 	var (
-		configPath string
-		apiToken   string
-		showVer    bool
+		configPath       string
+		apiToken         string
+		showVer          bool
+		letsencryptDomain string
 	)
 
 	flag.StringVar(&configPath, "config", "", "путь к файлу конфигурации")
 	flag.StringVar(&apiToken, "api-token", "", "API токен (или через FLOWLINK_API_TOKEN)")
 	flag.BoolVar(&showVer, "version", false, "показать версию")
+	flag.StringVar(&letsencryptDomain, "letsencrypt-domain", "", "домен для Let's Encrypt (переопределяет конфиг)")
 	flag.Parse()
 
 	if showVer {
@@ -51,6 +53,14 @@ func main() {
 		cfg.APIToken = envToken
 	}
 
+	// Переопределение домена для Let's Encrypt из флага
+	if letsencryptDomain != "" {
+		cfg.TLSDomain = letsencryptDomain
+		if cfg.TLSMode == "" {
+			cfg.TLSMode = "letsencrypt"
+		}
+	}
+
 	if cfg.APIToken == "" {
 		slog.Warn("API токен не задан — HTTP API будет без авторизации")
 	}
@@ -59,6 +69,8 @@ func main() {
 		"version", version.Version,
 		"wss", cfg.WSSAddr,
 		"api", cfg.APIAddr,
+		"tls_mode", cfg.TLSMode,
+		"tls_domain", cfg.TLSDomain,
 		"llm_backends", len(cfg.LLMBackends),
 	)
 
