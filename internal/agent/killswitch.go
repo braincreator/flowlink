@@ -8,10 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
 	"runtime"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -75,7 +73,7 @@ func NewKillSwitch() *KillSwitch {
 // handleSignals — обрабатывает системные сигналы.
 func (k *KillSwitch) handleSignals() {
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	notifyPlatformSignals(sigChan)
 
 	for sig := range sigChan {
 		k.logger.Info("получен сигнал", "signal", sig)
@@ -138,28 +136,9 @@ func (k *KillSwitch) getCPUUsage() float64 {
 	return k.getPlatformCPUUsage()
 }
 
-// getLinuxLoadAvg — заглушка, используется только на darwin.
-func (k *KillSwitch) getLinuxLoadAvg() float64 {
-	return 0.0
-}
-
-// getDiskUsage — возвращает процент использования диска.
+// getDiskUsage — возвращает процент использования диска (платформо-зависимо).
 func (k *KillSwitch) getDiskUsage() float64 {
-	var stat syscall.Statfs_t
-	home, _ := os.UserHomeDir()
-	if err := syscall.Statfs(home, &stat); err != nil {
-		return 0.0
-	}
-
-	total := stat.Blocks * uint64(stat.Bsize)
-	free := stat.Bavail * uint64(stat.Bsize)
-	used := total - free
-
-	if total == 0 {
-		return 0.0
-	}
-
-	return float64(used) / float64(total) * 100
+	return k.getPlatformDiskUsage()
 }
 
 // IsPaused — проверяет, находится ли агент на паузе.

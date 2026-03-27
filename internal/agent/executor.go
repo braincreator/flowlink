@@ -39,10 +39,10 @@ func (e *Executor) ExecAsync(
 	go func() {
 		start := time.Now()
 
-		// Определяем shell
+		// Определяем shell (платформо-зависимо)
 		shell := payload.Shell
 		if shell == "" {
-			shell = "/bin/sh"
+			shell = getShellCommand()
 		}
 
 		// Таймаут
@@ -57,7 +57,7 @@ func (e *Executor) ExecAsync(
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, shell, "-c", payload.Command)
+		cmd := exec.CommandContext(ctx, shell, getShellArgs(payload.Command)...)
 
 		// Рабочая директория
 		if payload.Dir != "" {
@@ -137,7 +137,7 @@ func (e *Executor) Exec(command string) (string, error) {
 
 // ExecSync — выполняет команду синхронно, возвращает вывод и exit code.
 func (e *Executor) ExecSync(command string, dir string, timeout int) (stdout string, stderr string, exitCode int) {
-	shell := "/bin/sh"
+	shell := getShellCommand()
 	if timeout == 0 {
 		timeout = 60
 	}
@@ -145,7 +145,7 @@ func (e *Executor) ExecSync(command string, dir string, timeout int) (stdout str
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, shell, "-c", command)
+	cmd := exec.CommandContext(ctx, shell, getShellArgs(command)...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
