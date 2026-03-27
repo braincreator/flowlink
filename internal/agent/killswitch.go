@@ -1,5 +1,7 @@
 // Package agent — Kill Switch и Circuit Breaker для flowlink.
 // Экстренная остановка и автоматическая защита от перегрузок.
+
+
 package agent
 
 import (
@@ -130,20 +132,14 @@ func (k *KillSwitch) checkResources() {
 	}
 }
 
-// getCPUUsage — возвращает использование CPU (упрощённо через load average).
+// getCPUUsage — возвращает использование CPU (платформо-зависимо).
+// Реализация в killswitch_darwin.go и killswitch_linux.go.
 func (k *KillSwitch) getCPUUsage() float64 {
-	loadAvg, err := syscall.SysctlUint32("vm.loadavg")
-	if err != nil {
-		// Linux fallback
-		return k.getLinuxLoadAvg()
-	}
-	return float64(loadAvg)
+	return k.getPlatformCPUUsage()
 }
 
-// getLinuxLoadAvg — получает load average на Linux.
+// getLinuxLoadAvg — заглушка, используется только на darwin.
 func (k *KillSwitch) getLinuxLoadAvg() float64 {
-	// Упрощённая реализация
-	// В реальном коде: /proc/loadavg
 	return 0.0
 }
 
