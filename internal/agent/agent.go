@@ -267,10 +267,12 @@ func (a *Agent) handleExecRequest(msg protocol.Message) {
 	// Выполняем команду
 	a.executor.ExecAsync(payload, func(output protocol.ExecOutputPayload) {
 		msg := protocol.NewMessage(protocol.MsgExecOutput)
+		output.RequestID = payload.RequestID
 		msg.Payload = output
 		a.write(msg)
 	}, func(done protocol.ExecDonePayload) {
 		msg := protocol.NewMessage(protocol.MsgExecDone)
+		done.RequestID = payload.RequestID
 		msg.Payload = done
 		a.write(msg)
 	})
@@ -284,6 +286,31 @@ func (a *Agent) handleSysInfo(msg protocol.Message) {
 	a.write(resp)
 }
 
+// writeResponse — отправляет ответ с request_id для корреляции.
+func (a *Agent) writeResponse(msgType protocol.MessageType, requestID string, payload any) {
+	msg := protocol.NewMessage(msgType)
+	if m, ok := payload.(map[string]any); ok {
+		m["request_id"] = requestID
+		msg.Payload = m
+	} else if m, ok := payload.(map[string]string); ok {
+		m["request_id"] = requestID
+		msg.Payload = m
+	} else {
+		msg.Payload = payload
+	}
+	a.write(msg)
+}
+
+// getRequestID — извлекает request_id из payload сообщения.
+func getRequestID(payload any) string {
+	if m, ok := payload.(map[string]any); ok {
+		if rid, ok := m["request_id"].(string); ok {
+			return rid
+		}
+	}
+	return ""
+}
+
 // handleFileRead — читает файл и отправляет содержимое.
 func (a *Agent) handleFileRead(msg protocol.Message) {
 	var payload protocol.FileReadPayload
@@ -293,6 +320,7 @@ func (a *Agent) handleFileRead(msg protocol.Message) {
 	}
 
 	resp := ReadFile(payload)
+	resp.RequestID = getRequestID(msg.Payload)
 	respMsg := protocol.NewMessage(protocol.MsgFileResponse)
 	respMsg.Payload = resp
 	a.write(respMsg)
@@ -307,6 +335,7 @@ func (a *Agent) handleFileWrite(msg protocol.Message) {
 	}
 
 	resp := WriteFile(payload)
+	resp.RequestID = getRequestID(msg.Payload)
 	respMsg := protocol.NewMessage(protocol.MsgFileResponse)
 	respMsg.Payload = resp
 	a.write(respMsg)
@@ -321,6 +350,7 @@ func (a *Agent) handleFileList(msg protocol.Message) {
 	}
 
 	resp := ListFiles(payload)
+	resp.RequestID = getRequestID(msg.Payload)
 	respMsg := protocol.NewMessage(protocol.MsgFileResponse)
 	respMsg.Payload = resp
 	a.write(respMsg)

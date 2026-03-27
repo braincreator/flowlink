@@ -35,6 +35,7 @@ type AgentConn struct {
 	LastSeen  time.Time
 	conn      *websocket.Conn
 	mu        sync.Mutex
+	callbacks map[string]func(any) // request_id → callback
 }
 
 // AgentPool — пул подключённых агентов.
@@ -132,6 +133,7 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/llm/chat", r.handleLLMChat)
 	apiMux.HandleFunc("/api/v1/llm/backends", r.handleLLMBackends)
 	apiMux.HandleFunc("/api/v1/llm/health", r.handleLLMHealth)
+	apiMux.HandleFunc("/mcp", r.handleMCP)
 
 	// Auth middleware
 	authMux := r.authMiddleware(apiMux)
@@ -237,8 +239,18 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 		msg.AgentID = payload.AgentID
 		agent.LastSeen = time.Now()
 
-		// TODO: маршрутизация сообщений к OpenClaw
 		r.logger.Debug("сообщение от агента", "agent", msg.AgentID, "type", msg.Type)
+
+		// Проверяем callback (для MCP sendAndWait)
+		if msg.Payload != nil {
+			if m, ok := msg.Payload.(map[string]any); ok {
+				if reqID, ok := m["request_id"].(string); ok {
+					if agent.TriggerCallback(reqID, msg.Payload) {
+						continue
+					}
+				}
+			}
+		}
 	}
 }
 
