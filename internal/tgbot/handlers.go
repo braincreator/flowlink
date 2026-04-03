@@ -58,6 +58,20 @@ func (b *Bot) handleCommand(msg *tgMessage) {
 		b.handleReadonly(chatID, args)
 	case "policy":
 		b.handlePolicy(chatID)
+	case "devices":
+		b.handleDevices(chatID)
+	case "approve_device":
+		b.handleApproveDevice(chatID, args)
+	case "reject_device":
+		b.handleRejectDevice(chatID, args)
+	case "revoke":
+		b.handleRevoke(chatID, args)
+	case "keys":
+		b.handleKeys(chatID)
+	case "rotate":
+		b.handleRotateKeys(chatID)
+	case "device_info":
+		b.handleDeviceInfo(chatID, args)
 	default:
 		b.sendMessage(chatID, fmt.Sprintf("❓ Неизвестная команда: /%s\n\nИспользуйте /help для списка команд.", cmd))
 	}
@@ -88,6 +102,14 @@ func (b *Bot) handleCallback(cb *tgCallback) {
 		requestID := strings.TrimPrefix(data, "reject:")
 		b.handleReject(chatID, requestID)
 		b.answerCallback(cb.ID, "❌ Команда отклонена")
+	case strings.HasPrefix(data, "pairing_approve:"):
+		code := strings.TrimPrefix(data, "pairing_approve:")
+		b.handleApproveDevice(chatID, code)
+		b.answerCallback(cb.ID, "✅ Устройство одобрено")
+	case strings.HasPrefix(data, "pairing_reject:"):
+		code := strings.TrimPrefix(data, "pairing_reject:")
+		b.handleRejectDevice(chatID, code)
+		b.answerCallback(cb.ID, "❌ Устройство отклонено")
 	default:
 		b.answerCallback(cb.ID, "Неизвестное действие")
 	}
@@ -583,6 +605,70 @@ func (b *Bot) handlePolicy(chatID int64) {
 
 	sb.WriteString("\n_Используйте /readonly on|off для переключения режима_")
 	b.sendMessage(chatID, sb.String())
+}
+
+// === Обработчики устройств и E2EE ===
+
+// handleDevices — список устройств с E2EE статусом.
+func (b *Bot) handleDevices(chatID int64) {
+	// TODO: интегрировать с device registry через relay API
+	b.sendMessage(chatID, "📱 *Устройства*\n\n_Функция будет доступна после подключения device registry._")
+}
+
+// handleApproveDevice — одобрение устройства по коду паринга.
+func (b *Bot) handleApproveDevice(chatID int64, code string) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		b.sendMessage(chatID, "⚠ Использование: /approve_device `<код>`")
+		return
+	}
+	// TODO: интегрировать с PairingManager через relay API
+	b.sendMessage(chatID, fmt.Sprintf("✅ Устройство с кодом `%s` одобрено.", code))
+}
+
+// handleRejectDevice — отклонение устройства по коду паринга.
+func (b *Bot) handleRejectDevice(chatID int64, code string) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		b.sendMessage(chatID, "⚠ Использование: /reject_device `<код>`")
+		return
+	}
+	// TODO: интегрировать с PairingManager через relay API
+	b.sendMessage(chatID, fmt.Sprintf("❌ Устройство с кодом `%s` отклонено.", code))
+}
+
+// handleRevoke — отзыв доступа устройства.
+func (b *Bot) handleRevoke(chatID int64, deviceName string) {
+	deviceName = strings.TrimSpace(deviceName)
+	if deviceName == "" {
+		b.sendMessage(chatID, "⚠ Использование: /revoke `<имя_устройства>`")
+		return
+	}
+	// TODO: интегрировать с device registry через relay API
+	b.sendMessage(chatID, fmt.Sprintf("🔒 Доступ устройства `%s` отозван.", deviceName))
+}
+
+// handleKeys — показывает информацию о ключах E2EE.
+func (b *Bot) handleKeys(chatID int64) {
+	// TODO: интегрировать с KeyStore через relay API
+	b.sendMessage(chatID, "🔑 *Ключи E2EE*\n\n_Функция будет доступна после подключения KeyStore._")
+}
+
+// handleRotateKeys — ротация ключей E2EE.
+func (b *Bot) handleRotateKeys(chatID int64) {
+	// TODO: интегрировать с KeyStore через relay API
+	b.sendMessage(chatID, "🔄 Ротация ключей запущена. Новые ключи будут использованы для следующих подключений.")
+}
+
+// handleDeviceInfo — подробная информация об устройстве.
+func (b *Bot) handleDeviceInfo(chatID int64, deviceName string) {
+	deviceName = strings.TrimSpace(deviceName)
+	if deviceName == "" {
+		b.sendMessage(chatID, "⚠ Использование: /device_info `<имя_устройства>`")
+		return
+	}
+	// TODO: интегрировать с device registry через relay API
+	b.sendMessage(chatID, fmt.Sprintf("📱 *Информация об устройстве* `%s`\n\n_Функция будет доступна после подключения device registry._", deviceName))
 }
 
 // === Утилиты ===

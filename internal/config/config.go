@@ -31,6 +31,9 @@ type Config struct {
 
 	// Backup — настройки резервного копирования
 	Backup BackupConfig `json:"backup"`
+
+	// E2EE — настройки end-to-end шифрования
+	E2EE E2EEConfig `json:"e2ee"`
 }
 
 // SandboxConfig — ограничения для команд и файлов.
@@ -259,6 +262,12 @@ func LoadRelayConfig(path string) (*RelayConfig, error) {
 	}
 
 	return &cfg, nil
+}
+
+// E2EEConfig — настройки end-to-end шифрования.
+type E2EEConfig struct {
+	Enabled    bool `json:"enabled"`      // default: true
+	AutoRotate bool `json:"auto_rotate"`  // авто-ротация каждые 30 дней
 }
 
 // OSInfo — базовая информация об ОС.
