@@ -4,10 +4,12 @@ package tgbot
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -245,6 +247,45 @@ func (b *Bot) answerCallback(callbackID, text string) error {
 	resp, err := http.Post(b.apiURL("answerCallbackQuery"), "application/json", strings.NewReader(string(data)))
 	if err != nil {
 		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+// sendPhoto — отправляет фото по URL.
+func (b *Bot) sendPhoto(chatID int64, photoURL string) error {
+	body := map[string]interface{}{
+		"chat_id": chatID,
+		"photo":   photoURL,
+	}
+	data, _ := json.Marshal(body)
+	resp, err := http.Post(b.apiURL("sendPhoto"), "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		return fmt.Errorf("sendPhoto HTTP: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		b.logger.Error("Telegram sendPhoto error", "status", resp.StatusCode, "body", string(respBody))
+	}
+	return nil
+}
+
+// sendPhotoBytes — отправляет фото как multipart/form-data.
+func (b *Bot) sendPhotoBytes(chatID int64, imgData []byte) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", fmt.Sprintf("%d", chatID))
+	part, err := w.CreateFormFile("photo", "qr.png")
+	if err != nil {
+		return fmt.Errorf("create form file: %w", err)
+	}
+	part.Write(imgData)
+	w.Close()
+
+	resp, err := http.Post(b.apiURL("sendPhoto"), w.FormDataContentType(), &buf)
+	if err != nil {
+		return fmt.Errorf("sendPhotoBytes HTTP: %w", err)
 	}
 	defer resp.Body.Close()
 	return nil

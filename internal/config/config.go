@@ -37,6 +37,25 @@ type Config struct {
 
 	// Payment — настройки платёжной системы
 	Payment PaymentConfig `json:"payment"`
+
+	// Autoscale — настройки автоскейлинга relay серверов
+	Autoscale AutoscaleConfig `json:"autoscale"`
+}
+
+// AutoscaleConfig — настройки autoscaling для relay.
+type AutoscaleConfig struct {
+	Enabled         bool    `json:"enabled"`          // default: false
+	Provider        string  `json:"provider"`         // "timeweb"
+	TimewebToken    string  `json:"timeweb_token"`
+	MinServers      int     `json:"min_servers"`      // 1
+	MaxServers      int     `json:"max_servers"`      // 5
+	ScaleUpAt       float64 `json:"scale_up_at"`      // clients per server (10)
+	ScaleDownAt     float64 `json:"scale_down_at"`    // clients per server (3)
+	CooldownMinutes int     `json:"cooldown_minutes"` // 10
+	ServerCPU       int     `json:"server_cpu"`       // 1
+	ServerRAM       int     `json:"server_ram"`       // 1024 (MB)
+	ServerDisk      int     `json:"server_disk"`      // 10 (GB)
+	ServerLocation  string  `json:"server_location"`  // "ru-1"
 }
 
 // PaymentConfig — настройки платёжной интеграции.
