@@ -54,10 +54,9 @@ func newTestServer() *httptest.Server {
 	// Per-server operations
 	mux.HandleFunc("/servers/cloud/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			id := r.URL.Path[len("/servers/cloud/"):]
 			resp := map[string]interface{}{
 				"server": map[string]interface{}{
-					"id": id,
+					"id": 12345,
 					"name": "test-server",
 					"status": map[string]interface{}{"status": "on"},
 					"ips": []map[string]interface{}{
