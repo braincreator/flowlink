@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://flowlink.flow-masters.ru/favicon.svg" width="80" alt="FlowLink" />
+  <img src="https://flowlink.flow-masters.ru/logo.svg" width="120" alt="FlowLink" />
 </p>
 
 <h1 align="center">FlowLink</h1>
@@ -15,6 +15,7 @@
   <a href="#-architecture">Architecture</a> ·
   <a href="#-api-reference">API</a> ·
   <a href="#-pricing">Pricing</a> ·
+  <a href="#-skills-devops--monitoring">Skills</a> ·
   <a href="README_ru.md">Русский</a>
 </p>
 
@@ -584,6 +585,70 @@ services:
 volumes:
   flowlink-data:
 ```
+
+---
+
+## 🧩 Skills (DevOps & Monitoring)
+
+FlowLink can be extended with **skills** — reusable command packs that add server management capabilities. Skills are defined in Markdown with YAML frontmatter and loaded by the agent at startup.
+
+### Available Skills
+
+| Skill | Icon | Description |
+|-------|------|-------------|
+| **Docker Manager** | 🐳 | Deploy, restart, scale containers. Health checks & auto-healing. |
+| **Log Analyzer** | 📋 | AI-powered log analysis. Detect errors, anomalies, and patterns. |
+| **SSL Manager** | 🔒 | Auto-renew Let's Encrypt certs. Monitor expiry, notify before renewal. |
+| **Backup Agent** | 💾 | Automated backups (tar, PostgreSQL, MySQL, MongoDB). Schedule & restore. |
+| **Uptime Monitor** | 📡 | HTTP/TCP/DNS health checks. Alert on downtime, track SLA. |
+| **Cost Tracker** | 💰 | Track server costs, predict spend, optimize resource usage. |
+
+### Using Skills
+
+Skills are stored in `skills/` directory and loaded automatically:
+
+```bash
+# List available skills
+./bin/flowlink skills list
+
+# Run a skill command
+./bin/flowlink skills run docker-manager docker_ps
+./bin/flowlink skills run log-analyzer search --pattern "ERROR" --file /var/log/syslog
+
+# Enable health checks for a skill
+./bin/flowlink skills enable uptime-monitor
+```
+
+### Skill Format
+
+Each skill is a Markdown file with YAML frontmatter:
+
+```yaml
+---
+name: Docker Manager
+version: 0.1.0
+description: Deploy, restart, scale containers
+categories: [devops, containers]
+commands:
+  - name: docker_ps
+    description: List running containers
+    run: docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    timeout: 10
+health_checks:
+  - name: container_running
+    interval: 60
+    run: docker inspect -f '{{.State.Running}}' {container}
+    on_fail: notify
+---
+```
+
+### Creating Custom Skills
+
+1. Create a `.md` file in `skills/` directory
+2. Add YAML frontmatter with commands and health checks
+3. Reload the agent: `./bin/flowlink skills reload`
+
+See [`skills/`](./skills/) for examples.
 
 ---
 

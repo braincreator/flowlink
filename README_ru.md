@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://flowlink.flow-masters.ru/favicon.svg" width="80" alt="FlowLink" />
+  <img src="https://flowlink.flow-masters.ru/logo.svg" width="120" alt="FlowLink" />
 </p>
 
 <h1 align="center">FlowLink</h1>
@@ -15,6 +15,7 @@
   <a href="#-архитектура">Архитектура</a> ·
   <a href="#-api-документация">API</a> ·
   <a href="#-тарифные-планы">Тарифы</a> ·
+  <a href="#-навыки-devops--мониторинг">Навыки</a> ·
   <a href="README.md">English</a>
 </p>
 
@@ -584,6 +585,57 @@ services:
 volumes:
   flowlink-data:
 ```
+
+---
+
+## 🧩 Навыки (DevOps & Мониторинг)
+
+FlowLink можно расширять **навыками** (skills) — переиспользуемыми наборами команд для управления серверами. Навыки описываются в Markdown с YAML frontmatter и загружаются агентом при старте.
+
+### Доступные навыки
+
+| Навык | Иконка | Описание |
+|-------|--------|----------|
+| **Docker Manager** | 🐳 | Деплой, рестарт, масштабирование контейнеров. Health checks и авто-восстановление. |
+| **Log Analyzer** | 📋 | AI-анализ логов. Поиск ошибок, аномалий и паттернов. |
+| **SSL Manager** | 🔒 | Авто-продление Let's Encrypt. Мониторинг срока действия, уведомления. |
+| **Backup Agent** | 💾 | Автоматические бэкапы (tar, PostgreSQL, MySQL, MongoDB). Расписание и восстановление. |
+| **Uptime Monitor** | 📡 | HTTP/TCP/DNS health checks. Алерты при даунтайме, отслеживание SLA. |
+| **Cost Tracker** | 💰 | Отслеживание затрат серверов, прогноз расходов, оптимизация ресурсов. |
+
+### Использование
+
+```bash
+# Список доступных навыков
+./bin/flowlink skills list
+
+# Выполнить команду навыка
+./bin/flowlink skills run docker-manager docker_ps
+./bin/flowlink skills run log-analyzer search --pattern "ERROR" --file /var/log/syslog
+
+# Включить health checks
+./bin/flowlink skills enable uptime-monitor
+```
+
+### Формат навыка
+
+Каждый навык — Markdown файл с YAML frontmatter:
+
+```yaml
+---
+name: Docker Manager
+version: 0.1.0
+description: Управление Docker контейнерами
+categories: [devops, containers]
+commands:
+  - name: docker_ps
+    description: Список запущенных контейнеров
+    run: docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+    timeout: 10
+---
+```
+
+См. [`skills/`](./skills/) для примеров.
 
 ---
 
