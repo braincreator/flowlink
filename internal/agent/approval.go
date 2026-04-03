@@ -322,6 +322,11 @@ func (a *ApproverV2) SetNotifyFn(fn func(req *ApprovalRequest)) {
 	a.notifyFn = fn
 }
 
+// Mode — возвращает текущий режим approval.
+func (a *ApproverV2) Mode() string {
+	return a.cfg.Mode
+}
+
 // GetPending — возвращает список pending запросов.
 func (a *ApproverV2) GetPending() []*ApprovalRequest {
 	a.mu.RLock()

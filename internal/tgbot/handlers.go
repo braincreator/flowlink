@@ -54,6 +54,10 @@ func (b *Bot) handleCommand(msg *tgMessage) {
 		b.handleReject(chatID, args)
 	case "settings":
 		b.handleSettings(chatID)
+	case "readonly":
+		b.handleReadonly(chatID, args)
+	case "policy":
+		b.handlePolicy(chatID)
 	default:
 		b.sendMessage(chatID, fmt.Sprintf("❓ Неизвестная команда: /%s\n\nИспользуйте /help для списка команд.", cmd))
 	}
@@ -514,6 +518,70 @@ func (b *Bot) handleSettings(chatID int64) {
 	sb.WriteString(fmt.Sprintf("*Уведомления:* %v\n", b.cfg.NotifyOn))
 	sb.WriteString(fmt.Sprintf("*Доступ:* %d пользователей\n", len(b.cfg.AllowedIDs)))
 
+	b.sendMessage(chatID, sb.String())
+}
+
+// handleReadonly — переключение read-only режима.
+func (b *Bot) handleReadonly(chatID int64, mode string) {
+	mode = strings.TrimSpace(strings.ToLower(mode))
+
+	var payload map[string]any
+	switch mode {
+	case "on", "1", "true":
+		payload = map[string]any{"read_only": true}
+	case "off", "0", "false":
+		payload = map[string]any{"read_only": false}
+	default:
+		b.sendMessage(chatID, "⚠ Использование: /readonly `on` или /readonly `off`")
+		return
+	}
+
+	data, err := b.relayPost("/api/v1/agents/readonly", payload)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
+
+	status := "🔒 Read-only"
+	if mode == "off" {
+		status = "🔓 Read-write"
+	}
+	b.sendMessage(chatID, fmt.Sprintf("%s режим %s\n\n%s", status, mode, string(data)))
+}
+
+// handlePolicy — отображение статуса Policy Layer.
+func (b *Bot) handlePolicy(chatID int64) {
+	data, err := b.relayPost("/api/v1/agents/policy", nil)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🛡 *Policy Layer Status*\n\n")
+
+	var status map[string]any
+	if err := json.Unmarshal(data, &status); err == nil {
+		if v, ok := status["read_only"]; ok {
+			sb.WriteString(fmt.Sprintf("*Read-only:* %v\n", v))
+		}
+		if v, ok := status["kill_switch_mode"]; ok {
+			sb.WriteString(fmt.Sprintf("*Kill Switch:* %v\n", v))
+		}
+		if v, ok := status["approval_mode"]; ok {
+			sb.WriteString(fmt.Sprintf("*Approval:* %v\n", v))
+		}
+		if v, ok := status["pending_approvals"]; ok {
+			sb.WriteString(fmt.Sprintf("*Pending Approvals:* %v\n", v))
+		}
+		if v, ok := status["blacklist_entries"]; ok {
+			sb.WriteString(fmt.Sprintf("*Blacklist Rules:* %v\n", v))
+		}
+	} else {
+		sb.WriteString(string(data))
+	}
+
+	sb.WriteString("\n_Используйте /readonly on|off для переключения режима_")
 	b.sendMessage(chatID, sb.String())
 }
 

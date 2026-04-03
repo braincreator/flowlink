@@ -16,6 +16,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// DefaultReadOnly — по умолчанию новый агент запускается в read-only режиме.
+// WRITE-доступ включается явно через Dashboard или Telegram.
+const DefaultReadOnly = true
+
 // Agent — экземпляр агента.
 type Agent struct {
 	cfg    *config.Config
@@ -27,12 +31,13 @@ type Agent struct {
 	// Подсистемы
 	executor    *Executor
 	sandbox     *Sandbox
-	approval    *ApproverV2 // обновлённый approver v2
+	approval    *ApproverV2
 	taskManager *TaskManager
 	skills      *SkillStore
-	llm         *RemoteLLM // LLM через реле (НЕ напрямую)
-	backup      *BackupEngine  // добавлен Backup Engine
-	killSwitch  *KillSwitch   // добавлен Kill Switch
+	llm         *RemoteLLM
+	backup      *BackupEngine
+	killSwitch  *KillSwitch
+	policy      *PolicyLayer // Единая точка проверки команд
 
 	notifyCh   chan protocol.Message // канал для уведомлений к реле
 
@@ -61,6 +66,18 @@ func NewAgent(cfg *config.Config) *Agent {
 	// Инициализируем Approver V2
 	approval := NewApproverV2(cfg.Approval)
 
+	// Инициализируем Policy Layer
+	policy := NewPolicyLayer(
+		NewSandbox(&cfg.Sandbox),
+		approval,
+		backup,
+		killSwitch,
+		cfg,
+	)
+
+	// Read-only по умолчанию (безопасность для новых агентов)
+	policy.SetReadOnly(DefaultReadOnly)
+
 	agent := &Agent{
 		cfg:        cfg,
 		done:       make(chan struct{}),
@@ -70,6 +87,7 @@ func NewAgent(cfg *config.Config) *Agent {
 		approval:    approval,
 		backup:     backup,
 		killSwitch:  killSwitch,
+		policy:      policy,
 		skills:     skills,
 		notifyCh:   make(chan protocol.Message, 100),
 		llm:        nil, // инициализируется ниже
@@ -250,6 +268,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 }
 
 // handleExecRequest — обрабатывает запрос на выполнение команды.
+// Все проверки проходят через Policy Layer.
 func (a *Agent) handleExecRequest(msg protocol.Message) {
 	var payload protocol.ExecRequestPayload
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
@@ -257,58 +276,54 @@ func (a *Agent) handleExecRequest(msg protocol.Message) {
 		return
 	}
 
-	// Проверка Kill Switch
-	if err := a.killSwitch.CheckCommand(payload.Command); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("заблокировано kill switch: %s", err))
-		a.logger.Warn("команда заблокирована kill switch", "command", payload.Command, "err", err)
-		return
-	}
+	// ─── Policy Layer: единая проверка через все слои ───
+	result := a.policy.Check(payload.Command)
 
-	// Проверка sandbox
-	if !a.sandbox.AllowCommand(payload.Command) {
-		a.sendError(msg.ID, "команда заблокирована sandbox-ом")
-		return
-	}
+	// Audit: логируем результат проверки
+	a.policy.AuditCommand(payload.Command, result)
 
-	// Проверка на деструктивность и создание бэкапа
-	if IsDestructive(payload.Command) && a.backup != nil {
-		affectedPaths := DetectAffectedPaths(payload.Command)
-		if len(affectedPaths) > 0 {
-			snapshotID, err := a.backup.CreateBefore(affectedPaths, payload.Command)
-			if err != nil {
-				a.logger.Warn("ошибка создания бэкапа", "err", err, "paths", affectedPaths)
-				// Продолжаем без бэкапа (упрощение)
-			} else {
-				a.logger.Info("бэкап создан", "snapshot_id", snapshotID, "paths", len(affectedPaths))
-			}
+	switch {
+	case result.Blocked:
+		a.sendError(msg.ID, result.Reason)
+		a.logger.Warn("команда заблокирована policy layer",
+			"command", payload.Command,
+			"reason", result.Reason,
+			"risk", result.RiskLevel,
+		)
+		return
+
+	case result.RequireApproval:
+		// Ожидание подтверждения через Telegram/Dashboard
+		a.logger.Info("команда ожидает подтверждения",
+			"request_id", payload.RequestID,
+			"approval_id", result.ApprovalID,
+			"command", payload.Command,
+		)
+		// Отправляем уведомление через реле
+		notifMsg := protocol.NewMessage(protocol.MsgApprovalRequest)
+		notifMsg.Payload = map[string]any{
+			"request_id":  payload.RequestID,
+			"approval_id": result.ApprovalID,
+			"command":     payload.Command,
+			"risk_level":  result.RiskLevel,
+			"reason":      result.Reason,
 		}
+		a.write(notifMsg)
+		return
+
+	case !result.Allowed:
+		a.sendError(msg.ID, result.Reason)
+		return
 	}
 
-	// Проверка approval (3 режима)
-	decision, requestID, err := a.approval.CheckApproval(payload.Command)
-	if err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("ошибка approval: %v", err))
-		return
-	}
+	// ─── Все проверки пройдены, выполняем команду ───
+	a.logger.Info("команда одобрена policy layer",
+		"command", payload.Command,
+		"risk", result.RiskLevel,
+		"snapshot", result.SnapshotID,
+	)
 
-	switch decision {
-	case DecisionRejected:
-		a.sendError(msg.ID, fmt.Sprintf("команда отклонена: %s", payload.Command))
-		a.logger.Warn("команда отклонена approval", "command", payload.Command)
-		return
-	case DecisionTimedOut:
-		a.sendError(msg.ID, fmt.Sprintf("таймаут ожидания подтверждения: %s", payload.Command))
-		a.logger.Warn("таймаут approval", "command", payload.Command)
-		return
-	case DecisionPending:
-		// Ждём подтверждения через реле
-		// Запрос уже отправлен через notifyFn в approval
-		a.logger.Info("ожидание подтверждения", "request_id", requestID, "command", payload.Command)
-		return
-	case DecisionApproved:
-		// Выполняем команду
-		a.executeCommand(payload)
-	}
+	a.executeCommand(payload)
 }
 
 

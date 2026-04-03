@@ -303,6 +303,11 @@ func (k *KillSwitch) RecordSuccess() {
 }
 
 // GetMode — возвращает текущий режим.
+// Mode — alias для GetMode (используется Policy Layer).
+func (k *KillSwitch) Mode() KillSwitchMode {
+	return k.GetMode()
+}
+
 func (k *KillSwitch) GetMode() KillSwitchMode {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
