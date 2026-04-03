@@ -5,23 +5,27 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/braincreator/flowlink/internal/billing"
 )
 
 // PaymentHandlers — обработчики платежей для Telegram-бота.
 type PaymentHandlers struct {
-	planStore    *billing.PlanStore
-	invoiceStore *billing.InvoiceStore
-	gateway      billing.PaymentGateway
-	bot          *Bot
-	logger       *slog.Logger
+	planStore        *billing.PlanStore
+	invoiceStore     *billing.InvoiceStore
+	subscriptionStore *billing.SubscriptionStore
+	gateway          billing.PaymentGateway
+	bot              *Bot
+	logger           *slog.Logger
 }
 
 // NewPaymentHandlers — создаёт обработчики платежей.
 func NewPaymentHandlers(
 	planStore *billing.PlanStore,
 	invoiceStore *billing.InvoiceStore,
+	subscriptionStore *billing.SubscriptionStore,
 	gateway billing.PaymentGateway,
 	bot *Bot,
 	logger *slog.Logger,
@@ -30,34 +34,65 @@ func NewPaymentHandlers(
 		logger = slog.Default()
 	}
 	return &PaymentHandlers{
-		planStore:    planStore,
-		invoiceStore: invoiceStore,
-		gateway:      gateway,
-		bot:          bot,
-		logger:       logger,
+		planStore:        planStore,
+		invoiceStore:     invoiceStore,
+		subscriptionStore: subscriptionStore,
+		gateway:          gateway,
+		bot:              bot,
+		logger:           logger,
 	}
 }
 
-// HandleSubscribe — обрабатывает /subscribe <plan_id>.
-func (ph *PaymentHandlers) HandleSubscribe(chatID int64, planID string) {
-	if planID == "" {
-		ph.bot.sendMessage(chatID, "⚠ Использование: /subscribe `<план>`\n\nДоступные планы:\n• *Free* — бесплатно\n• *Starter* — $19/мес\n• *Pro* — $49/мес\n• *Enterprise* — по запросу")
+// HandleSubscribe — обрабатывает /subscribe [plan_id] [period].
+func (ph *PaymentHandlers) HandleSubscribe(chatID int64, args []string) {
+	clientID := fmt.Sprintf("tg:%d", chatID)
+
+	// Если аргументов нет — показать список планов
+	if len(args) == 0 {
+		ph.showPlans(chatID)
 		return
 	}
 
+	planID := args[0]
+	period := billing.PeriodMonthly
+	if len(args) > 1 {
+		switch args[1] {
+		case "monthly", "m":
+			period = billing.PeriodMonthly
+		case "quarterly", "q":
+			period = billing.PeriodQuarterly
+		case "yearly", "y":
+			period = billing.PeriodYearly
+		default:
+			ph.bot.sendMessage(chatID, "⚠ Неверный период. Используйте: monthly, quarterly, yearly")
+			return
+		}
+	}
+
+	// Проверяем план
 	plan, ok := ph.planStore.GetPlan(planID)
 	if !ok {
-		ph.bot.sendMessage(chatID, fmt.Sprintf("❌ План «%s» не найден. Используйте /subscribe <free|starter|pro|enterprise>", planID))
+		ph.bot.sendMessage(chatID, fmt.Sprintf("❌ План «%s» не найден. Используйте /subscribe без параметров для списка планов.", planID))
 		return
 	}
 
+	// Бесплатный план
 	if plan.PriceMonthly == 0 {
 		ph.bot.sendMessage(chatID, fmt.Sprintf("✅ План *%s* активирован (бесплатно).\n\nФункции:\n%s", plan.Name, formatFeatures(plan.Features)))
 		return
 	}
 
+	// Проверяем, нет ли уже активной подписки
+	subs := ph.subscriptionStore.ListSubscriptions(clientID)
+	for _, sub := range subs {
+		if sub.Status == billing.SubscriptionStatusActive {
+			ph.bot.sendMessage(chatID, fmt.Sprintf("⚠ У вас уже есть активная подписка: *%s* (%s).\n\nИспользуйте /my_subscription для информации или /cancel для отмены.", sub.PlanID, sub.Period))
+			return
+		}
+	}
+
 	// Создаём счёт
-	clientID := fmt.Sprintf("tg:%d", chatID)
+	customerEmail := fmt.Sprintf("tg%d@flowlink.flow-masters.ru", chatID)
 	inv, err := ph.invoiceStore.GenerateInvoice(clientID, planID)
 	if err != nil {
 		ph.logger.Error("failed to create invoice", "err", err, "client", clientID, "plan", planID)
@@ -65,7 +100,7 @@ func (ph *PaymentHandlers) HandleSubscribe(chatID int64, planID string) {
 		return
 	}
 
-	// Создаём SBP платёж
+	// Создаём платёж (первый платёж с save_payment_method)
 	session, err := ph.gateway.CreatePayment(inv, "")
 	if err != nil {
 		ph.logger.Error("failed to create payment", "err", err, "invoice", inv.ID)
@@ -73,74 +108,267 @@ func (ph *PaymentHandlers) HandleSubscribe(chatID int64, planID string) {
 		return
 	}
 
-	rubAmount := billing.USDtoRUB(plan.PriceMonthly)
-	msg := fmt.Sprintf(
-		"💳 *Оплата подписки*\n\n"+
-			"📦 План: *%s*\n"+
-			"💰 Сумма: *%.2f ₽* ($%.2f по курсу ЦБ РФ)\n"+
-			"🧾 Счёт: `%s`\n\n"+
-			"📱 Отсканируйте QR-код в приложении банка для оплаты через СБП.\n\n"+
-			"⏰ Счёт действителен 7 дней.",
-		plan.Name, rubAmount, plan.PriceMonthly, inv.ID,
+	// Создаём pending подписку
+	sub, err := ph.subscriptionStore.CreateSubscription(
+		clientID,
+		customerEmail,
+		planID,
+		period,
+		"", // payment_method_id придёт в webhook
+		session.PaymentID,
 	)
-
-	// Отправляем сообщение
-	ph.bot.sendMessage(chatID, msg)
-
-	// Отправляем QR-код как фото
-	if session.PaymentURL != "" {
-		ph.bot.sendPhoto(chatID, session.PaymentURL)
-	} else if session.QRPayload != "" {
-		// Генерируем QR локально
-		qrData, err := billing.GenerateQRCode(session.QRPayload, 300)
-		if err == nil {
-			ph.bot.sendPhotoBytes(chatID, qrData)
-		}
-	}
-
-	ph.logger.Info("payment session created", "chat", chatID, "plan", planID, "invoice", inv.ID, "payment", session.PaymentID)
-}
-
-// HandlePaymentStatus — обрабатывает /payment_status.
-func (ph *PaymentHandlers) HandlePaymentStatus(chatID int64) {
-	clientID := fmt.Sprintf("tg:%d", chatID)
-	invoices := ph.invoiceStore.ListInvoices(clientID)
-
-	if len(invoices) == 0 {
-		ph.bot.sendMessage(chatID, "📭 У вас нет счетов.")
+	if err != nil {
+		ph.logger.Error("failed to create subscription", "err", err, "client", clientID)
+		ph.bot.sendMessage(chatID, "❌ Ошибка создания подписки. Попробуйте позже.")
 		return
 	}
 
-	// Берём последний счёт
-	last := invoices[len(invoices)-1]
-	statusEmoji := "⏳"
-	switch last.Status {
-	case billing.InvoiceStatusPaid:
-		statusEmoji = "✅"
-	case billing.InvoiceStatusOverdue:
-		statusEmoji = "⚠️"
-	case billing.InvoiceStatusCancelled:
-		statusEmoji = "❌"
+	// Рассчитываем цену
+	prices := plan.GetPrices()
+	var price billing.PlanPrice
+	for _, p := range prices {
+		if p.Period == period {
+			price = p
+			break
+		}
 	}
 
+	rubAmount := billing.USDtoRUB(price.Total)
 	msg := fmt.Sprintf(
-		"🧾 *Последний счёт*\n\n"+
-			"%s Статус: *%s*\n"+
-			"💰 Сумма: *%.2f ₽*\n"+
-			"📦 План: %s\n"+
-			"📅 Создан: %s\n"+
-			"⏰ До: %s\n",
-		statusEmoji, last.Status,
-		last.Amount, last.PlanID,
-		last.CreatedAt.Format("02.01.2006"),
-		last.DueDate.Format("02.01.2006"),
+		"💳 *Подписка на FlowLink*\n\n"+
+			"📦 План: *%s*\n"+
+			"📅 Период: *%s*\n"+
+			"💰 Сумма: *%.2f ₽* ($%.2f)\n",
+		plan.Name, formatPeriod(period), rubAmount, price.Total,
 	)
 
-	if last.PaidAt != nil {
-		msg += fmt.Sprintf("✅ Оплачен: %s\n", last.PaidAt.Format("02.01.2006 15:04"))
+	if price.Savings > 0 {
+		msg += fmt.Sprintf("🎉 Экономия: *%.2f ₽* (%s)\n", billing.USDtoRUB(price.Savings), price.SavingsPct)
 	}
 
+	msg += fmt.Sprintf(
+		"🧾 Счёт: `%s`\n\n"+
+			"💳 Нажмите кнопку ниже для оплаты картой.\n"+
+			"🔄 Карта будет сохранена для автоматического продления.",
+		inv.ID,
+	)
+
+	// Отправляем сообщение с inline кнопкой
+	keyboard := [][]InlineButton{
+		{
+			{Text: "💳 Оплатить картой", URL: session.PaymentURL},
+		},
+		{
+			{Text: "❌ Отмена", CallbackData: "cancel_sub:" + sub.ID},
+		},
+	}
+	ph.bot.sendMessageWithKeyboard(chatID, msg, keyboard)
+
+	ph.logger.Info("subscription payment created", "chat", chatID, "plan", planID, "period", period, "invoice", inv.ID, "payment", session.PaymentID)
+}
+
+// showPlans — показывает список планов с ценами.
+func (ph *PaymentHandlers) showPlans(chatID int64) {
+	plans := ph.planStore.ListPlans()
+	msg := "📋 *Тарифные планы FlowLink*\n\n"
+
+	for _, plan := range plans {
+		if plan.ID == "enterprise" {
+			continue // Enterprise по запросу
+		}
+
+		msg += fmt.Sprintf("📦 *%s*\n", plan.Name)
+		if plan.PriceMonthly == 0 {
+			msg += "   💰 Бесплатно\n"
+		} else {
+			prices := plan.GetPrices()
+			for _, p := range prices {
+				rubTotal := billing.USDtoRUB(p.Total)
+				periodName := formatPeriod(p.Period)
+				savingsInfo := ""
+				if p.SavingsPct != "" {
+					savingsInfo = fmt.Sprintf(" (экономия %s)", p.SavingsPct)
+				}
+				msg += fmt.Sprintf("   • %s: *%.0f ₽*%s\n", periodName, rubTotal, savingsInfo)
+			}
+		}
+		msg += fmt.Sprintf("   %s\n\n", strings.Join(plan.Features[:min(3, len(plan.Features))], ", "))
+	}
+
+	msg += "💡 *Как подписаться:*\n"
+	msg += "`/subscribe starter monthly` — Starter на месяц\n"
+	msg += "`/subscribe pro yearly` — Pro на год (экономия 30%%)\n"
+	msg += "`/subscribe free` — Free навсегда"
+
 	ph.bot.sendMessage(chatID, msg)
+}
+
+// HandleMySubscription — обрабатывает /my_subscription.
+func (ph *PaymentHandlers) HandleMySubscription(chatID int64) {
+	clientID := fmt.Sprintf("tg:%d", chatID)
+	subs := ph.subscriptionStore.ListSubscriptions(clientID)
+
+	if len(subs) == 0 {
+		ph.bot.sendMessage(chatID, "📭 У вас нет подписок.\n\nИспользуйте /subscribe для выбора плана.")
+		return
+	}
+
+	// Показываем все подписки
+	for _, sub := range subs {
+		plan, _ := ph.planStore.GetPlan(sub.PlanID)
+		planName := sub.PlanID
+		if plan.ID != "" {
+			planName = plan.Name
+		}
+
+		statusEmoji := "⏳"
+		switch sub.Status {
+		case billing.SubscriptionStatusActive:
+			statusEmoji = "✅"
+		case billing.SubscriptionStatusCancelled:
+			statusEmoji = "❌"
+		case billing.SubscriptionStatusExpired:
+			statusEmoji = "⚠️"
+		case billing.SubscriptionStatusPending:
+			statusEmoji = "💳"
+		}
+
+		msg := fmt.Sprintf(
+			"%s *Подписка*\n\n"+
+				"📦 План: *%s*\n"+
+				"📅 Период: *%s*\n"+
+				"📊 Статус: *%s*\n",
+			statusEmoji, planName, formatPeriod(sub.Period), sub.Status,
+		)
+
+		if sub.Status == billing.SubscriptionStatusActive {
+			msg += fmt.Sprintf(
+				"📅 Следующее списание: *%s*\n"+
+					"💰 Сумма: *%.0f ₽*\n",
+				sub.NextBillingDate.Format("02.01.2006"),
+				billing.USDtoRUB(getSubscriptionAmount(plan, sub.Period)),
+			)
+		}
+
+		msg += fmt.Sprintf(
+			"🕐 Начало: *%s*\n",
+			sub.StartedAt.Format("02.01.2006"),
+		)
+
+		if sub.CancelledAt != nil {
+			msg += fmt.Sprintf("❌ Отменена: *%s*\n", sub.CancelledAt.Format("02.01.2006"))
+		}
+
+		// Добавляем кнопки
+		var keyboard [][]InlineButton
+		if sub.Status == billing.SubscriptionStatusActive {
+			keyboard = [][]InlineButton{
+				{{Text: "❌ Отменить подписку", CallbackData: "cancel_sub:" + sub.ID}},
+			}
+		}
+
+		if keyboard != nil {
+			ph.bot.sendMessageWithKeyboard(chatID, msg, keyboard)
+		} else {
+			ph.bot.sendMessage(chatID, msg)
+		}
+	}
+}
+
+// HandleCancel — обрабатывает /cancel [subscription_id].
+func (ph *PaymentHandlers) HandleCancel(chatID int64, args []string) {
+	clientID := fmt.Sprintf("tg:%d", chatID)
+	subs := ph.subscriptionStore.ListSubscriptions(clientID)
+
+	if len(subs) == 0 {
+		ph.bot.sendMessage(chatID, "📭 У вас нет подписок для отмены.")
+		return
+	}
+
+	// Если не указан ID — отменяем первую активную
+	var targetSub *billing.Subscription
+	if len(args) > 0 {
+		subID := args[0]
+		var ok bool
+		targetSub, ok = ph.subscriptionStore.GetSubscription(subID)
+		if !ok {
+			ph.bot.sendMessage(chatID, fmt.Sprintf("❌ Подписка «%s» не найдена.", subID))
+			return
+		}
+	} else {
+		for _, sub := range subs {
+			if sub.Status == billing.SubscriptionStatusActive {
+				targetSub = sub
+				break
+			}
+		}
+	}
+
+	if targetSub == nil {
+		ph.bot.sendMessage(chatID, "⚠ Нет активных подписок для отмены.")
+		return
+	}
+
+	if targetSub.Status != billing.SubscriptionStatusActive {
+		ph.bot.sendMessage(chatID, fmt.Sprintf("⚠ Подписка уже %s.", targetSub.Status))
+		return
+	}
+
+	// Подтверждение отмены
+	msg := fmt.Sprintf(
+		"⚠ *Подтверждение отмены*\n\n"+
+			"📦 План: *%s*\n"+
+			"📅 Период: *%s*\n"+
+			"💰 Вы потеряете доступ: *%s*\n\n"+
+			"Вы уверены?",
+		targetSub.PlanID, formatPeriod(targetSub.Period),
+		targetSub.NextBillingDate.Format("02.01.2006"),
+	)
+
+	keyboard := [][]InlineButton{
+		{
+			{Text: "✅ Да, отменить", CallbackData: "confirm_cancel:" + targetSub.ID},
+			{Text: "❌ Нет, оставить", CallbackData: "dismiss"},
+		},
+	}
+	ph.bot.sendMessageWithKeyboard(chatID, msg, keyboard)
+}
+
+// HandleCallback — обрабатывает callback от inline кнопок.
+func (ph *PaymentHandlers) HandleCallback(chatID int64, callbackData string) {
+	parts := strings.SplitN(callbackData, ":", 2)
+	action := parts[0]
+
+	switch action {
+	case "cancel_sub":
+		if len(parts) < 2 {
+			return
+		}
+		subID := parts[1]
+		ph.HandleCancel(chatID, []string{subID})
+
+	case "confirm_cancel":
+		if len(parts) < 2 {
+			return
+		}
+		subID := parts[1]
+		ph.cancelSubscription(chatID, subID, false)
+
+	case "dismiss":
+		// Ничего не делаем, кнопка просто закрывается
+	}
+}
+
+// cancelSubscription — отменяет подписку.
+func (ph *PaymentHandlers) cancelSubscription(chatID int64, subID string, refund bool) {
+	err := ph.subscriptionStore.CancelSubscription(subID, refund)
+	if err != nil {
+		ph.logger.Error("failed to cancel subscription", "err", err, "sub", subID)
+		ph.bot.sendMessage(chatID, "❌ Ошибка отмены подписки. Попробуйте позже.")
+		return
+	}
+
+	ph.bot.sendMessage(chatID, "✅ Подписка отменена.\n\nВы можете продолжать пользоваться сервисом до конца оплаченного периода.")
 }
 
 // HandleWebhook — HTTP handler для вебхуков от Точки.
@@ -170,16 +398,48 @@ func (ph *PaymentHandlers) HandleWebhook(w http.ResponseWriter, r *http.Request)
 	// Обрабатываем событие
 	switch evt.Event {
 	case "payment.paid":
+		// Отмечаем счёт оплаченным
 		if err := ph.invoiceStore.MarkPaid(evt.InvoiceID); err != nil {
 			ph.logger.Error("failed to mark invoice paid", "err", err, "invoice", evt.InvoiceID)
-		} else {
-			ph.notifyPaymentSuccess(evt.InvoiceID)
 		}
-	default:
-		ph.logger.Info("unhandled webhook event", "event", evt.Event)
+
+		// Активируем подписку (если есть payment_method_id)
+		ph.activateSubscription(evt.InvoiceID, evt.PaymentMethodID)
+
+		// Уведомляем клиента
+		ph.notifyPaymentSuccess(evt.InvoiceID)
+
+	case "payment.rejected":
+		ph.logger.Warn("payment rejected", "invoice", evt.InvoiceID, "payment", evt.PaymentID)
+		// Можно уведомить клиента
+
+	case "payment.refunded":
+		ph.logger.Info("payment refunded", "invoice", evt.InvoiceID, "payment", evt.PaymentID)
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// activateSubscription — активирует подписку после успешной оплаты.
+func (ph *PaymentHandlers) activateSubscription(invoiceID, paymentMethodID string) {
+	inv, ok := ph.invoiceStore.GetInvoice(invoiceID)
+	if !ok {
+		return
+	}
+
+	// Ищем pending подписку для этого клиента
+	subs := ph.subscriptionStore.ListSubscriptions(inv.ClientID)
+	for _, sub := range subs {
+		if sub.Status == billing.SubscriptionStatusPending {
+			// Обновляем подписку с payment_method_id и активируем
+			sub.PaymentMethodID = paymentMethodID
+			sub.Status = billing.SubscriptionStatusActive
+			sub.LastPaymentID = inv.ID
+			// Сохраняем (нужен метод UpdateSubscription в store)
+			ph.logger.Info("subscription activated", "sub", sub.ID, "customer", inv.ClientID, "method", paymentMethodID)
+			break
+		}
+	}
 }
 
 // notifyPaymentSuccess — отправляет уведомление об успешной оплате.
@@ -205,7 +465,8 @@ func (ph *PaymentHandlers) notifyPaymentSuccess(invoiceID string) {
 			"📦 План: *%s*\n"+
 			"💰 Сумма: *%.2f ₽*\n"+
 			"🧾 Счёт: `%s`\n\n"+
-			"Спасибо за подписку! 🎉",
+			"🎉 Подписка активирована!\n"+
+			"🔄 Карта сохранена для автоматического продления.",
 		planName, inv.Amount, inv.ID,
 	)
 	ph.bot.sendMessage(chatID, msg)
@@ -236,4 +497,51 @@ func formatFeatures(features []string) string {
 		result += fmt.Sprintf("• %s\n", f)
 	}
 	return result
+}
+
+// formatPeriod — форматирует период для отображения.
+func formatPeriod(period billing.BillingPeriod) string {
+	switch period {
+	case billing.PeriodMonthly:
+		return "Месяц"
+	case billing.PeriodQuarterly:
+		return "Квартал (3 мес)"
+	case billing.PeriodYearly:
+		return "Год"
+	default:
+		return string(period)
+	}
+}
+
+// getSubscriptionAmount — возвращает сумму подписки для периода.
+func getSubscriptionAmount(plan billing.Plan, period billing.BillingPeriod) float64 {
+	prices := plan.GetPrices()
+	for _, p := range prices {
+		if p.Period == period {
+			return p.Total
+		}
+	}
+	return plan.PriceMonthly
+}
+
+// min — возвращает минимум из двух чисел.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// InlineButton — кнопка inline клавиатуры.
+type InlineButton struct {
+	Text         string `json:"text"`
+	URL          string `json:"url,omitempty"`
+	CallbackData string `json:"callback_data,omitempty"`
+}
+
+// sendMessageWithKeyboard — отправляет сообщение с inline клавиатурой (заглушка).
+func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, keyboard [][]InlineButton) {
+	// TODO: Реализовать отправку с inline кнопками через Telegram API
+	// Пока просто отправляем текст
+	b.sendMessage(chatID, text)
 }

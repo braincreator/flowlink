@@ -1,4 +1,4 @@
-// Package billing — Точка Банк: SBP динамический QR, OAuth2, webhook.
+// Package billing — Точка Банк Acquiring: recurring payments, OAuth2, webhooks.
 package billing
 
 import (
@@ -14,12 +14,13 @@ import (
 )
 
 const (
-	tochkaDefaultBaseURL = "https://enter.tochka.com/uapi"
-	tochkaTokenPath      = "/oauth2/token"
-	tochkaSBPDynamicQR   = "/v2/sbp/c2b/qr/dynamic"
-	tochkaSBPStatus      = "/v2/sbp/c2b/qr/%s/status"
-	tochkaSBPRefund      = "/v2/sbp/c2b/qr/refund"
-	tochkaAccountPath    = "/v2/accounts/%s"
+	tochkaDefaultBaseURL      = "https://enter.tochka.com/uapi"
+	tochkaTokenPath           = "/oauth2/token"
+	tochkaAcquiringPayment    = "/v2/acquiring/payments"
+	tochkaAcquiringPaymentID  = "/v2/acquiring/payments/%s"
+	tochkaAcquiringPaymentStatus = "/v2/acquiring/payments/%s/status"
+	tochkaAcquiringRefund     = "/v2/acquiring/payments/%s/refund"
+	tochkaAccountPath         = "/v2/accounts/%s"
 )
 
 // TokenCache — thread-safe кэш OAuth2 токена.
@@ -177,70 +178,178 @@ func (c *TochkaClient) doJSON(method, path string, reqBody any) ([]byte, int, er
 	return body, resp.StatusCode, nil
 }
 
-// --- PaymentGateway implementation ---
+// --- Acquiring API ---
 
-// CreatePayment — создаёт SBP динамический QR для счёта.
-func (c *TochkaClient) CreatePayment(invoice *Invoice, returnURL string) (*PaymentSession, error) {
-	rubAmount := USDtoRUB(invoice.Amount)
-	if invoice.Currency != "RUB" {
-		rubAmount = USDtoRUB(invoice.Amount)
-	}
-
-	session, err := c.CreateSBPPayment(rubAmount, invoice.ID, invoice.Description)
-	if err != nil {
-		return nil, err
-	}
-	return session, nil
+// TochkaAcquiringRequest — запрос на создание платежа.
+type TochkaAcquiringRequest struct {
+	Amount            int64               `json:"amount"`             // копейки
+	OrderID           string              `json:"order_id"`
+	Customer          TochkaCustomer      `json:"customer"`
+	PaymentMethod     string              `json:"payment_method,omitempty"`     // "bank_card"
+	SavePaymentMethod bool                `json:"save_payment_method,omitempty"`
+	PaymentMethodID   string              `json:"payment_method_id,omitempty"`  // для recurring
+	Receipt           *TochkaReceipt      `json:"receipt,omitempty"`
 }
 
-// CreateSBPPayment — создаёт динамический QR через СБП.
-func (c *TochkaClient) CreateSBPPayment(amount float64, orderID, purpose string) (*PaymentSession, error) {
-	reqBody := map[string]interface{}{
-		"amount":          amount,
-		"currency":        "RUB",
-		"payment_purpose": purpose,
-		"order_id":        orderID,
+// TochkaCustomer — данные клиента.
+type TochkaCustomer struct {
+	Email string `json:"email"`
+}
+
+// TochkaReceipt — чек для 54-ФЗ.
+type TochkaReceipt struct {
+	Items []TochkaReceiptItem `json:"items"`
+}
+
+// TochkaReceiptItem — позиция в чеке.
+type TochkaReceiptItem struct {
+	Name     string `json:"name"`
+	Price    int64  `json:"price"`    // копейки
+	Quantity int    `json:"quantity"`
+	VATCode  int    `json:"vat_code"` // 1 = НДС 20%
+}
+
+// TochkaAcquiringResponse — ответ на создание платежа.
+type TochkaAcquiringResponse struct {
+	PaymentID       string `json:"payment_id"`
+	PaymentMethodID string `json:"payment_method_id"`
+	PaymentURL      string `json:"payment_url"` // ссылка на оплату
+	Status          string `json:"status"`
+}
+
+// TochkaPaymentStatusResponse — ответ на запрос статуса.
+type TochkaPaymentStatusResponse struct {
+	Status         string `json:"status"` // pending, paid, rejected
+	Amount         int64  `json:"amount"`
+	PaymentMethodID string `json:"payment_method_id"`
+	PaidAt         string `json:"paid_at"`
+}
+
+// CreatePayment — создаёт первый платёж с сохранением карты.
+// Используется для подписки: save_payment_method = true.
+func (c *TochkaClient) CreatePayment(invoice *Invoice, returnURL string) (*PaymentSession, error) {
+	// Конвертируем USD → RUB → копейки
+	rubAmount := USDtoRUB(invoice.Amount)
+	kopecks := int64(rubAmount * 100)
+
+	_ = invoice.Description // plan parsed from description
+	
+	req := TochkaAcquiringRequest{
+		Amount:  kopecks,
+		OrderID: invoice.ID,
+		Customer: TochkaCustomer{
+			Email: invoice.ClientID + "@flowlink.cloud", // fallback email
+		},
+		PaymentMethod:     "bank_card",
+		SavePaymentMethod: true, // KEY: сохранить карту для recurring
+		Receipt: &TochkaReceipt{
+			Items: []TochkaReceiptItem{
+				{
+					Name:     invoice.Description,
+					Price:    kopecks,
+					Quantity: 1,
+					VATCode:  1,
+				},
+			},
+		},
 	}
 
-	body, status, err := c.doJSON("POST", tochkaSBPDynamicQR, reqBody)
+	body, status, err := c.doJSON("POST", tochkaAcquiringPayment, req)
 	if err != nil {
-		return nil, fmt.Errorf("tochka create sbp payment: %w", err)
+		return nil, fmt.Errorf("tochka create payment: %w", err)
 	}
 	if status != http.StatusOK && status != http.StatusCreated {
-		return nil, fmt.Errorf("tochka create sbp payment: status %d, body: %s", status, string(body))
+		return nil, fmt.Errorf("tochka create payment: status %d, body: %s", status, string(body))
 	}
 
-	var resp struct {
-		QRCodeID string `json:"qr_code_id"`
-		Payload  string `json:"payload"`
-	}
+	var resp TochkaAcquiringResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("tochka sbp response parse: %w", err)
+		return nil, fmt.Errorf("tochka payment response parse: %w", err)
 	}
 
-	paymentURL := ""
-	if resp.Payload != "" {
-		paymentURL = "https://qr.nspk.ru/" + resp.Payload + ".png"
-	}
-
-	c.logger.Info("sbp payment created", "qr_id", resp.QRCodeID, "amount", amount)
+	c.logger.Info("acquiring payment created", "payment_id", resp.PaymentID, "order", invoice.ID, "amount", kopecks)
 
 	return &PaymentSession{
-		PaymentURL: paymentURL,
-		PaymentID:  resp.QRCodeID,
-		QRPayload:  resp.Payload,
-		Status:     "pending",
+		PaymentURL:      resp.PaymentURL,
+		PaymentID:       resp.PaymentID,
+		PaymentMethodID: resp.PaymentMethodID,
+		Status:          resp.Status,
 	}, nil
 }
 
-// CheckPayment — проверяет статус платежа по qr_code_id.
+// CreateRecurringPayment — создаёт повторный платёж по сохранённой карте.
+func (c *TochkaClient) CreateRecurringPayment(customerEmail, savedMethodID, planID string, period BillingPeriod) (*PaymentSession, error) {
+	planStore := NewPlanStore()
+	plan, ok := planStore.GetPlan(planID)
+	if !ok {
+		return nil, fmt.Errorf("plan %s not found", planID)
+	}
+
+	// Цена с учётом периода
+	prices := plan.GetPrices()
+	var totalPrice float64
+	for _, p := range prices {
+		if p.Period == period {
+			totalPrice = p.Total
+			break
+		}
+	}
+
+	// Конвертируем USD → RUB → копейки
+	rubAmount := USDtoRUB(totalPrice)
+	kopecks := int64(rubAmount * 100)
+
+	orderID := fmt.Sprintf("recurring-%s-%s-%d", customerEmail, planID, time.Now().Unix())
+
+	req := TochkaAcquiringRequest{
+		Amount:  kopecks,
+		OrderID: orderID,
+		Customer: TochkaCustomer{
+			Email: customerEmail,
+		},
+		PaymentMethodID: savedMethodID, // токен сохранённой карты
+		Receipt: &TochkaReceipt{
+			Items: []TochkaReceiptItem{
+				{
+					Name:     fmt.Sprintf("FlowLink %s (%s)", plan.Name, period),
+					Price:    kopecks,
+					Quantity: 1,
+					VATCode:  1,
+				},
+			},
+		},
+	}
+
+	body, status, err := c.doJSON("POST", tochkaAcquiringPayment, req)
+	if err != nil {
+		return nil, fmt.Errorf("tochka recurring payment: %w", err)
+	}
+	if status != http.StatusOK && status != http.StatusCreated {
+		return nil, fmt.Errorf("tochka recurring payment: status %d, body: %s", status, string(body))
+	}
+
+	var resp TochkaAcquiringResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("tochka recurring response parse: %w", err)
+	}
+
+	c.logger.Info("recurring payment created", "payment_id", resp.PaymentID, "method", savedMethodID, "amount", kopecks)
+
+	return &PaymentSession{
+		PaymentID:       resp.PaymentID,
+		PaymentMethodID: resp.PaymentMethodID,
+		Status:          resp.Status,
+	}, nil
+}
+
+// CheckPayment — проверяет статус платежа по payment_id.
 func (c *TochkaClient) CheckPayment(paymentID string) (*PaymentStatus, error) {
 	return c.GetPaymentStatus(paymentID)
 }
 
-// GetPaymentStatus — возвращает статус SBP платежа.
-func (c *TochkaClient) GetPaymentStatus(qrCodeID string) (*PaymentStatus, error) {
-	path := fmt.Sprintf(tochkaSBPStatus, qrCodeID)
+// GetPaymentStatus — возвращает статус платежа.
+func (c *TochkaClient) GetPaymentStatus(paymentID string) (*PaymentStatus, error) {
+	path := fmt.Sprintf(tochkaAcquiringPaymentStatus, paymentID)
 	body, status, err := c.doJSON("GET", path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("tochka get payment status: %w", err)
@@ -249,11 +358,7 @@ func (c *TochkaClient) GetPaymentStatus(qrCodeID string) (*PaymentStatus, error)
 		return nil, fmt.Errorf("tochka get payment status: status %d, body: %s", status, string(body))
 	}
 
-	var resp struct {
-		Status string  `json:"status"`
-		Amount float64 `json:"amount"`
-		PaidAt string  `json:"paid_at"`
-	}
+	var resp TochkaPaymentStatusResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("tochka status parse: %w", err)
 	}
@@ -267,10 +372,11 @@ func (c *TochkaClient) GetPaymentStatus(qrCodeID string) (*PaymentStatus, error)
 	}
 
 	return &PaymentStatus{
-		PaymentID: qrCodeID,
-		Status:    resp.Status,
-		Amount:    resp.Amount,
-		PaidAt:    paidAt,
+		PaymentID:       paymentID,
+		Status:          resp.Status,
+		Amount:          float64(resp.Amount) / 100, // копейки → рубли
+		PaidAt:          paidAt,
+		PaymentMethodID: resp.PaymentMethodID,
 	}, nil
 }
 
@@ -279,14 +385,16 @@ func (c *TochkaClient) Refund(paymentID string, amount float64) error {
 	return c.RefundPayment(paymentID, amount)
 }
 
-// RefundPayment — создаёт возврат по SBP транзакции.
-func (c *TochkaClient) RefundPayment(refTransactionID string, amount float64) error {
+// RefundPayment — создаёт возврат по платежу.
+func (c *TochkaClient) RefundPayment(paymentID string, amount float64) error {
+	kopecks := int64(amount * 100)
+	path := fmt.Sprintf(tochkaAcquiringRefund, paymentID)
+	
 	reqBody := map[string]interface{}{
-		"ref_transaction_id": refTransactionID,
-		"amount":             amount,
+		"amount": kopecks,
 	}
 
-	body, status, err := c.doJSON("POST", tochkaSBPRefund, reqBody)
+	body, status, err := c.doJSON("POST", path, reqBody)
 	if err != nil {
 		return fmt.Errorf("tochka refund request: %w", err)
 	}
@@ -294,29 +402,38 @@ func (c *TochkaClient) RefundPayment(refTransactionID string, amount float64) er
 		return fmt.Errorf("tochka refund failed: status %d, body: %s", status, string(body))
 	}
 
-	c.logger.Info("refund created", "transaction", refTransactionID, "amount", amount)
+	c.logger.Info("refund created", "payment", paymentID, "amount", kopecks)
 	return nil
 }
 
 // WebhookVerify — верифицирует webhook от Точки.
-// Простая реализация: парсит JSON body. Для production добавить HMAC.
+// Парсит JSON body, извлекает статус платежа.
 func (c *TochkaClient) WebhookVerify(body []byte, signature string) (*WebhookEvent, error) {
 	var evt struct {
-		Status string  `json:"status"`
-		QRCodeID string `json:"qr_code_id"`
-		Amount float64  `json:"amount"`
-		OrderID string  `json:"order_id"`
+		Event          string `json:"event"` // payment.paid, payment.rejected, payment.refunded
+		PaymentID      string `json:"payment_id"`
+		OrderID         string `json:"order_id"`
+		Status         string `json:"status"`
+		Amount         int64  `json:"amount"`
+		PaymentMethodID string `json:"payment_method_id"`
 	}
 
 	if err := json.Unmarshal(body, &evt); err != nil {
 		return nil, fmt.Errorf("tochka webhook parse: %w", err)
 	}
 
+	// Нормализуем event
+	eventType := evt.Event
+	if eventType == "" {
+		eventType = "payment." + evt.Status
+	}
+
 	return &WebhookEvent{
-		Event:     "payment." + evt.Status,
-		InvoiceID: evt.OrderID,
-		PaymentID: evt.QRCodeID,
-		Amount:    evt.Amount,
+		Event:           eventType,
+		InvoiceID:       evt.OrderID,
+		PaymentID:       evt.PaymentID,
+		Amount:          float64(evt.Amount) / 100,
+		PaymentMethodID: evt.PaymentMethodID,
 	}, nil
 }
 
@@ -339,6 +456,17 @@ func (c *TochkaClient) GetBalance() (float64, error) {
 	}
 
 	return resp.Balance, nil
+}
+
+// parsePlanFromDescription — извлекает план из описания счета.
+func parsePlanFromDescription(desc string) (Plan, bool) {
+	ps := NewPlanStore()
+	for _, plan := range ps.ListPlans() {
+		if plan.ID != "free" && plan.ID != "enterprise" {
+			return plan, true
+		}
+	}
+	return Plan{}, false
 }
 
 // Ensure TochkaClient implements PaymentGateway.
