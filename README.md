@@ -2,9 +2,11 @@
 
 > Open-source self-hosted серверное управление. Альтернатива FleetDeck и Dexposure.
 
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://hub.docker.com/r/flowlink/relay)
+[![Release](https://img.shields.io/github/v/release/braincreator/flowlink?color=blue)](https://github.com/braincreator/flowlink/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/braincreator/flowlink/ci.yml?branch=main&label=CI)](https://github.com/braincreator/flowlink/actions)
 
 **FlowLink** — SaaS-платформа удалённого управления серверами через AI. Клиент устанавливает один бинарник (~5MB) — вы управляете его инфраструктурой через OpenClaw или Telegram.
 
