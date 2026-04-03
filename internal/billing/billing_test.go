@@ -21,7 +21,7 @@ func TestPlanLimits(t *testing.T) {
 	ps := NewPlanStore()
 
 	// Проверяем что все предустановленные планы существуют
-	plans := []string{"free", "starter", "business", "enterprise"}
+	plans := []string{"free", "starter", "pro", "enterprise"}
 	for _, id := range plans {
 		p, ok := ps.GetPlan(id)
 		if !ok {
@@ -34,11 +34,11 @@ func TestPlanLimits(t *testing.T) {
 
 	// Проверяем лимиты free
 	free, _ := ps.GetPlan("free")
-	if free.MaxAgents != 1 {
-		t.Errorf("free.MaxAgents = %d, ожидали 1", free.MaxAgents)
+	if free.MaxAgents != 3 {
+		t.Errorf("free.MaxAgents = %d, ожидали 3", free.MaxAgents)
 	}
-	if free.MaxCommands != 100 {
-		t.Errorf("free.MaxCommands = %d, ожидали 100", free.MaxCommands)
+	if free.MaxCommands != 500 {
+		t.Errorf("free.MaxCommands = %d, ожидали 500", free.MaxCommands)
 	}
 	if free.PriceMonthly != 0 {
 		t.Errorf("free.PriceMonthly = %f, ожидали 0", free.PriceMonthly)
@@ -120,24 +120,24 @@ func TestCheckLimit(t *testing.T) {
 
 	clientID := "client-limits"
 
-	// Free план: 100 команд
-	for i := 0; i < 99; i++ {
+	// Free план: 500 команд
+	for i := 0; i < 499; i++ {
 		ut.RecordCommand(clientID)
 	}
 
 	check := ut.CheckLimit(clientID, ResourceCommands, "free")
 	if !check.CanProceed {
-		t.Error("99 команд — должно быть можно продолжать")
+		t.Error("499 команд — должно быть можно продолжать")
 	}
 	if check.Remaining != 1 {
 		t.Errorf("remaining = %d, ожидали 1", check.Remaining)
 	}
 
-	// 100-я команда — последний
+	// 500-я команда — последний
 	ut.RecordCommand(clientID)
 	check = ut.CheckLimit(clientID, ResourceCommands, "free")
 	if check.CanProceed {
-		t.Error("100 команд — лимит исчерпан, нельзя продолжать")
+		t.Error("500 команд — лимит исчерпан, нельзя продолжать")
 	}
 
 	// Безлимитный план
@@ -150,16 +150,16 @@ func TestCheckLimit(t *testing.T) {
 	}
 
 	// Storage лимит
-	ut.UpdateStorage(clientID, 99*MB)
+	ut.UpdateStorage(clientID, 499*MB)
 	check = ut.CheckLimit(clientID, ResourceStorage, "free")
 	if !check.CanProceed {
-		t.Error("99MB < 100MB — можно")
+		t.Error("499MB < 500MB — можно")
 	}
 
-	ut.UpdateStorage(clientID, 101*MB)
+	ut.UpdateStorage(clientID, 501*MB)
 	check = ut.CheckLimit(clientID, ResourceStorage, "free")
 	if check.CanProceed {
-		t.Error("101MB > 100MB — нельзя")
+		t.Error("501MB > 500MB — нельзя")
 	}
 
 	// Несуществующий план
@@ -185,8 +185,8 @@ func TestInvoiceGeneration(t *testing.T) {
 	if inv.Status != InvoiceStatusPending {
 		t.Errorf("статус = %s, ожидали pending", inv.Status)
 	}
-	if inv.Amount != 990 {
-		t.Errorf("сумма = %f, ожидали 990", inv.Amount)
+	if inv.Amount != 19 {
+		t.Errorf("сумма = %f, ожидали 19", inv.Amount)
 	}
 	if inv.Currency != "RUB" {
 		t.Errorf("валюта = %s, ожидали RUB", inv.Currency)
@@ -281,7 +281,7 @@ func TestSuspendClient(t *testing.T) {
 
 	// Создаём 2 счета
 	is.GenerateInvoice(clientID, "starter")
-	is.GenerateInvoice(clientID, "business")
+	is.GenerateInvoice(clientID, "pro")
 
 	// Приостанавливаем
 	err := is.SuspendClient(clientID)
@@ -409,7 +409,7 @@ func TestPlanStoreSetPlan(t *testing.T) {
 	custom := Plan{
 		ID: "custom", Name: "Кастомный",
 		MaxAgents: 50, MaxCommands: 50000, MaxBackups: 100,
-		MaxStorage: 50 * GB, PriceMonthly: 9990,
+		MaxStorage: 50 * GB, PriceMonthly: 49,
 		Features: []string{"telegram_bot", "audit", "mcp"},
 	}
 	ps.SetPlan(custom)

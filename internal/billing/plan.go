@@ -21,7 +21,7 @@ type Plan struct {
 	MaxCommands  int      `json:"max_commands"`   // в месяц (-1 = безлимит)
 	MaxBackups   int      `json:"max_backups"`    // хранить одновременно (-1 = безлимит)
 	MaxStorage   int64    `json:"max_storage"`    // байт для бэкапов (-1 = безлимит)
-	PriceMonthly float64  `json:"price_monthly"`  // RUB
+	PriceMonthly float64  `json:"price_monthly"`  // USD
 	Features     []string `json:"features"`       // ["telegram_bot", "audit", "mcp", "api"]
 }
 
@@ -38,27 +38,27 @@ func (p Plan) HasFeature(feature string) bool {
 // предустановленные планы
 var predefinedPlans = map[string]Plan{
 	"free": {
-		ID: "free", Name: "Бесплатный",
-		MaxAgents: 1, MaxCommands: 100, MaxBackups: 3, MaxStorage: 100 * MB,
+		ID: "free", Name: "Free",
+		MaxAgents: 3, MaxCommands: 500, MaxBackups: 5, MaxStorage: 500 * MB,
 		PriceMonthly: 0,
-		Features:     []string{"basic_exec"},
+		Features:     []string{"basic_exec", "cli", "telegram_bot", "sandbox", "kill_switch"},
 	},
 	"starter": {
-		ID: "starter", Name: "Стартовый",
-		MaxAgents: 3, MaxCommands: 1000, MaxBackups: 10, MaxStorage: 1 * GB,
-		PriceMonthly: 990,
-		Features:     []string{"telegram_bot", "audit"},
+		ID: "starter", Name: "Cloud Starter",
+		MaxAgents: 10, MaxCommands: 5000, MaxBackups: 20, MaxStorage: 5 * GB,
+		PriceMonthly: 19,
+		Features:     []string{"managed_relay", "auto_updates", "backups", "llm_proxy", "mcp", "email_support", "analytics"},
 	},
-	"business": {
-		ID: "business", Name: "Бизнес",
-		MaxAgents: 25, MaxCommands: 10000, MaxBackups: 50, MaxStorage: 10 * GB,
-		PriceMonthly: 4990,
-		Features:     []string{"telegram_bot", "audit", "mcp", "api"},
+	"pro": {
+		ID: "pro", Name: "Cloud Pro",
+		MaxAgents: 50, MaxCommands: -1, MaxBackups: -1, MaxStorage: 50 * GB,
+		PriceMonthly: 49,
+		Features:     []string{"priority_relay", "dedicated_ip", "sso", "team_management", "advanced_audit", "priority_support", "custom_integrations"},
 	},
 	"enterprise": {
-		ID: "enterprise", Name: "Корпоративный",
-		MaxAgents: 100, MaxCommands: -1, MaxBackups: -1, MaxStorage: 100 * GB,
-		PriceMonthly: 19990,
+		ID: "enterprise", Name: "Enterprise",
+		MaxAgents: -1, MaxCommands: -1, MaxBackups: -1, MaxStorage: -1,
+		PriceMonthly: 0, // custom pricing
 		Features:     []string{"all"},
 	},
 }
