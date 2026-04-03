@@ -34,6 +34,19 @@ type Config struct {
 
 	// E2EE — настройки end-to-end шифрования
 	E2EE E2EEConfig `json:"e2ee"`
+
+	// Payment — настройки платёжной системы
+	Payment PaymentConfig `json:"payment"`
+}
+
+// PaymentConfig — настройки платёжной интеграции.
+type PaymentConfig struct {
+	Provider        string `json:"provider"`            // "tochka", "manual"
+	TochkaClientID  string `json:"tochka_client_id"`
+	TochkaSecret    string `json:"tochka_secret"`
+	TochkaAccountID string `json:"tochka_account_id"`   // счёт/БИК
+	WebhookURL      string `json:"webhook_url"`
+	WebhookSecret   string `json:"webhook_secret"`
 }
 
 // SandboxConfig — ограничения для команд и файлов.

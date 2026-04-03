@@ -13,6 +13,38 @@ const (
 	GB = 1024 * MB
 )
 
+// BillingPeriod — период подписки.
+type BillingPeriod string
+
+const (
+	PeriodMonthly  BillingPeriod = "monthly"
+	PeriodQuarterly BillingPeriod = "quarterly"
+	PeriodYearly    BillingPeriod = "yearly"
+)
+
+// PeriodDiscount — скидки за длинные подписки (маркетинговые).
+var PeriodDiscount = map[BillingPeriod]float64{
+	PeriodMonthly:  1.0,   // 0%
+	PeriodQuarterly: 0.85,  // 15% off
+	PeriodYearly:    0.70,  // 30% off
+}
+
+// PeriodMonths — длительность в месяцах.
+var PeriodMonths = map[BillingPeriod]int{
+	PeriodMonthly:  1,
+	PeriodQuarterly: 3,
+	PeriodYearly:    12,
+}
+
+// PlanPrice — цена плана с учётом периода.
+type PlanPrice struct {
+	Period      BillingPeriod `json:"period"`
+	MonthlyEquiv float64       `json:"monthly_equiv"` // цена в пересчёте на месяц
+	Total       float64       `json:"total"`        // итоговая сумма за период
+	Savings     float64       `json:"savings"`       // экономия vs monthly (USD)
+	SavingsPct  string        `json:"savings_pct"`   // "15%", "30%"
+}
+
 // Plan — тарифный план.
 type Plan struct {
 	ID           string   `json:"id"`
@@ -21,8 +53,38 @@ type Plan struct {
 	MaxCommands  int      `json:"max_commands"`   // в месяц (-1 = безлимит)
 	MaxBackups   int      `json:"max_backups"`    // хранить одновременно (-1 = безлимит)
 	MaxStorage   int64    `json:"max_storage"`    // байт для бэкапов (-1 = безлимит)
-	PriceMonthly float64  `json:"price_monthly"`  // USD
+	PriceMonthly float64  `json:"price_monthly"`  // USD (базовая цена за месяц)
 	Features     []string `json:"features"`       // ["telegram_bot", "audit", "mcp", "api"]
+}
+
+// GetPrices — возвращает цены для всех периодов.
+func (p Plan) GetPrices() []PlanPrice {
+	prices := make([]PlanPrice, 0, 3)
+	for _, period := range []BillingPeriod{PeriodMonthly, PeriodQuarterly, PeriodYearly} {
+		discount := PeriodDiscount[period]
+		months := PeriodMonths[period]
+		monthlyEquiv := p.PriceMonthly * discount
+		total := monthlyEquiv * float64(months)
+		savings := p.PriceMonthly*float64(months) - total
+		var savingsPct string
+		switch period {
+		case PeriodMonthly:
+			savingsPct = ""
+		case PeriodQuarterly:
+			savingsPct = "15%"
+		case PeriodYearly:
+			savingsPct = "30%"
+		}
+
+		prices = append(prices, PlanPrice{
+			Period:      period,
+			MonthlyEquiv: monthlyEquiv,
+			Total:       total,
+			Savings:     savings,
+			SavingsPct:  savingsPct,
+		})
+	}
+	return prices
 }
 
 // HasFeature — проверяет наличие фичи в плане.
