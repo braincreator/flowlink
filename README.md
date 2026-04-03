@@ -128,6 +128,165 @@ make build
 
 ---
 
+## 🔐 Security Architecture
+
+FlowLink implements a **7-layer security pipeline** that evaluates every command before execution:
+
+```
+Command received
+       │
+       ▼
+  ┌──────────┐   NO
+  │ KillSwitch├──────────► DROP (log + notify)
+  └────┬─────┘
+       │ YES
+       ▼
+  ┌──────────┐   YES
+  │ Read-only├──────────► Execute read-only
+  └────┬─────┘
+       │ NO
+       ▼
+  ┌──────────┐   MATCH
+  │ Blacklist├──────────► REJECT (log + notify)
+  └────┬─────┘
+       │ NO MATCH
+       ▼
+  ┌──────────┐   VIOLATION
+  │ Sandbox  ├──────────► REJECT (out of bounds)
+  └────┬─────┘
+       │ OK
+       ▼
+  ┌──────────┐   NEEDS APPROVAL
+  │ Approval ├──────────► Wait for human
+  └────┬─────┘
+       │ APPROVED / AUTO
+       ▼
+  ┌──────────┐
+ │  Backup   │──► Snapshot before destructive ops
+  └────┬─────┘
+       │
+       ▼
+  ┌──────────┐
+ │  Execute  │──► Run command, log result
+  └──────────┘
+```
+
+### Key Security Properties
+
+| Property | Implementation |
+|----------|---------------|
+| **E2EE** | X25519 ECDH key exchange + AES-256-GCM for all command/response payloads |
+| **Relay is blind** | Relay forwards encrypted blobs — it has no access to plaintext commands |
+| **Device trust** | Owner explicitly approves each device via Telegram before E2EE is established |
+| **Zero-knowledge relay** | Even a compromised relay cannot read or modify commands |
+
+---
+
+## 🔒 End-to-End Encryption (E2EE)
+
+FlowLink encrypts **all command and response payloads** with end-to-end encryption. The relay never sees plaintext.
+
+### Key Generation
+
+```bash
+# Each owner has a keypair (auto-generated on first setup)
+flowlink-agent keys generate
+# → ~/.flowlink/e2ee_private.key  (X25519 private key)
+# → ~/.flowlink/e2ee_public.key   (X25519 public key)
+```
+
+- **Algorithm:** X25519 (Curve25519 ECDH)
+- **Symmetric cipher:** AES-256-GCM
+- **Key derivation:** HKDF-SHA256
+- **Private key permissions:** `0600` (owner read/write only)
+
+### Key Storage
+
+| File | Contents | Permissions |
+|------|----------|-------------|
+| `~/.flowlink/e2ee_private.key` | X25519 private key | `0600` |
+| `~/.flowlink/e2ee_public.key` | X25519 public key | `0644` |
+| `~/.flowlink/e2ee_devices.json` | Per-device shared secrets | `0600` |
+
+### Key Exchange Flow
+
+```
+  Owner (Telegram)          Relay (VPS)           Device (Server)
+       │                        │                       │
+  1. /keys generate          │                       │
+       │─── public key ────────►│                       │
+       │                        │                       │
+  2. Device pairing request   │                       │
+       │                        │◄── CODE ──────────────│
+       │                        │                       │
+  3. /approve_device CODE     │                       │
+       │                        │─── approval ──────────►│
+       │                        │                       │
+  4. E2EE handshake          │                       │
+       │◄═══ ECDH ══════════════╪═══════════════════════►│
+       │    (shared secret computed on both sides)       │
+       │                        │                       │
+  5. Encrypted communication │                       │
+       │◄══════ AES-256-GCM ════╪══════════════════════►│
+       │    (relay forwards opaque blobs)                │
+```
+
+### Key Rotation
+
+```bash
+# Rotate all keys (requires re-approval of all devices)
+/rotate
+
+# Automatic rotation (optional, in config)
+# "auto_rotate": true  — rotates every 30 days
+```
+
+> **Forward secrecy:** After rotation, old keys are securely deleted. Previously captured encrypted traffic cannot be decrypted. However, FlowLink does **not** implement per-session key ratcheting (like Signal) — rotation is manual/explicit to keep the system simple for server management use cases.
+
+---
+
+## 📱 Device Management
+
+FlowLink uses a **trust-on-first-approval** model. Every device must be explicitly approved by the owner via Telegram before it can execute commands.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/devices` | List all connected devices with status and E2EE info |
+| `/approve_device CODE` | Approve a new device (starts E2EE handshake) |
+| `/reject_device CODE` | Reject a pending pairing request |
+| `/revoke NAME` | Revoke device access (immediate disconnect) |
+| `/keys` | Show your E2EE key fingerprint and device count |
+| `/rotate` | Rotate E2EE keys (all devices must re-pair) |
+| `/device_info NAME` | Detailed device info (OS, IP, last seen, key fingerprint) |
+
+### Pairing Flow
+
+```
+  ┌─────────┐         ┌─────────┐         ┌─────────┐
+  │  Device  │         │  Relay   │         │  Owner  │
+  │ (Agent)  │         │         │         │(Telegram)│
+  └────┬────┘         └────┬────┘         └────┬────┘
+       │                   │                   │
+  1. flowlink-agent setup                      │
+       │── connect + public key ──►│            │
+       │                   │                   │
+  2.                  ┌── pending ──►        │
+       │                   │   /devices shows   │
+       │                   │   "⚠️ PENDING"     │
+       │                   │                   │
+  3.                   │              /approve_device ABC123
+       │                   │◄───────────────────│
+       │                   │                   │
+  4. ◄── E2EE established ──│                   │
+       │                   │                   │
+  5. ✅ Ready — encrypted commands flow         │
+       │═══════════════════│                   │
+```
+
+---
+
 ## ✨ Features
 
 - 🖥️ **Remote Shell** — execute commands with sandbox and timeouts
@@ -147,6 +306,13 @@ make build
 ---
 
 ## 🔧 Configuration
+
+### Agent Setup
+
+```bash
+# Interactive setup (generates config + keys)
+flowlink-agent setup --relay wss://your-relay.com --token YOUR_TOKEN
+```
 
 ### Agent — `~/.flowlink/config.yaml`
 
@@ -211,6 +377,16 @@ data_dir: "/var/lib/flowlink"
 
 # Rate limiting
 rate_limit_rpm: 60            # requests per minute
+```
+
+### E2EE Configuration
+
+```yaml
+# ~/.flowlink/config.yaml — E2EE section
+e2ee:
+  enabled: true               # Enable end-to-end encryption
+  auto_rotate: false           # Auto-rotate keys every 30 days
+  key_dir: "~/.flowlink"      # Directory for key storage
 ```
 
 ---
