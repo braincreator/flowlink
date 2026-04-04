@@ -1,5 +1,3 @@
-github.com/braincreator/flowlink-autoscale v0.0.0-20260403175230-282d1924fb0e h1:B4LC2LWWc8FaIZwiNjo4Tt8hAJyblndPCem8RF33pNo=
-github.com/braincreator/flowlink-autoscale v0.0.0-20260403175230-282d1924fb0e/go.mod h1:n1xb+H4NyYdGYYja530hI0hay7O39TTo3aYYzpgMTME=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=

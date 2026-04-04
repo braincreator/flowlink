@@ -9,7 +9,6 @@ require (
 )
 
 require (
-	github.com/braincreator/flowlink-autoscale v0.0.0-20260403175230-282d1924fb0e // indirect
 	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 )
