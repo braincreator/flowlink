@@ -596,10 +596,131 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 				Data:    payloadData,
 			})
 
+		case protocol.MsgExecDone:
+			// Выполнение команды завершено
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    EventExecComplete,
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgExecOutput:
+			// Вывод выполнения команды
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    "exec.output",
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgSysInfoResp:
+			// Ответ на запрос системной информации
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    "sysinfo.response",
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgFileResponse:
+			// Ответ на запрос файла
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    "file.response",
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgConfigAck:
+			// Подтверждение обновления конфигурации
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    EventAgentConfigUpdated,
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgTaskProgress:
+			// Прогресс выполнения задачи
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    "task.progress",
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgTaskDone:
+			// Задача завершена
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    "task.complete",
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgSkillList:
+			// Ответ на запрос списка навыков
+			// Сначала проверяем callback (для request/response паттерна)
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					if reqID, ok := m["request_id"].(string); ok {
+						if agent.TriggerCallback(reqID, msg.Payload) {
+							continue
+						}
+					}
+				}
+			}
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    "skill.list",
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
 		default:
-			// Для ответов (exec_output, exec_done, file_response, etc.) — callback mechanism
-			// Callback уже проверен выше, поэтому если мы здесь — логируем и игнорируем
-			r.logger.Debug("сообщение от агента", "agent", msg.AgentID, "type", msg.Type)
+			// Для неизвестных сообщений — логируем
+			r.logger.Debug("неизвестный тип сообщения от агента", "agent", msg.AgentID, "type", msg.Type)
 		}
 	}
 }
