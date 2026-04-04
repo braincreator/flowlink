@@ -269,10 +269,33 @@ func agentStart() {
 		os.Exit(0)
 	}()
 
-	// Connect to relay
-	if err := a.Connect(ctx); err != nil {
-		slog.Error("connection failed", "err", err)
-		os.Exit(1)
+	// Connect to relay with auto-reconnect
+	maxRetries := 0 // 0 = infinite
+	for attempt := 0; maxRetries == 0 || attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(min(30, 2<<uint(min(attempt, 4)))) * time.Second
+			slog.Info("reconnecting...", "attempt", attempt+1, "backoff", backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+		}
+		if err := a.Connect(ctx); err != nil {
+			slog.Error("connection failed", "err", err)
+			if attempt >= 10 {
+				slog.Error("too many retries, waiting 60s before continuing")
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(60 * time.Second):
+				}
+			}
+			continue
+		}
+		slog.Info("connected to relay")
+		// Connection lost — reconnect
+		slog.Warn("connection lost, will reconnect...")
 	}
 
 	// Block
