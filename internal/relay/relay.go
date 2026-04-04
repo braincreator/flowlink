@@ -242,6 +242,11 @@ func (r *Relay) Start() error {
 	// Nginx config generator endpoint
 	apiMux.HandleFunc("/api/v1/nginx-config", r.handleNginxConfig)
 
+	// Rate Limit endpoints
+	apiMux.HandleFunc("/api/v1/rate-limits", r.handleRateLimits)           // GET — список, POST — сброс статистики
+	apiMux.HandleFunc("/api/v1/rate-limits/", r.handleRateLimitByClient)  // GET/PUT/DELETE для конкретного клиента
+	apiMux.HandleFunc("/api/v1/rate-limits/stats", r.handleRateLimitStats) // GET — общая статистика
+
 	// Dashboard (с авторизацией через API token, регистрируем ДО middleware chain)
 	dashProvider := &dashboardProvider{r: r}
 	apiMux.Handle("/dashboard/", http.StripPrefix("/dashboard", dashboard.NewHandler(dashProvider, r.cfg.APIToken)))
@@ -1916,6 +1921,106 @@ func (r *Relay) handleAuthRevoke(w http.ResponseWriter, req *http.Request) {
 		"client_id": body.ClientID,
 		"count":     count,
 	})
+}
+
+// === Rate Limit HTTP Handlers ===
+
+// handleRateLimits — GET: список лимитов для всех клиентов, POST: сброс статистики.
+func (r *Relay) handleRateLimits(w http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case http.MethodGet:
+		clientStats := r.rateLimit.GetAllClientStats()
+		writeJSON(w, map[string]any{
+			"clients": clientStats,
+			"count":   len(clientStats),
+		})
+
+	case http.MethodPost:
+		// POST /api/v1/rate-limits/reset — сбросить всю статистику
+		r.rateLimit.ResetStats()
+		writeJSON(w, map[string]string{"status": "stats_reset"})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+	}
+}
+
+// handleRateLimitByClient — GET/PUT/DELETE для конкретного клиента.
+func (r *Relay) handleRateLimitByClient(w http.ResponseWriter, req *http.Request) {
+	// Извлекаем client_id из пути: /api/v1/rate-limits/{client_id}...
+	path := strings.TrimPrefix(req.URL.Path, "/api/v1/rate-limits/")
+	parts := strings.SplitN(path, "/", 2)
+	clientID := parts[0]
+
+	if clientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id обязателен")
+		return
+	}
+
+	switch req.Method {
+	case http.MethodGet:
+		// GET — статистика для конкретного клиента
+		stats := r.rateLimit.GetClientStats(clientID)
+		writeJSON(w, stats)
+
+	case http.MethodPut:
+		// PUT — обновить лимиты для клиента
+		var body struct {
+			MaxPerMin  *int `json:"max_per_min"`
+			MaxPerHour *int `json:"max_per_hour"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "неверный JSON")
+			return
+		}
+
+		if body.MaxPerMin == nil || body.MaxPerHour == nil {
+			writeError(w, http.StatusBadRequest, "max_per_min и max_per_hour обязательны")
+			return
+		}
+
+		r.rateLimit.SetClientLimits(clientID, *body.MaxPerMin, *body.MaxPerHour)
+		stats := r.rateLimit.GetClientStats(clientID)
+		writeJSON(w, map[string]any{
+			"status":    "updated",
+			"client_id": clientID,
+			"limits":    stats,
+		})
+
+	case http.MethodDelete:
+		// DELETE — сбросить кастомные лимиты (return to defaults)
+		r.rateLimit.ResetClientLimits(clientID)
+		writeJSON(w, map[string]string{
+			"status":    "reset",
+			"client_id": clientID,
+		})
+
+	case http.MethodPost:
+		// POST /api/v1/rate-limits/{client_id}/reset — сбросить счётчики клиента
+		if len(parts) == 2 && parts[1] == "reset" {
+			r.rateLimit.ResetClientCounters(clientID)
+			writeJSON(w, map[string]string{
+				"status":    "counters_reset",
+				"client_id": clientID,
+			})
+			return
+		}
+		writeError(w, http.StatusBadRequest, "используйте POST .../reset для сброса счётчиков")
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+	}
+}
+
+// handleRateLimitStats — GET /api/v1/rate-limits/stats — общая статистика.
+func (r *Relay) handleRateLimitStats(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		return
+	}
+
+	stats := r.rateLimit.GetStats()
+	writeJSON(w, stats)
 }
 
 func writeJSON(w http.ResponseWriter, data any) {

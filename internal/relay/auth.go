@@ -680,6 +680,20 @@ type RateLimiter struct {
 	maxPerMin  int
 	maxPerHour int
 	logger     *slog.Logger
+
+	// Statistics
+	totalRequests    int64
+	rejectedRequests int64
+	lastReset        time.Time
+
+	// Per-client limits (override defaults)
+	clientLimits sync.Map // client_id → *ClientLimitConfig
+}
+
+// ClientLimitConfig — конфигурация лимитов для конкретного клиента.
+type ClientLimitConfig struct {
+	MaxPerMin  int
+	MaxPerHour int
 }
 
 type rateWindow struct {
@@ -697,6 +711,7 @@ func NewRateLimiter(maxPerMin, maxPerHour int, logger *slog.Logger) *RateLimiter
 		maxPerMin:  maxPerMin,
 		maxPerHour: maxPerHour,
 		logger:     logger,
+		lastReset:  time.Now(),
 	}
 }
 
@@ -715,23 +730,32 @@ func (rl *RateLimiter) Check(clientID string) (bool, int) {
 	window.minuteWindow = filterTimestamps(window.minuteWindow, minuteAgo)
 	window.hourWindow = filterTimestamps(window.hourWindow, hourAgo)
 
+	// Получаем лимиты для клиента (override или defaults)
+	maxPerMin, maxPerHour := rl.getClientLimits(clientID)
+
 	// Проверяем лимиты
-	if len(window.minuteWindow) >= rl.maxPerMin {
+	if len(window.minuteWindow) >= maxPerMin {
 		// Retry after: конец текущей минуты
 		retryAfter := int(window.minuteWindow[0] + 60 - now)
 		if retryAfter < 1 {
 			retryAfter = 1
 		}
+		rl.mu.Lock()
+		rl.rejectedRequests++
+		rl.mu.Unlock()
 		rl.logger.Warn("rate limit превышен (minute)", "client_id", clientID, "count", len(window.minuteWindow))
 		return false, retryAfter
 	}
 
-	if len(window.hourWindow) >= rl.maxPerHour {
+	if len(window.hourWindow) >= maxPerHour {
 		// Retry after: конец текущего часа
 		retryAfter := int(window.hourWindow[0] + 3600 - now)
 		if retryAfter < 1 {
 			retryAfter = 1
 		}
+		rl.mu.Lock()
+		rl.rejectedRequests++
+		rl.mu.Unlock()
 		rl.logger.Warn("rate limit превышен (hour)", "client_id", clientID, "count", len(window.hourWindow))
 		return false, retryAfter
 	}
@@ -739,6 +763,10 @@ func (rl *RateLimiter) Check(clientID string) (bool, int) {
 	// Добавляем текущий запрос
 	window.minuteWindow = append(window.minuteWindow, now)
 	window.hourWindow = append(window.hourWindow, now)
+
+	rl.mu.Lock()
+	rl.totalRequests++
+	rl.mu.Unlock()
 
 	return true, 0
 }
@@ -756,6 +784,158 @@ func (rl *RateLimiter) getWindow(clientID string) *rateWindow {
 
 	actual, _ := rl.windows.LoadOrStore(clientID, window)
 	return actual.(*rateWindow)
+}
+
+// getClientLimits — возвращает лимиты для клиента (override или defaults).
+func (rl *RateLimiter) getClientLimits(clientID string) (int, int) {
+	if v, ok := rl.clientLimits.Load(clientID); ok {
+		cfg := v.(*ClientLimitConfig)
+		return cfg.MaxPerMin, cfg.MaxPerHour
+	}
+	return rl.maxPerMin, rl.maxPerHour
+}
+
+// SetClientLimits — устанавливает кастомные лимиты для клиента.
+func (rl *RateLimiter) SetClientLimits(clientID string, maxPerMin, maxPerHour int) {
+	cfg := &ClientLimitConfig{
+		MaxPerMin:  maxPerMin,
+		MaxPerHour: maxPerHour,
+	}
+	rl.clientLimits.Store(clientID, cfg)
+	rl.logger.Info("обновлены лимиты клиента",
+		"client_id", clientID,
+		"max_per_min", maxPerMin,
+		"max_per_hour", maxPerHour,
+	)
+}
+
+// ResetClientLimits — сбрасывает кастомные лимиты клиента (return to defaults).
+func (rl *RateLimiter) ResetClientLimits(clientID string) {
+	rl.clientLimits.Delete(clientID)
+	rl.logger.Info("сброшены лимиты клиента", "client_id", clientID)
+}
+
+// ClientStats — статистика rate limit для одного клиента.
+type ClientStats struct {
+	ClientID       string `json:"client_id"`
+	RequestsPerMin int    `json:"requests_per_min"` // лимит
+	Burst          int    `json:"burst"`            // лимит hour
+	UsedMin        int    `json:"used_min"`        // использовано за минуту
+	UsedHour       int    `json:"used_hour"`       // использовано за час
+	Status         string `json:"status"`         // ok | warning | exceeded
+}
+
+// RateLimitStats — общая статистика rate limiting.
+type RateLimitStats struct {
+	TotalRequests    int64         `json:"total_requests"`
+	RejectedRequests int64         `json:"rejected_requests"`
+	LastReset        time.Time     `json:"last_reset"`
+	DefaultMaxPerMin int           `json:"default_max_per_min"`
+	DefaultMaxPerHour int          `json:"default_max_per_hour"`
+	TopAbusers       []ClientStats `json:"top_abusers"` // топ по rejected
+}
+
+// GetClientStats — возвращает статистику для конкретного клиента.
+func (rl *RateLimiter) GetClientStats(clientID string) ClientStats {
+	window := rl.getWindow(clientID)
+	window.mu.Lock()
+	defer window.mu.Unlock()
+
+	now := time.Now().Unix()
+	minuteAgo := now - 60
+	hourAgo := now - 3600
+
+	// Очищаем старые записи
+	window.minuteWindow = filterTimestamps(window.minuteWindow, minuteAgo)
+	window.hourWindow = filterTimestamps(window.hourWindow, hourAgo)
+
+	maxPerMin, maxPerHour := rl.getClientLimits(clientID)
+	usedMin := len(window.minuteWindow)
+	usedHour := len(window.hourWindow)
+
+	// Определяем статус
+	status := "ok"
+	if usedMin >= maxPerMin || usedHour >= maxPerHour {
+		status = "exceeded"
+	} else if usedMin >= maxPerMin*8/10 || usedHour >= maxPerHour*8/10 {
+		status = "warning"
+	}
+
+	return ClientStats{
+		ClientID:       clientID,
+		RequestsPerMin: maxPerMin,
+		Burst:          maxPerHour,
+		UsedMin:        usedMin,
+		UsedHour:       usedHour,
+		Status:         status,
+	}
+}
+
+// GetAllClientStats — возвращает статистику для всех клиентов.
+func (rl *RateLimiter) GetAllClientStats() []ClientStats {
+	var stats []ClientStats
+
+	rl.windows.Range(func(key, value interface{}) bool {
+		clientID := key.(string)
+		stats = append(stats, rl.GetClientStats(clientID))
+		return true
+	})
+
+	return stats
+}
+
+// GetStats — возвращает общую статистику rate limiting.
+func (rl *RateLimiter) GetStats() RateLimitStats {
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
+
+	// Собираем топ абузеров
+	clientStats := rl.GetAllClientStats()
+
+	// Сортируем по rejected (в реальной реализации можно добавить rejected counter per client)
+	// Пока берём топ по использованию
+	topAbusers := make([]ClientStats, 0, 5)
+	for _, cs := range clientStats {
+		if cs.Status == "exceeded" || cs.Status == "warning" {
+			topAbusers = append(topAbusers, cs)
+		}
+		if len(topAbusers) >= 5 {
+			break
+		}
+	}
+
+	return RateLimitStats{
+		TotalRequests:     rl.totalRequests,
+		RejectedRequests:  rl.rejectedRequests,
+		LastReset:         rl.lastReset,
+		DefaultMaxPerMin:  rl.maxPerMin,
+		DefaultMaxPerHour: rl.maxPerHour,
+		TopAbusers:        topAbusers,
+	}
+}
+
+// ResetStats — сбрасывает статистику.
+func (rl *RateLimiter) ResetStats() {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	rl.totalRequests = 0
+	rl.rejectedRequests = 0
+	rl.lastReset = time.Now()
+
+	rl.logger.Info("статистика rate limit сброшена")
+}
+
+// ResetClientCounters — сбрасывает счётчики для конкретного клиента.
+func (rl *RateLimiter) ResetClientCounters(clientID string) {
+	window := rl.getWindow(clientID)
+	window.mu.Lock()
+	defer window.mu.Unlock()
+
+	window.minuteWindow = window.minuteWindow[:0]
+	window.hourWindow = window.hourWindow[:0]
+
+	rl.logger.Info("сброшены счётчики клиента", "client_id", clientID)
 }
 
 // filterTimestamps — фильтрует timestamps, оставляя только недавние.

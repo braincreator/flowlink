@@ -104,6 +104,7 @@ pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(-
   <a href="#/agents/" data-page="agents" style="padding-left:40px">📋 Детали</a>
   <a href="#/clients" data-page="clients">👥 Клиенты</a>
   <a href="#/exec" data-page="exec">⌨️ Выполнение</a>
+  <a href="#/rate-limits" data-page="rate-limits">⚡ Rate Limits</a>
   <a href="#/audit" data-page="audit">📋 Аудит</a>
   <a href="#/settings" data-page="settings">⚙️ Настройки</a>
 </nav>
@@ -173,6 +174,23 @@ pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(-
     </div>
   </div>
 </div>
+<!-- RATE LIMITS -->
+<div id="page-rate-limits" class="page">
+  <h1>Rate Limits</h1>
+  <div class="grid4" id="rate-stats-grid"></div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="margin:0">Клиенты</h2>
+      <div style="display:flex;gap:8px">
+        <button onclick="loadRateLimits()">🔄 Обновить</button>
+        <button class="danger" onclick="resetAllRateStats()">Сбросить статистику</button>
+      </div>
+    </div>
+    <table><thead><tr><th>Client ID</th><th>Requests/min</th><th>Burst (hour)</th><th>Used/min</th><th>Used/hour</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody id="rate-limits-tbody"></tbody></table>
+    <div class="empty" id="rate-empty" style="display:none">Нет данных о rate limits</div>
+  </div>
+</div>
 <!-- AUDIT -->
 <div id="page-audit" class="page">
   <h1>Аудит лог</h1>
@@ -233,7 +251,7 @@ function route(){
   const page=hash.replace('#/','').replace(/\/.*/,'')||'overview';
   const el=$(`#page-${page}`);
   if(el){el.classList.add('active');$$(`nav a[data-page="${page}"]`).forEach(a=>a.classList.add('active'))}
-  const loaders={overview:loadOverview,agents:loadAgents,clients:loadClients,exec:loadExecAgents,audit:loadAudit,settings:loadSettings,welcome:loadWelcome};
+  const loaders={overview:loadOverview,agents:loadAgents,clients:loadClients,exec:loadExecAgents,audit:loadAudit,settings:loadSettings,welcome:loadWelcome,'rate-limits':loadRateLimits};
   if(loaders[page])loaders[page]();
 }
 window.addEventListener('hashchange',route);
@@ -617,6 +635,112 @@ function viewClient(id){
       </div>
       <div class="modal-actions"><button onclick="closeModal()">Закрыть</button></div>`);
   }).catch(e=>{showModal(`<h3>Ошибка</h3><p>${e.message}</p><div class="modal-actions"><button onclick="closeModal()">OK</button></div>`)});
+}
+
+// === Rate Limits ===
+async function loadRateLimits(){
+  try{
+    const [stats,clients]=await Promise.all([
+      api('/rate-limits/stats'),
+      api('/rate-limits')
+    ]);
+
+    // Stats cards
+    const totalReq=stats.total_requests||0;
+    const rejected=stats.rejected_requests||0;
+    const rejectRate=totalReq>0?((rejected/totalReq)*100).toFixed(1):0;
+    const lastReset=stats.last_reset?new Date(stats.last_reset):null;
+
+    $('#rate-stats-grid').innerHTML=`
+      <div class="card stat"><div class="label">Всего запросов</div><div class="value">${totalReq}</div></div>
+      <div class="card stat"><div class="label">Отклонено</div><div class="value" style="color:var(--red)">${rejected}</div><div class="sub">${rejectRate}%</div></div>
+      <div class="card stat"><div class="label">Default лимит</div><div class="value">${stats.default_max_per_min}/${stats.default_max_per_hour}</div><div class="sub">min/hour</div></div>
+      <div class="card stat"><div class="label">Последний сброс</div><div class="value">${lastReset?timeAgo(lastReset):'-'}</div></div>
+    `;
+
+    // Clients table
+    const list=clients.clients||[];
+    const tbody=$('#rate-limits-tbody');
+    if(!list.length){tbody.innerHTML='';$('#rate-empty').style.display='block';return}
+    $('#rate-empty').style.display='none';
+
+    tbody.innerHTML=list.map(c=>{
+      const id=c.client_id;
+      const pctMin=c.requests_per_min>0?(c.used_min/c.requests_per_min*100):0;
+      const pctHour=c.burst>0?(c.used_hour/c.burst*100):0;
+      const maxPct=Math.max(pctMin,pctHour);
+      const statusColor=c.status==='exceeded'?'red':c.status==='warning'?'yellow':'green';
+      return `<tr>
+        <td><code style="font-size:12px">${id}</code></td>
+        <td>${c.requests_per_min}</td>
+        <td>${c.burst}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="bar-chart" style="width:80px;height:16px"><div class="bar" style="height:100%;width:${pctMin}%;background:${pctMin>80?'var(--red)':pctMin>50?'var(--yellow)':'var(--green)'}"></div></div>
+            <span style="font-size:12px">${c.used_min}</span>
+          </div>
+        </td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="bar-chart" style="width:80px;height:16px"><div class="bar" style="height:100%;width:${pctHour}%;background:${pctHour>80?'var(--red)':pctHour>50?'var(--yellow)':'var(--green)'}"></div></div>
+            <span style="font-size:12px">${c.used_hour}</span>
+          </div>
+        </td>
+        <td><span class="badge-on ${statusColor}">${c.status}</span></td>
+        <td>
+          <button class="sm" onclick="editRateLimit('${id}',${c.requests_per_min},${c.burst})">✏️</button>
+          <button class="sm" onclick="resetClientCounters('${id}')">🔄</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+
+function editRateLimit(clientId,curMin,curHour){
+  showModal(`<h3>Изменить лимиты</h3>
+    <p style="color:var(--dim);margin-bottom:12px">Client: <code>${clientId}</code></p>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div><label>Requests/min</label><input id="erl-min" type="number" value="${curMin}" min="1" style="width:100%"></div>
+      <div><label>Burst (requests/hour)</label><input id="erl-hour" type="number" value="${curHour}" min="1" style="width:100%"></div>
+    </div>
+    <div class="modal-actions">
+      <button onclick="closeModal()">Отмена</button>
+      <button class="danger" onclick="resetRateLimit('${clientId}')">Сбросить в default</button>
+      <button class="primary" onclick="saveRateLimit('${clientId}')">Сохранить</button>
+    </div>`);
+}
+
+async function saveRateLimit(clientId){
+  const maxPerMin=parseInt($('#erl-min').value)||30;
+  const maxPerHour=parseInt($('#erl-hour').value)||200;
+  try{
+    await api('/rate-limits/'+clientId,{method:'PUT',body:JSON.stringify({max_per_min:maxPerMin,max_per_hour:maxPerHour})});
+    closeModal();
+    loadRateLimits();
+  }catch(e){alert('Ошибка: '+e.message)}
+}
+
+async function resetRateLimit(clientId){
+  try{
+    await api('/rate-limits/'+clientId,{method:'DELETE'});
+    closeModal();
+    loadRateLimits();
+  }catch(e){alert('Ошибка: '+e.message)}
+}
+
+async function resetClientCounters(clientId){
+  try{
+    await api('/rate-limits/'+clientId+'/reset',{method:'POST'});
+    loadRateLimits();
+  }catch(e){alert('Ошибка: '+e.message)}
+}
+
+async function resetAllRateStats(){
+  if(!confirm('Сбросить всю статистику rate limits?'))return;
+  try{
+    await api('/rate-limits/reset',{method:'POST'});
+    loadRateLimits();
+  }catch(e){alert('Ошибка: '+e.message)}
 }
 
 // === Utils ===
