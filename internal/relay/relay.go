@@ -177,6 +177,11 @@ func (r *Relay) CreateFirstAgent(clientID, label string) (*AgentRegistration, er
 	return r.registry.RegisterAgent(clientID, label, []string{"default"}, runtime.GOOS, runtime.GOARCH)
 }
 
+// PoolList — возвращает список подключённых агентов (для тестов).
+func (r *Relay) PoolList() []*AgentConn {
+	return r.pool.List()
+}
+
 // Start — запускает WSS-сервер для агентов.
 func (r *Relay) Start() error {
 	// WSS endpoint для агентов
@@ -476,6 +481,32 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 					}
 				}
 			}
+		}
+
+		// Обработка сообщений от агента
+		switch msg.Type {
+		case protocol.MsgHeartbeat:
+			ack := protocol.NewMessage(protocol.MsgHeartbeatAck)
+			ack.AgentID = msg.AgentID
+			conn.WriteJSON(ack)
+
+		case protocol.MsgNeedsApproval, protocol.MsgApprovalRequest:
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    EventApprovalRequired,
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		default:
+			// Для ответов (exec_output, exec_done, file_response, etc.) — callback mechanism
+			// Callback уже проверен выше, поэтому если мы здесь — логируем и игнорируем
+			r.logger.Debug("сообщение от агента", "agent", msg.AgentID, "type", msg.Type)
 		}
 	}
 }
