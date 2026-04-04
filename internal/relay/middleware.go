@@ -3,9 +3,11 @@
 package relay
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -48,8 +50,15 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Пропускаем исключённые пути
-			if skipMap[r.URL.Path] {
+			// Пропускаем исключённые пути (exact match или prefix для /path/)
+			skip := false
+			for p := range skipMap {
+				if r.URL.Path == p || strings.HasPrefix(r.URL.Path, p) {
+					skip = true
+					break
+				}
+			}
+			if skip {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -60,8 +69,11 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 				return
 			}
 
-			// Получаем токен из заголовка
+			// Получаем токен из заголовка или query param
 			token := r.Header.Get("Authorization")
+			if token == "" {
+				token = r.URL.Query().Get("token")
+			}
 			if token == "" {
 				writeAuthError(w, "токен не указан", http.StatusUnauthorized)
 				return
@@ -204,8 +216,8 @@ func RequestLoggerMiddleware(logger *slog.Logger) Middleware {
 			duration := time.Since(start)
 			clientID := GetClientIDFromContext(r)
 
-			// Логируем все запросы, кроме health checks
-			if r.URL.Path != "/health" && r.URL.Path != "/metrics" {
+			// Логируем все запросы, кроме health checks и SSE
+			if r.URL.Path != "/health" && r.URL.Path != "/metrics" && r.URL.Path != "/api/v1/events" {
 				logger.Info("HTTP запрос",
 					"method", r.Method,
 					"path", r.URL.Path,
@@ -239,6 +251,21 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(status int) {
 	rw.status = status
 	rw.ResponseWriter.WriteHeader(status)
+}
+
+// Flush реализует http.Flusher для поддержки SSE streaming.
+func (rw *responseWriter) Flush() {
+	if f, ok := rw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack реализует http.Hijacker для поддержки WebSocket.
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
 }
 
 // === Recovery Middleware ===

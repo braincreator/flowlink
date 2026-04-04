@@ -208,11 +208,16 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/billing/invoices/", r.handleBillingInvoicePay)
 	apiMux.HandleFunc("/api/v1/billing/payment-methods", r.handleBillingPaymentMethods)
 
-	// Middleware chain
+	// Dashboard (с авторизацией через API token, регистрируем ДО middleware chain)
+	dashProvider := &dashboardProvider{r: r}
+	apiMux.Handle("/dashboard/", http.StripPrefix("/dashboard", dashboard.NewHandler(dashProvider, r.cfg.APIToken)))
+
+	// Middleware chain (dashboard имеет собственную авторизацию)
 	authCfg := AuthMiddlewareConfig{
 		AuthManager: r.auth,
 		StaticToken: r.cfg.APIToken,
 		Logger:      r.logger,
+		SkipPaths:   []string{"/dashboard/", "/dashboard"},
 	}
 
 	handler := Chain(
@@ -222,10 +227,6 @@ func (r *Relay) Start() error {
 		RateLimitMiddleware(r.rateLimit, r.logger),
 		AuthMiddleware(authCfg),
 	)(apiMux)
-
-	// Dashboard
-	dashProvider := &dashboardProvider{r: r}
-	http.Handle("/dashboard/", http.StripPrefix("/dashboard", dashboard.NewHandler(dashProvider)))
 
 	// Инициализируем TLS если нужно
 	var tlsConfig *tls.Config
@@ -1120,17 +1121,26 @@ func (r *Relay) handleClientByID(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// /api/v1/clients/{id}
-	if req.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
-		return
-	}
+	switch req.Method {
+	case http.MethodGet:
+		client, ok := r.registry.GetClient(clientID)
+		if !ok {
+			writeError(w, http.StatusNotFound, "клиент не найден")
+			return
+		}
+		writeJSON(w, client)
 
-	client, ok := r.registry.GetClient(clientID)
-	if !ok {
-		writeError(w, http.StatusNotFound, "клиент не найден")
-		return
+	case http.MethodDelete:
+		err := r.registry.DeactivateClient(clientID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]string{"status": "deactivated", "client_id": clientID})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
 	}
-	writeJSON(w, client)
 }
 
 // handleAgentRegister — POST: зарегистрировать агента (альтернативный endpoint).

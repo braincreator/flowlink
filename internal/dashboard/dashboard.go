@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 )
 
 //go:embed static
@@ -62,11 +63,36 @@ type DataProvider interface {
 }
 
 // NewHandler — возвращает http.Handler для dashboard routes.
-func NewHandler(dp DataProvider) http.Handler {
+// token — статический токен для авторизации (Bearer header или ?token= query param).
+func NewHandler(dp DataProvider, token string) http.Handler {
 	mux := http.NewServeMux()
 
-	// API endpoints для SPA
-	mux.HandleFunc("/api/overview", func(w http.ResponseWriter, r *http.Request) {
+	// Auth middleware для dashboard
+	authMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			authed := false
+			// Bearer token
+			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+				if strings.TrimPrefix(auth, "Bearer ") == token {
+					authed = true
+				}
+			}
+			// ?token= query param
+			if !authed && r.URL.Query().Get("token") == token {
+				authed = true
+			}
+			if !authed {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"code": "401", "error": "токен не указан"})
+				return
+			}
+			next(w, r)
+		}
+	}
+
+	// API endpoints для SPA (защищены)
+	mux.HandleFunc("/api/overview", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		clients := dp.DashboardClients()
 		agents := dp.DashboardAgents()
 		stats := dp.DashboardAuditStats()
@@ -81,26 +107,26 @@ func NewHandler(dp DataProvider) http.Handler {
 			"clients": clients,
 			"stats":   stats,
 		})
-	})
+	}))
 
-	mux.HandleFunc("/api/agents", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/agents", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"agents": dp.DashboardAgents()})
-	})
+	}))
 
-	mux.HandleFunc("/api/clients", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/clients", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"clients": dp.DashboardClients()})
-	})
+	}))
 
-	mux.HandleFunc("/api/audit", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/audit", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		stats := dp.DashboardAuditStats()
 		json.NewEncoder(w).Encode(map[string]any{"entries": stats.Entries, "total": stats.TotalEntries})
-	})
+	}))
 
-	// Static files
+	// Static files (SPA — index.html serves login page, auth via token)
 	sub, _ := fs.Sub(staticFS, "static")
 	fileServer := http.FileServer(http.FS(sub))
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if path == "/" {
 			path = "/index.html"
@@ -115,7 +141,7 @@ func NewHandler(dp DataProvider) http.Handler {
 
 		r.URL.Path = "/index.html"
 		fileServer.ServeHTTP(w, r)
-	})
+	}))
 
 	return mux
 }
