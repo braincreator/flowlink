@@ -223,6 +223,7 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/agents/skills/push", r.handleSkillPush)
 	apiMux.HandleFunc("/api/v1/agents/skills/list", r.handleSkillList)
 	apiMux.HandleFunc("/api/v1/agents/skills/delete", r.handleSkillDelete)
+	apiMux.HandleFunc("/api/v1/agents/config", r.handleAgentConfigUpdate) // PUT — обновить конфиг агента
 	apiMux.HandleFunc("/api/v1/agents/backup", r.handleBackupCreate)           // POST — trigger backup
 	apiMux.HandleFunc("/api/v1/agents/backup/list", r.handleBackupList)      // GET — list snapshots
 	apiMux.HandleFunc("/api/v1/agents/backup/", r.handleBackupOperations)    // POST /restore, DELETE /{id}
@@ -1071,6 +1072,80 @@ func (r *Relay) handleSkillDelete(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, map[string]string{"status": "delete_requested", "skill_id": body.SkillID})
 }
 
+// handleAgentConfigUpdate — PUT /api/v1/agents/config: обновить конфигурацию агента.
+// Отправляет MsgConfigUpdate агенту через WS.
+func (r *Relay) handleAgentConfigUpdate(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "только PUT")
+		return
+	}
+
+	var body struct {
+		AgentID    string         `json:"agent_id"`
+		ReadOnly   *bool          `json:"read_only"`
+		Label      *string        `json:"label"`
+		WorkDir    *string        `json:"work_dir"`
+		KillSwitch map[string]any `json:"kill_switch"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+	if body.AgentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id обязателен")
+		return
+	}
+
+	agent, ok := r.pool.Get(body.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	// Собираем payload — только переданные поля
+	payload := map[string]any{}
+	if body.ReadOnly != nil {
+		payload["read_only"] = *body.ReadOnly
+	}
+	if body.Label != nil {
+		payload["label"] = *body.Label
+	}
+	if body.WorkDir != nil {
+		payload["work_dir"] = *body.WorkDir
+	}
+	if body.KillSwitch != nil {
+		payload["kill_switch"] = body.KillSwitch
+	}
+
+	if len(payload) == 0 {
+		writeError(w, http.StatusBadRequest, "нет полей для обновления")
+		return
+	}
+
+	// Отправляем MsgConfigUpdate агенту
+	msg := protocol.NewMessage(protocol.MsgConfigUpdate)
+	msg.Payload = payload
+	if err := agent.SendMessage(msg); err != nil {
+		r.logger.Error("не удалось отправить config update", "err", err, "agent", body.AgentID)
+		writeError(w, http.StatusBadGateway, "агент не получил конфиг")
+		return
+	}
+
+	// Publish SSE event
+	r.eventBus.Publish(Event{
+		Type:    EventAgentConfigUpdated,
+		AgentID: body.AgentID,
+		Data:    payload,
+	})
+
+	writeJSON(w, map[string]any{
+		"status":   "config_update_sent",
+		"agent_id": body.AgentID,
+		"fields":   payload,
+	})
+}
+
 // === Backup API Handlers ===
 
 // handleBackupCreate — POST /api/v1/agents/backup: trigger backup на агенте.
@@ -1627,6 +1702,22 @@ func (r *Relay) handleApprovalAction(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
+	}
+
+	// Отправляем MsgApprovalResponse агенту через WS
+	if agent, ok := r.pool.Get(req2.AgentID); ok {
+		respMsg := protocol.NewMessage(protocol.MsgApprovalResponse)
+		respMsg.AgentID = req2.AgentID
+		respMsg.Payload = map[string]any{
+			"request_id": req2.ID,
+			"decision":   action, // "approve" или "reject"
+			"comment":    body.Comment,
+		}
+		if err := agent.SendMessage(respMsg); err != nil {
+			r.logger.Error("не удалось отправить approval response агенту", "err", err, "agent", req2.AgentID)
+		}
+	} else {
+		r.logger.Warn("агент не подключён для approval response", "agent", req2.AgentID)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -25,6 +25,7 @@ const (
 	EventBackupList        EventType = "backup.list"
 	EventBackupProgress    EventType = "backup.progress"
 	EventKillSwitch        EventType = "killswitch"
+	EventAgentConfigUpdated EventType = "agent.config_updated"
 	EventError             EventType = "error"
 )
 

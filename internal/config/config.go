@@ -26,6 +26,9 @@ type Config struct {
 	// Sandbox — ограничения прав
 	Sandbox SandboxConfig `json:"sandbox"`
 
+	// ReadOnly — агент запускается в read-only режиме (default: true для безопасности)
+	ReadOnly bool `json:"read_only"`
+
 	// Approval — настройки подтверждения (v2 с 3 режимами)
 	Approval ApprovalConfigV2 `json:"approval"`
 
@@ -218,6 +221,7 @@ func DefaultConfig() Config {
 			BackupDir:     filepath.Join(home, ".flowlink", "backups"),
 			Enabled:       true,
 		},
+		ReadOnly: true, // безопасность: новый агент в read-only
 	}
 }
 

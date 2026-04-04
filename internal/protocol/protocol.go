@@ -345,6 +345,32 @@ type BackupProgressPayload struct {
 	Message   string `json:"message"`
 }
 
+// ConfigUpdatePayload — обновление конфигурации агента.
+// Все поля optional — только переданные обновляются.
+type ConfigUpdatePayload struct {
+	AgentID    string                `json:"agent_id,omitempty"`    // ID агента
+	ReadOnly   *bool                 `json:"read_only,omitempty"`   // true = read-only режим
+	Label      *string               `json:"label,omitempty"`       // человекочитаемое имя
+	WorkDir    *string               `json:"work_dir,omitempty"`    // рабочая директория
+	KillSwitch *KillSwitchUpdateData `json:"kill_switch,omitempty"` // настройки kill switch
+}
+
+// KillSwitchUpdateData — данные для обновления kill switch.
+type KillSwitchUpdateData struct {
+	DiskThreshold   *float64 `json:"disk_threshold,omitempty"`   // порог диска для readonly
+	CPUThreshold    *float64 `json:"cpu_threshold,omitempty"`    // порог CPU для паузы
+	CPUThresholdDur *int     `json:"cpu_threshold_sec,omitempty"` // длительность превышения CPU
+}
+
+// ConfigAckPayload — подтверждение обновления конфигурации.
+type ConfigAckPayload struct {
+	AgentID  string                 `json:"agent_id"`            // ID агента
+	Success  bool                   `json:"success"`             // true если успешно
+	Config   map[string]interface{} `json:"config,omitempty"`    // текущий конфиг (для отладки)
+	Error    string                 `json:"error,omitempty"`     // ошибка если не success
+	Applied  []string               `json:"applied,omitempty"`   // список применённых полей
+}
+
 // NewMessage — создаёт новое сообщение с UUID и timestamp.
 func NewMessage(msgType MessageType) Message {
 	return Message{

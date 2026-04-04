@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -78,7 +79,7 @@ func NewAgent(cfg *config.Config) *Agent {
 	)
 
 	// Read-only по умолчанию (безопасность для новых агентов)
-	policy.SetReadOnly(DefaultReadOnly)
+	policy.SetReadOnly(cfg.ReadOnly)
 
 	agent := &Agent{
 		cfg:        cfg,
@@ -236,11 +237,14 @@ func (a *Agent) handleMessage(msg protocol.Message) {
 	case protocol.MsgLLMResponse:
 		a.handleLLMResponse(msg)
 
+	case protocol.MsgApprovalResponse:
+		a.handleApprovalResponse(msg)
+
 	case protocol.MsgHeartbeatAck:
 		// Пинг получен, всё ок
 
 	case protocol.MsgConfigUpdate:
-		a.logger.Info("обновление конфигурации от реле")
+		a.handleConfigUpdate(msg)
 
 	default:
 		a.logger.Warn("неизвестный тип сообщения", "type", msg.Type)
@@ -520,11 +524,148 @@ func (a *Agent) handleSkillDelete(msg protocol.Message) {
 	a.logger.Info("скилл удалён", "id", payload.SkillID)
 }
 
+// handleApprovalResponse — обрабатывает ответ на запрос подтверждения от реле.
+func (a *Agent) handleApprovalResponse(msg protocol.Message) {
+	var payload struct {
+		RequestID string `json:"request_id"`
+		Decision   string `json:"decision"` // approved, rejected
+		Comment    string `json:"comment"`
+	}
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.logger.Warn("неверный approval response payload", "err", err)
+		return
+	}
+	if payload.RequestID == "" {
+		a.logger.Warn("approval response без request_id")
+		return
+	}
+
+	switch payload.Decision {
+	case "approved":
+		a.approval.Approve(payload.RequestID)
+		a.logger.Info("команда одобрена реле", "request_id", payload.RequestID, "comment", payload.Comment)
+	case "rejected":
+		a.approval.Reject(payload.RequestID)
+		a.logger.Info("команда отклонена реле", "request_id", payload.RequestID, "comment", payload.Comment)
+	default:
+		a.logger.Warn("неизвестное решение approval", "decision", payload.Decision, "request_id", payload.RequestID)
+	}
+}
+
+// handleConfigUpdate — обрабатывает обновление конфигурации от реле.
+func (a *Agent) handleConfigUpdate(msg protocol.Message) {
+	var payload struct {
+		ReadOnly   *bool              `json:"read_only"`
+		Label      *string            `json:"label"`
+		WorkDir    *string            `json:"work_dir"`
+		KillSwitch *map[string]any    `json:"kill_switch"`
+	}
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.logger.Warn("неверный config update payload", "err", err)
+		return
+	}
+
+	// Применяем read_only
+	if payload.ReadOnly != nil {
+		a.policy.SetReadOnly(*payload.ReadOnly)
+		a.cfg.ReadOnly = *payload.ReadOnly
+		a.logger.Info("режим read-only обновлён", "read_only", *payload.ReadOnly)
+	}
+
+	// Применяем label
+	if payload.Label != nil && *payload.Label != "" {
+		a.cfg.Label = *payload.Label
+		a.logger.Info("label обновлён", "label", *payload.Label)
+	}
+
+	// Применяем kill_switch thresholds
+	if payload.KillSwitch != nil {
+		ks := *payload.KillSwitch
+		if dt, ok := ks["disk_threshold"].(float64); ok {
+			a.killSwitch.SetDiskThreshold(dt)
+			a.cfg.KillSwitch.DiskThreshold = dt
+			a.logger.Info("disk threshold обновлён", "value", dt)
+		}
+		if ct, ok := ks["cpu_threshold"].(float64); ok {
+			// Duration: cpu_threshold_sec если задан, иначе 5 минут
+			dur := 5 * time.Minute
+			if cts, ok := ks["cpu_threshold_sec"].(float64); ok {
+				dur = time.Duration(int(cts)) * time.Second
+				a.cfg.KillSwitch.CPUThresholdDur = int(cts)
+			}
+			a.killSwitch.SetCPUThreshold(ct, dur)
+			a.cfg.KillSwitch.CPUThreshold = ct
+			a.logger.Info("cpu threshold обновлён", "value", ct, "duration", dur)
+		}
+	}
+
+	// Формируем payload для ack с текущим состоянием конфига
+	applied := []string{}
+	if payload.ReadOnly != nil {
+		applied = append(applied, "read_only")
+	}
+	if payload.Label != nil {
+		applied = append(applied, "label")
+	}
+	if payload.WorkDir != nil {
+		applied = append(applied, "work_dir")
+	}
+	if payload.KillSwitch != nil {
+		applied = append(applied, "kill_switch")
+	}
+
+	// Отправляем подтверждение
+	ack := protocol.NewMessage(protocol.MsgConfigAck)
+	ack.AgentID = a.cfg.AgentID
+	ack.Payload = protocol.ConfigAckPayload{
+		AgentID: a.cfg.AgentID,
+		Success: true,
+		Applied: applied,
+		Config: map[string]interface{}{
+			"read_only": a.cfg.ReadOnly,
+			"label":     a.cfg.Label,
+			"kill_switch": map[string]interface{}{
+				"disk_threshold":    a.cfg.KillSwitch.DiskThreshold,
+				"cpu_threshold":     a.cfg.KillSwitch.CPUThreshold,
+				"cpu_threshold_sec": a.cfg.KillSwitch.CPUThresholdDur,
+			},
+		},
+	}
+
+	if err := a.write(ack); err != nil {
+		a.logger.Error("ошибка отправки config ack", "err", err)
+		return
+	}
+
+	a.logger.Info("конфигурация обновлена", "applied", applied)
+}
+
 // unmarshalPayload — десериализует payload сообщения.
 func unmarshalPayload(data any, v any) error {
-	// В реальном коде: json.Unmarshal из raw JSON
-	// Упрощение для компиляции
-	return nil
+	switch d := data.(type) {
+	case map[string]any:
+		// Конвертируем map в JSON и обратно в struct
+		jsonBytes, err := json.Marshal(d)
+		if err != nil {
+			return fmt.Errorf("marshal map: %w", err)
+		}
+		return json.Unmarshal(jsonBytes, v)
+	case string:
+		return json.Unmarshal([]byte(d), v)
+	case []byte:
+		return json.Unmarshal(d, v)
+	case json.RawMessage:
+		return json.Unmarshal(d, v)
+	case nil:
+		return fmt.Errorf("payload is nil")
+	default:
+		// Любой другой тип — пробуем marshal/unmarshal
+		jsonBytes, err := json.Marshal(d)
+		if err != nil {
+			return fmt.Errorf("marshal payload: %w", err)
+		}
+		return json.Unmarshal(jsonBytes, v)
+	}
 }
 
 // notifyKillSwitchEvent — отправляет уведомление о событии kill switch через реле.
