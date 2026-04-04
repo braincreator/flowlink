@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/braincreator/flowlink/internal/config"
+	"github.com/braincreator/flowlink/internal/nginx"
 	"github.com/braincreator/flowlink/internal/relay"
 	"github.com/braincreator/flowlink/pkg/version"
 )
@@ -25,6 +26,9 @@ func main() {
 			return
 		case "validate":
 			cmdValidate(os.Args[2:])
+			return
+		case "nginx-config":
+			cmdNginxConfig(os.Args[2:])
 			return
 		case "version", "--version", "-v":
 			fmt.Printf("flowlink-relay %s\n", version.Version)
@@ -46,7 +50,24 @@ func printHelp() {
 	fmt.Println("  flowlink-relay setup --non-interactive  Setup from env vars")
 	fmt.Println("  flowlink-relay serve              Start relay server (default)")
 	fmt.Println("  flowlink-relay validate           Validate config file")
+	fmt.Println("  flowlink-relay nginx-config       Generate nginx config")
 	fmt.Println("  flowlink-relay version            Show version")
+	fmt.Println()
+	fmt.Println("Nginx config generation:")
+	fmt.Println("  flowlink-relay nginx-config --domain example.com [--tls]")
+	fmt.Println("  flowlink-relay nginx-config --domain example.com --tls --output /etc/nginx/sites-available/flowlink")
+	fmt.Println()
+	fmt.Println("  Flags:")
+	fmt.Println("    --domain         Domain name (required)")
+	fmt.Println("    --tls            Enable HTTPS (generates HTTP→HTTPS redirect)")
+	fmt.Println("    --ws-path        WebSocket path (default: /ws)")
+	fmt.Println("    --api-prefix     API prefix (default: /api/v1)")
+	fmt.Println("    --output         Output file path (default: stdout)")
+	fmt.Println("    --full           Generate full nginx.conf (not just server block)")
+	fmt.Println("    --cert-path      SSL certificate path (for TLS)")
+	fmt.Println("    --key-path       SSL key path (for TLS)")
+	fmt.Println("    --rate-limit     Rate limit requests/sec (default: 100)")
+	fmt.Println("    --no-gzip        Disable gzip compression")
 	fmt.Println()
 	fmt.Println("Environment variables for setup:")
 	fmt.Println("  FLOWLINK_API_TOKEN      API token")
@@ -310,6 +331,112 @@ func cmdValidate(args []string) {
 		fmt.Println("✅ Configuration is valid!")
 	} else {
 		fmt.Printf("⚠️  %d warnings found\n", warnings)
+	}
+}
+
+// ====================
+// Nginx Config Command
+// ====================
+
+func cmdNginxConfig(args []string) {
+	// Парсим флаги
+	var (
+		domain     string
+		tls        bool
+		wsPath     string
+		apiPrefix  string
+		outputPath string
+		fullConfig bool
+		certPath   string
+		keyPath    string
+		rateLimit  int
+		noGzip     bool
+	)
+
+	fs := flag.NewFlagSet("nginx-config", flag.ExitOnError)
+	fs.StringVar(&domain, "domain", "", "Domain name (required)")
+	fs.BoolVar(&tls, "tls", false, "Enable HTTPS")
+	fs.StringVar(&wsPath, "ws-path", "/ws", "WebSocket path")
+	fs.StringVar(&apiPrefix, "api-prefix", "/api/v1", "API prefix")
+	fs.StringVar(&outputPath, "output", "", "Output file path (default: stdout)")
+	fs.BoolVar(&fullConfig, "full", false, "Generate full nginx.conf")
+	fs.StringVar(&certPath, "cert-path", "", "SSL certificate path")
+	fs.StringVar(&keyPath, "key-path", "", "SSL key path")
+	fs.IntVar(&rateLimit, "rate-limit", 100, "Rate limit requests/sec")
+	fs.BoolVar(&noGzip, "no-gzip", false, "Disable gzip compression")
+
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
+		os.Exit(1)
+	}
+
+	if domain == "" {
+		fmt.Fprintln(os.Stderr, "❌ --domain is required")
+		fs.PrintDefaults()
+		os.Exit(1)
+	}
+
+	// Импортируем пакет nginx
+	config := nginx.Config{
+		Domain:         domain,
+		WSSPath:        wsPath,
+		APIPrefix:      apiPrefix,
+		TLS:            tls,
+		CertPath:       certPath,
+		KeyPath:        keyPath,
+		BackendAPIPort: 8080,
+		BackendWSSPort: 8443,
+		RateLimit:      rateLimit,
+		EnableGzip:     !noGzip,
+	}
+
+	if tls {
+		config.Port = 443
+		if certPath == "" {
+			config.CertPath = fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", domain)
+		}
+		if keyPath == "" {
+			config.KeyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", domain)
+		}
+	} else {
+		config.Port = 80
+	}
+
+	// Валидация
+	if err := config.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Invalid config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Генерируем конфиг
+	gen := nginx.NewGenerator(config)
+	var output string
+	var err error
+
+	if fullConfig {
+		output, err = gen.GenerateFullConfig()
+	} else {
+		output, err = gen.Generate()
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error generating config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Выводим результат
+	if outputPath != "" {
+		if err := os.WriteFile(outputPath, []byte(output), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error writing file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✅ Nginx config written to %s\n", outputPath)
+		fmt.Println("\nNext steps:")
+		fmt.Println("  1. Review the config: cat", outputPath)
+		fmt.Println("  2. Test config: sudo nginx -t")
+		fmt.Println("  3. Reload nginx: sudo nginx -s reload")
+	} else {
+		fmt.Println(output)
 	}
 }
 

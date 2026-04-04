@@ -146,6 +146,9 @@ type RelayConfig struct {
 
 	// Telegram Bot — настройки бота для управления через Telegram
 	TelegramBot *TelegramBotConfig `json:"telegram_bot,omitempty"`
+
+	// Audit — настройки audit логов
+	AuditHMACSecret string `json:"audit_hmac_secret"` // путь к файлу с HMAC ключом (default: ~/.flowlink/audit.key)
 }
 
 // TelegramBotConfig — конфигурация Telegram-бота.

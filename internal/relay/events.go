@@ -22,6 +22,8 @@ const (
 	EventApprovalRejected  EventType = "approval.rejected"
 	EventBackupCreated     EventType = "backup.created"
 	EventBackupRestored    EventType = "backup.restored"
+	EventBackupList        EventType = "backup.list"
+	EventBackupProgress    EventType = "backup.progress"
 	EventKillSwitch        EventType = "killswitch"
 	EventError             EventType = "error"
 )

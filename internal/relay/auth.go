@@ -22,8 +22,15 @@ import (
 type TokenType string
 
 const (
-	TokenTypeAgent TokenType = "agent" // Pairwise токен для агентов
-	TokenTypeAPI   TokenType = "api"   // API токен для HTTP клиентов
+	TokenTypeAgent   TokenType = "agent"   // Pairwise токен для агентов
+	TokenTypeAPI     TokenType = "api"     // API токен для HTTP клиентов
+	TokenTypeRefresh TokenType = "refresh" // Refresh токен для rotation
+)
+
+// Token expiry defaults
+const (
+	AccessTokenExpiry  = 24 * time.Hour // Access token: 24 hours
+	RefreshTokenExpiry = 7 * 24 * time.Hour // Refresh token: 7 days
 )
 
 // Token — структура токена.
@@ -36,14 +43,31 @@ type Token struct {
 	Revoked   bool      `json:"revoked"`    // Отозван ли токен
 }
 
+// TokenPair — пара access + refresh токенов.
+type TokenPair struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresAt    int64  `json:"expires_at"`
+	TokenType    string `json:"token_type"` // всегда "Bearer"
+}
+
+// blacklistEntry — запись в blacklist.
+type blacklistEntry struct {
+	tokenID   string
+	expiresAt int64 // когда entry можно удалить
+}
+
 // AuthManager — менеджер аутентификации.
 type AuthManager struct {
-	mu       sync.RWMutex
-	tokens   map[string]*Token        // token_id → Token
-	clientTokens map[string][]string  // client_id → []token_id
-	secrets  map[string][]byte        // client_id → HMAC secret
-	revoked  map[string]bool          // token_id → revoked
-	logger   *slog.Logger
+	mu            sync.RWMutex
+	tokens        map[string]*Token        // token_id → Token
+	clientTokens  map[string][]string     // client_id → []token_id
+	secrets       map[string][]byte       // client_id → HMAC secret
+	revoked       map[string]bool         // token_id → revoked
+	blacklist     map[string]int64        // token_id → expiresAt (blacklisted tokens)
+	refreshTokens map[string]string       // refresh_token_id → access_token_id (for rotation)
+	logger        *slog.Logger
+	stopCleanup   chan struct{}           // канал для остановки cleanup goroutine
 }
 
 // NewAuthManager — создаёт новый менеджер аутентификации.
@@ -51,13 +75,26 @@ func NewAuthManager(logger *slog.Logger) *AuthManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AuthManager{
-		tokens:       make(map[string]*Token),
-		clientTokens: make(map[string][]string),
-		secrets:      make(map[string][]byte),
-		revoked:      make(map[string]bool),
-		logger:       logger,
+	am := &AuthManager{
+		tokens:        make(map[string]*Token),
+		clientTokens:  make(map[string][]string),
+		secrets:       make(map[string][]byte),
+		revoked:       make(map[string]bool),
+		blacklist:     make(map[string]int64),
+		refreshTokens: make(map[string]string),
+		logger:        logger,
+		stopCleanup:   make(chan struct{}),
 	}
+
+	// Запускаем periodic cleanup blacklist
+	go am.cleanupBlacklist()
+
+	return am
+}
+
+// Stop — останавливает background goroutines (для graceful shutdown).
+func (am *AuthManager) Stop() {
+	close(am.stopCleanup)
 }
 
 // === Agent Tokens (Pairwise) ===
@@ -281,6 +318,298 @@ func (am *AuthManager) RevokeToken(tokenStr string) error {
 	am.logger.Info("токен отозван", "token_id", token.ID, "client_id", token.ClientID)
 
 	return nil
+}
+
+// === JWT Token Rotation ===
+
+// GenerateTokenPair — генерирует пару access + refresh токенов.
+// Access token: 24h expiry
+// Refresh token: 7d expiry, содержит type="refresh"
+func (am *AuthManager) GenerateTokenPair(clientID string) (*TokenPair, error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	now := time.Now()
+	accessExpiry := now.Add(AccessTokenExpiry).Unix()
+	refreshExpiry := now.Add(RefreshTokenExpiry).Unix()
+
+	// Генерируем или получаем секрет для клиента
+	secret := am.secrets[clientID]
+	if secret == nil {
+		secret = generateSecret()
+		am.secrets[clientID] = secret
+	}
+
+	// Генерируем access token
+	accessID := generateTokenID()
+	accessToken := &Token{
+		ID:        accessID,
+		Type:      TokenTypeAPI,
+		ClientID:  clientID,
+		CreatedAt: now.Unix(),
+		ExpiresAt: accessExpiry,
+	}
+
+	accessJSON, err := json.Marshal(accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("сериализация access токена: %w", err)
+	}
+	accessSig := signToken(accessJSON, secret)
+	accessStr := base64.RawURLEncoding.EncodeToString(accessJSON) + "." + accessSig
+
+	// Генерируем refresh token
+	refreshID := generateTokenID()
+	refreshToken := &Token{
+		ID:        refreshID,
+		Type:      TokenTypeRefresh,
+		ClientID:  clientID,
+		CreatedAt: now.Unix(),
+		ExpiresAt: refreshExpiry,
+	}
+
+	refreshJSON, err := json.Marshal(refreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("сериализация refresh токена: %w", err)
+	}
+	refreshSig := signToken(refreshJSON, secret)
+	refreshStr := base64.RawURLEncoding.EncodeToString(refreshJSON) + "." + refreshSig
+
+	// Сохраняем токены
+	am.tokens[accessID] = accessToken
+	am.tokens[refreshID] = refreshToken
+	am.clientTokens[clientID] = append(am.clientTokens[clientID], accessID, refreshID)
+	am.refreshTokens[refreshID] = accessID // связь refresh → access
+
+	am.logger.Info("сгенерирована пара токенов",
+		"client_id", clientID,
+		"access_id", accessID,
+		"refresh_id", refreshID,
+		"access_expiry", time.Unix(accessExpiry, 0).Format(time.RFC3339),
+		"refresh_expiry", time.Unix(refreshExpiry, 0).Format(time.RFC3339),
+	)
+
+	return &TokenPair{
+		AccessToken:  accessStr,
+		RefreshToken: refreshStr,
+		ExpiresAt:    accessExpiry,
+		TokenType:    "Bearer",
+	}, nil
+}
+
+// RefreshToken — валидирует refresh token и генерирует новую пару (rotation).
+// Старый refresh token инвалидируется.
+func (am *AuthManager) RefreshToken(refreshTokenStr string) (*TokenPair, error) {
+	// Парсим refresh token
+	token, err := am.parseToken(refreshTokenStr)
+	if err != nil {
+		return nil, fmt.Errorf("парсинг refresh токена: %w", err)
+	}
+
+	// Проверяем тип
+	if token.Type != TokenTypeRefresh {
+		return nil, fmt.Errorf("неверный тип токена: ожидается refresh")
+	}
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	// Проверяем blacklist
+	if _, blacklisted := am.blacklist[token.ID]; blacklisted {
+		return nil, fmt.Errorf("refresh токен в blacklist")
+	}
+
+	// Проверяем отзыв
+	if am.revoked[token.ID] {
+		return nil, fmt.Errorf("refresh токен отозван")
+	}
+
+	// Проверяем expiration
+	if token.ExpiresAt > 0 && time.Now().Unix() > token.ExpiresAt {
+		return nil, fmt.Errorf("refresh токен истёк")
+	}
+
+	// Проверяем подпись
+	secret := am.secrets[token.ClientID]
+	if secret == nil {
+		return nil, fmt.Errorf("секрет не найден")
+	}
+
+	if !verifyTokenSignature(refreshTokenStr, secret) {
+		return nil, fmt.Errorf("неверная подпись refresh токена")
+	}
+
+	// Rotation: добавляем старые токены в blacklist
+	oldAccessID := am.refreshTokens[token.ID]
+	if oldAccessID != "" {
+		am.blacklist[oldAccessID] = time.Now().Add(AccessTokenExpiry).Unix()
+		delete(am.tokens, oldAccessID)
+	}
+	am.blacklist[token.ID] = time.Now().Add(RefreshTokenExpiry).Unix()
+	delete(am.tokens, token.ID)
+	delete(am.refreshTokens, token.ID)
+
+	// Генерируем новую пару
+	am.mu.Unlock() // Unlock для рекурсивного вызова
+	pair, err := am.GenerateTokenPair(token.ClientID)
+	am.mu.Lock() // Re-lock для defer
+
+	if err != nil {
+		return nil, fmt.Errorf("генерация новой пары: %w", err)
+	}
+
+	am.logger.Info("выполнен refresh токенов",
+		"client_id", token.ClientID,
+		"old_refresh_id", token.ID,
+		"old_access_id", oldAccessID,
+	)
+
+	return pair, nil
+}
+
+// IsBlacklisted — проверяет, находится ли токен в blacklist.
+func (am *AuthManager) IsBlacklisted(tokenID string) bool {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	_, blacklisted := am.blacklist[tokenID]
+	return blacklisted
+}
+
+// AddToBlacklist — добавляет токен в blacklist.
+func (am *AuthManager) AddToBlacklist(tokenStr string) error {
+	token, err := am.parseToken(tokenStr)
+	if err != nil {
+		return err
+	}
+
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	// Blacklist expiry = token expiry (или max TTL если бессрочный)
+	expiry := token.ExpiresAt
+	if expiry == 0 {
+		expiry = time.Now().Add(7 * 24 * time.Hour).Unix() // max 7 days
+	}
+
+	am.blacklist[token.ID] = expiry
+	am.logger.Info("токен добавлен в blacklist", "token_id", token.ID, "client_id", token.ClientID)
+
+	return nil
+}
+
+// Logout — logout клиента: добавляет access token в blacklist.
+func (am *AuthManager) Logout(accessTokenStr string) error {
+	return am.AddToBlacklist(accessTokenStr)
+}
+
+// RevokeByClientID — отзывает все токены клиента (admin operation).
+func (am *AuthManager) RevokeByClientID(clientID string) int {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+
+	tokenIDs := am.clientTokens[clientID]
+	count := 0
+
+	for _, tokenID := range tokenIDs {
+		if !am.revoked[tokenID] {
+			am.revoked[tokenID] = true
+			// Также добавляем в blacklist для быстрой проверки
+			if token, ok := am.tokens[tokenID]; ok && token.ExpiresAt > 0 {
+				am.blacklist[tokenID] = token.ExpiresAt
+			}
+			count++
+		}
+	}
+
+	// Очищаем связь refresh → access
+	for refreshID, accessID := range am.refreshTokens {
+		if accessID != "" {
+			for _, tokenID := range tokenIDs {
+				if tokenID == accessID {
+					am.blacklist[refreshID] = time.Now().Add(RefreshTokenExpiry).Unix()
+					delete(am.refreshTokens, refreshID)
+					break
+				}
+			}
+		}
+	}
+
+	am.logger.Info("отозваны токены клиента", "client_id", clientID, "count", count)
+
+	return count
+}
+
+// ValidateTokenWithBlacklist — проверяет токен с учётом blacklist.
+// Используется в middleware.
+func (am *AuthManager) ValidateTokenWithBlacklist(tokenStr string) (string, error) {
+	// Парсим токен
+	token, err := am.parseToken(tokenStr)
+	if err != nil {
+		return "", err
+	}
+
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	// Проверяем blacklist (быстрая проверка)
+	if _, blacklisted := am.blacklist[token.ID]; blacklisted {
+		return "", fmt.Errorf("токен в blacklist")
+	}
+
+	// Проверяем тип (только API токены для HTTP)
+	if token.Type != TokenTypeAPI {
+		return "", fmt.Errorf("неверный тип токена")
+	}
+
+	// Проверяем отзыв
+	if am.revoked[token.ID] {
+		return "", fmt.Errorf("токен отозван")
+	}
+
+	// Проверяем expiration
+	if token.ExpiresAt > 0 && time.Now().Unix() > token.ExpiresAt {
+		return "", fmt.Errorf("токен истёк")
+	}
+
+	// Проверяем подпись
+	secret := am.secrets[token.ClientID]
+	if secret == nil {
+		return "", fmt.Errorf("секрет не найден")
+	}
+
+	if !verifyTokenSignature(tokenStr, secret) {
+		return "", fmt.Errorf("неверная подпись")
+	}
+
+	return token.ClientID, nil
+}
+
+// ParseTokenStr — экспортированный метод для парсинга токена.
+func (am *AuthManager) ParseTokenStr(tokenStr string) (*Token, error) {
+	return am.parseToken(tokenStr)
+}
+
+// cleanupBlacklist — периодическая очистка blacklist от истёкших записей.
+func (am *AuthManager) cleanupBlacklist() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			am.mu.Lock()
+			now := time.Now().Unix()
+			for tokenID, expiry := range am.blacklist {
+				if now > expiry {
+					delete(am.blacklist, tokenID)
+				}
+			}
+			am.mu.Unlock()
+			am.logger.Debug("очистка blacklist завершена")
+		case <-am.stopCleanup:
+			return
+		}
+	}
 }
 
 // === Helpers ===

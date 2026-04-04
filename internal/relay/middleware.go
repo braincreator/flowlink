@@ -4,6 +4,7 @@ package relay
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -48,6 +49,12 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 		skipMap[path] = true
 	}
 
+	// Auth endpoints (без проверки токена — они сами выдают токены)
+	authPaths := map[string]bool{
+		"/api/v1/auth/token":   true,
+		"/api/v1/auth/refresh": true,
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Пропускаем исключённые пути (exact match или prefix для /path/)
@@ -63,6 +70,12 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 				return
 			}
 
+			// Пропускаем auth endpoints (они сами обрабатывают аутентификацию)
+			if authPaths[r.URL.Path] {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Если нет AuthManager и нет StaticToken — пропускаем (dev mode)
 			if cfg.AuthManager == nil && cfg.StaticToken == "" {
 				next.ServeHTTP(w, r)
@@ -70,7 +83,8 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 			}
 
 			// Получаем токен из заголовка или query param
-			token := r.Header.Get("Authorization")
+		authHeader := r.Header.Get("Authorization")
+			token := authHeader
 			if token == "" {
 				token = r.URL.Query().Get("token")
 			}
@@ -84,9 +98,20 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 				token = strings.TrimPrefix(token, "Bearer ")
 			}
 
+			// Проверяем формат access_token:refresh_token (для auto-refresh)
+			var accessToken, refreshToken string
+			if strings.Contains(token, ":") {
+				parts := strings.SplitN(token, ":", 2)
+				accessToken = parts[0]
+				refreshToken = parts[1]
+			} else {
+				accessToken = token
+			}
+
 			// Вариант 1: Проверка через AuthManager (динамические токены)
 			if cfg.AuthManager != nil {
-				clientID, err := cfg.AuthManager.ValidateAPIToken(token)
+				clientID, err := cfg.AuthManager.ValidateTokenWithBlacklist(accessToken)
+
 				if err == nil {
 					// Токен валиден — добавляем client_id в заголовок
 					r.Header.Set("X-Client-ID", clientID)
@@ -94,14 +119,31 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 					return
 				}
 
-				// Если ошибка не "токен не найден" — логируем
-				if !strings.Contains(err.Error(), "не найден") {
+				// Если токен истёк и есть refresh token — пробуем auto-refresh
+				if strings.Contains(err.Error(), "истёк") && refreshToken != "" {
+					newPair, refreshErr := cfg.AuthManager.RefreshToken(refreshToken)
+					if refreshErr == nil {
+						// Auto-refresh успешен — возвращаем новые токены в заголовках
+						w.Header().Set("X-New-Access-Token", newPair.AccessToken)
+						w.Header().Set("X-New-Refresh-Token", newPair.RefreshToken)
+						w.Header().Set("X-Token-Refreshed", "true")
+
+						// Устанавливаем client_id и продолжаем
+						r.Header.Set("X-Client-ID", extractClientIDFromToken(newPair.AccessToken))
+						next.ServeHTTP(w, r)
+						return
+					}
+					cfg.Logger.Debug("auto-refresh не удался", "err", refreshErr)
+				}
+
+				// Если ошибка не "токен не найден" и не "истёк" — логируем
+				if !strings.Contains(err.Error(), "не найден") && !strings.Contains(err.Error(), "истёк") {
 					cfg.Logger.Debug("ошибка валидации токена", "err", err)
 				}
 			}
 
 			// Вариант 2: Проверка статического токена из конфига
-			if cfg.StaticToken != "" && token == cfg.StaticToken {
+			if cfg.StaticToken != "" && accessToken == cfg.StaticToken {
 				r.Header.Set("X-Client-ID", "static-client")
 				next.ServeHTTP(w, r)
 				return
@@ -111,6 +153,28 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 			writeAuthError(w, "неверный токен", http.StatusUnauthorized)
 		})
 	}
+}
+
+// extractClientIDFromToken — извлекает client_id из токена без валидации.
+func extractClientIDFromToken(tokenStr string) string {
+	parts := strings.Split(tokenStr, ".")
+	if len(parts) != 2 {
+		return ""
+	}
+
+	tokenJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return ""
+	}
+
+	var token struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.Unmarshal(tokenJSON, &token); err != nil {
+		return ""
+	}
+
+	return token.ClientID
 }
 
 // === Rate Limit Middleware ===

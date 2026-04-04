@@ -22,6 +22,7 @@ import (
 	"github.com/braincreator/flowlink/internal/billing"
 	"github.com/braincreator/flowlink/internal/config"
 	"github.com/braincreator/flowlink/internal/dashboard"
+	"github.com/braincreator/flowlink/internal/nginx"
 	"github.com/braincreator/flowlink/internal/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -115,6 +116,9 @@ func (p *AgentPool) Count() int {
 func (a *AgentConn) SendMessage(msg protocol.Message) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.conn == nil {
+		return fmt.Errorf("websocket connection is nil")
+	}
 	return a.conn.WriteJSON(msg)
 }
 
@@ -203,6 +207,9 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/agents/skills/push", r.handleSkillPush)
 	apiMux.HandleFunc("/api/v1/agents/skills/list", r.handleSkillList)
 	apiMux.HandleFunc("/api/v1/agents/skills/delete", r.handleSkillDelete)
+	apiMux.HandleFunc("/api/v1/agents/backup", r.handleBackupCreate)           // POST — trigger backup
+	apiMux.HandleFunc("/api/v1/agents/backup/list", r.handleBackupList)      // GET — list snapshots
+	apiMux.HandleFunc("/api/v1/agents/backup/", r.handleBackupOperations)    // POST /restore, DELETE /{id}
 	apiMux.HandleFunc("/api/v1/llm/chat", r.handleLLMChat)
 	apiMux.HandleFunc("/api/v1/llm/backends", r.handleLLMBackends)
 	apiMux.HandleFunc("/api/v1/llm/health", r.handleLLMHealth)
@@ -231,6 +238,9 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/billing/invoices", r.handleBillingInvoices)
 	apiMux.HandleFunc("/api/v1/billing/invoices/", r.handleBillingInvoicePay)
 	apiMux.HandleFunc("/api/v1/billing/payment-methods", r.handleBillingPaymentMethods)
+
+	// Nginx config generator endpoint
+	apiMux.HandleFunc("/api/v1/nginx-config", r.handleNginxConfig)
 
 	// Dashboard (с авторизацией через API token, регистрируем ДО middleware chain)
 	dashProvider := &dashboardProvider{r: r}
@@ -513,6 +523,48 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 
 			r.eventBus.Publish(Event{
 				Type:    EventApprovalRequired,
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgBackupResponse:
+			// Ответ на запрос создания бэкапа
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    EventBackupCreated,
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgBackupListResp:
+			// Ответ на запрос списка снапшотов
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    EventBackupList,
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgBackupProgress:
+			// Прогресс создания бэкапа (SSE event)
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    EventBackupProgress,
 				AgentID: msg.AgentID,
 				Data:    payloadData,
 			})
@@ -991,6 +1043,184 @@ func (r *Relay) handleSkillDelete(w http.ResponseWriter, req *http.Request) {
 	agent.SendMessage(msg)
 
 	writeJSON(w, map[string]string{"status": "delete_requested", "skill_id": body.SkillID})
+}
+
+// === Backup API Handlers ===
+
+// handleBackupCreate — POST /api/v1/agents/backup: trigger backup на агенте.
+func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		return
+	}
+
+	var body struct {
+		AgentID     string   `json:"agent_id"`
+		Description string   `json:"description,omitempty"`
+		Paths       []string `json:"paths,omitempty"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	if body.AgentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id обязателен")
+		return
+	}
+
+	agent, ok := r.pool.Get(body.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	requestID := uuid.New().String()
+	msg := protocol.NewMessage(protocol.MsgBackupRequest)
+	msg.Payload = protocol.BackupRequestPayload{
+		RequestID:   requestID,
+		Description: body.Description,
+		Paths:       body.Paths,
+	}
+
+	if err := agent.SendMessage(msg); err != nil {
+		writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+		return
+	}
+
+	writeJSON(w, map[string]string{
+		"status":    "sent",
+		"request_id": requestID,
+		"agent_id":  body.AgentID,
+	})
+}
+
+// handleBackupList — GET /api/v1/agents/backup/list: list snapshots.
+func (r *Relay) handleBackupList(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		return
+	}
+
+	agentID := req.URL.Query().Get("agent_id")
+	if agentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id обязателен")
+		return
+	}
+
+	agent, ok := r.pool.Get(agentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	requestID := uuid.New().String()
+	msg := protocol.NewMessage(protocol.MsgBackupList)
+	msg.Payload = protocol.BackupListPayload{
+		RequestID: requestID,
+	}
+
+	if err := agent.SendMessage(msg); err != nil {
+		writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+		return
+	}
+
+	writeJSON(w, map[string]string{
+		"status":    "sent",
+		"request_id": requestID,
+		"agent_id":  agentID,
+	})
+}
+
+// handleBackupOperations — POST /api/v1/agents/backup/{id}/restore, DELETE /api/v1/agents/backup/{id}.
+func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request) {
+	// Парсим путь: /api/v1/agents/backup/{id}/restore или /api/v1/agents/backup/{id}
+	path := strings.TrimPrefix(req.URL.Path, "/api/v1/agents/backup/")
+	parts := strings.SplitN(path, "/", 2)
+
+	snapshotID := parts[0]
+	if snapshotID == "" {
+		writeError(w, http.StatusBadRequest, "snapshot_id обязателен")
+		return
+	}
+
+	// Определяем операцию
+	var operation string
+	if len(parts) == 2 && parts[1] == "restore" {
+		operation = "restore"
+	} else if req.Method == http.MethodDelete {
+		operation = "delete"
+	} else {
+		writeError(w, http.StatusBadRequest, "неподдерживаемая операция")
+		return
+	}
+
+	// Читаем тело для agent_id
+	var body struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	if body.AgentID == "" {
+		writeError(w, http.StatusBadRequest, "agent_id обязателен")
+		return
+	}
+
+	agent, ok := r.pool.Get(body.AgentID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "агент не подключён")
+		return
+	}
+
+	requestID := uuid.New().String()
+
+	switch operation {
+	case "restore":
+		if req.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "только POST")
+			return
+		}
+		msg := protocol.NewMessage(protocol.MsgBackupRestore)
+		msg.Payload = protocol.BackupRestorePayload{
+			RequestID:  requestID,
+			SnapshotID: snapshotID,
+		}
+		if err := agent.SendMessage(msg); err != nil {
+			writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+			return
+		}
+		writeJSON(w, map[string]string{
+			"status":     "sent",
+			"request_id":  requestID,
+			"snapshot_id": snapshotID,
+			"agent_id":   body.AgentID,
+		})
+
+	case "delete":
+		if req.Method != http.MethodDelete {
+			writeError(w, http.StatusMethodNotAllowed, "только DELETE")
+			return
+		}
+		msg := protocol.NewMessage(protocol.MsgBackupDelete)
+		msg.Payload = protocol.BackupDeletePayload{
+			RequestID:  requestID,
+			SnapshotID: snapshotID,
+		}
+		if err := agent.SendMessage(msg); err != nil {
+			writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+			return
+		}
+		writeJSON(w, map[string]string{
+			"status":     "sent",
+			"request_id":  requestID,
+			"snapshot_id": snapshotID,
+			"agent_id":   body.AgentID,
+		})
+	}
 }
 
 // === Вспомогательные функции ===
@@ -1526,6 +1756,168 @@ func currentBillingMonth() string {
 	return time.Now().Format("2006-01")
 }
 
+// === Auth HTTP Handlers (JWT Token Rotation) ===
+
+// handleAuthToken — POST /api/v1/auth/token — генерация пары токенов.
+// Body: {"client_id": "...", "client_secret": "..."} (опционально)
+// Response: {"access_token": "...", "refresh_token": "...", "expires_at": 1234567890, "token_type": "Bearer"}
+func (r *Relay) handleAuthToken(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		return
+	}
+
+	var body struct {
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"` // для будущей проверки
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	if body.ClientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id обязателен")
+		return
+	}
+
+	// Проверяем что клиент существует (если есть registry)
+	if r.registry != nil {
+		if _, ok := r.registry.GetClient(body.ClientID); !ok {
+			writeError(w, http.StatusNotFound, "клиент не найден")
+			return
+		}
+	}
+
+	// Генерируем пару токенов
+	pair, err := r.auth.GenerateTokenPair(body.ClientID)
+	if err != nil {
+		r.logger.Error("ошибка генерации токенов", "err", err, "client_id", body.ClientID)
+		writeError(w, http.StatusInternalServerError, "ошибка генерации токенов")
+		return
+	}
+
+	writeJSON(w, pair)
+}
+
+// handleAuthRefresh — POST /api/v1/auth/refresh — refresh токенов.
+// Body: {"refresh_token": "..."}
+// Response: {"access_token": "...", "refresh_token": "...", "expires_at": 1234567890, "token_type": "Bearer"}
+func (r *Relay) handleAuthRefresh(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		return
+	}
+
+	var body struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	if body.RefreshToken == "" {
+		writeError(w, http.StatusBadRequest, "refresh_token обязателен")
+		return
+	}
+
+	// Refresh токены
+	pair, err := r.auth.RefreshToken(body.RefreshToken)
+	if err != nil {
+		r.logger.Warn("ошибка refresh токена", "err", err)
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	writeJSON(w, pair)
+}
+
+// handleAuthLogout — POST /api/v1/auth/logout — logout (blacklist токена).
+// Требует Authorization header с access token.
+// Response: {"status": "logged_out"}
+func (r *Relay) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		return
+	}
+
+	// Получаем токен из заголовка
+	authHeader := req.Header.Get("Authorization")
+	if authHeader == "" {
+		writeError(w, http.StatusUnauthorized, "Authorization header обязателен")
+		return
+	}
+
+	token := authHeader
+	if strings.HasPrefix(token, "Bearer ") {
+		token = strings.TrimPrefix(token, "Bearer ")
+	}
+
+	// Добавляем в blacklist
+	if err := r.auth.Logout(token); err != nil {
+		r.logger.Warn("ошибка logout", "err", err)
+		writeError(w, http.StatusBadRequest, "неверный токен")
+		return
+	}
+
+	writeJSON(w, map[string]string{"status": "logged_out"})
+}
+
+// handleAuthRevoke — POST /api/v1/auth/revoke — admin revoke по client_id.
+// Требует Authorization header с admin токеном (пока проверяем static token).
+// Body: {"client_id": "..."}
+// Response: {"status": "revoked", "count": 5}
+func (r *Relay) handleAuthRevoke(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		return
+	}
+
+	// Проверяем admin доступ (static token из конфига)
+	authHeader := req.Header.Get("Authorization")
+	if authHeader == "" {
+		writeError(w, http.StatusUnauthorized, "Authorization header обязателен")
+		return
+	}
+
+	token := authHeader
+	if strings.HasPrefix(token, "Bearer ") {
+		token = strings.TrimPrefix(token, "Bearer ")
+	}
+
+	// Только static token может revoke
+	if r.cfg.APIToken == "" || token != r.cfg.APIToken {
+		writeError(w, http.StatusForbidden, "требуется admin токен")
+		return
+	}
+
+	var body struct {
+		ClientID string `json:"client_id"`
+	}
+
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "неверный JSON")
+		return
+	}
+
+	if body.ClientID == "" {
+		writeError(w, http.StatusBadRequest, "client_id обязателен")
+		return
+	}
+
+	// Отзываем все токены клиента
+	count := r.auth.RevokeByClientID(body.ClientID)
+
+	writeJSON(w, map[string]any{
+		"status":    "revoked",
+		"client_id": body.ClientID,
+		"count":     count,
+	})
+}
+
 func writeJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
@@ -1638,4 +2030,115 @@ func (dp *dashboardProvider) DashboardAuditStats() *dashboard.AuditStatsInfo {
 		TotalEntries: stats.TotalEntries, ByAction: stats.ByAction,
 		Last24hCount: stats.Last24hCount, Entries: entries,
 	}
+}
+
+// handleNginxConfig обрабатывает GET /api/v1/nginx-config?domain=x&tls=true
+func (r *Relay) handleNginxConfig(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Проверяем авторизацию (API token)
+	token := req.Header.Get("Authorization")
+	if token == "" {
+		token = req.URL.Query().Get("token")
+	}
+	if token == "" {
+		writeError(w, http.StatusUnauthorized, "authorization required")
+		return
+	}
+	if r.cfg.APIToken != "" && token != "Bearer "+r.cfg.APIToken && token != r.cfg.APIToken {
+		writeError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	// Парсим параметры запроса
+	domain := req.URL.Query().Get("domain")
+	if domain == "" {
+		writeError(w, http.StatusBadRequest, "domain parameter required")
+		return
+	}
+
+	tlsParam := req.URL.Query().Get("tls")
+	tls := tlsParam == "true" || tlsParam == "1"
+
+	wsPath := req.URL.Query().Get("ws_path")
+	if wsPath == "" {
+		wsPath = "/ws"
+	}
+
+	apiPrefix := req.URL.Query().Get("api_prefix")
+	if apiPrefix == "" {
+		apiPrefix = "/api/v1"
+	}
+
+	certPath := req.URL.Query().Get("cert_path")
+	keyPath := req.URL.Query().Get("key_path")
+
+	rateLimitStr := req.URL.Query().Get("rate_limit")
+	rateLimit := 100
+	if rateLimitStr != "" {
+		var err error
+		rateLimit, err = strconv.Atoi(rateLimitStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid rate_limit parameter")
+			return
+		}
+	}
+
+	fullConfig := req.URL.Query().Get("full") == "true"
+
+	// Создаём конфигурацию
+	config := nginx.Config{
+		Domain:         domain,
+		WSSPath:        wsPath,
+		APIPrefix:      apiPrefix,
+		TLS:            tls,
+		CertPath:       certPath,
+		KeyPath:        keyPath,
+		BackendAPIPort: 8080,
+		BackendWSSPort: 8443,
+		RateLimit:      rateLimit,
+		EnableGzip:     true,
+	}
+
+	if tls {
+		config.Port = 443
+		if certPath == "" {
+			config.CertPath = fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", domain)
+		}
+		if keyPath == "" {
+			config.KeyPath = fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", domain)
+		}
+	} else {
+		config.Port = 80
+	}
+
+	// Валидация
+	if err := config.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid config: %v", err))
+		return
+	}
+
+	// Генерируем конфиг
+	gen := nginx.NewGenerator(config)
+	var output string
+	var err error
+
+	if fullConfig {
+		output, err = gen.GenerateFullConfig()
+	} else {
+		output, err = gen.Generate()
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to generate config: %v", err))
+		return
+	}
+
+	// Возвращаем конфиг
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(output))
 }

@@ -57,6 +57,15 @@ const (
 	MsgLLMRequest    MessageType = "llm_request"      // Агент → Реле: запрос к LLM
 	MsgLLMResponse   MessageType = "llm_response"     // Реле → Агент: ответ от LLM
 
+	// === Резервное копирование ===
+	MsgBackupRequest    MessageType = "backup_request"     // Relay → Agent: trigger backup
+	MsgBackupResponse   MessageType = "backup_response"    // Agent → Relay: backup result
+	MsgBackupList       MessageType = "backup_list"        // Relay → Agent: list snapshots
+	MsgBackupListResp   MessageType = "backup_list_resp"   // Agent → Relay: snapshot list
+	MsgBackupRestore    MessageType = "backup_restore"     // Relay → Agent: restore snapshot
+	MsgBackupDelete     MessageType = "backup_delete"      // Relay → Agent: delete snapshot
+	MsgBackupProgress   MessageType = "backup_progress"    // Agent → Relay: progress %
+
 	// === Ошибка ===
 	MsgError         MessageType = "error"           // Любой → Любой: ошибка
 )
@@ -258,6 +267,82 @@ type SkillInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	UpdatedAt   string `json:"updated_at"`
+}
+
+// === Backup Payloads ===
+
+// BackupRequestPayload — запрос на создание бэкапа.
+type BackupRequestPayload struct {
+	RequestID   string   `json:"request_id"`
+	Description string   `json:"description,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+}
+
+// BackupResponsePayload — результат создания бэкапа.
+type BackupResponsePayload struct {
+	RequestID  string `json:"request_id"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	Size       int64  `json:"size,omitempty"`
+	Timestamp  int64  `json:"timestamp,omitempty"`
+	Success    bool   `json:"success"`
+	Error      string `json:"error,omitempty"`
+}
+
+// BackupListPayload — запрос списка снапшотов.
+type BackupListPayload struct {
+	RequestID string `json:"request_id"`
+}
+
+// BackupListResponsePayload — список снапшотов.
+type BackupListResponsePayload struct {
+	RequestID string     `json:"request_id"`
+	Snapshots []Snapshot `json:"snapshots"`
+	Count     int        `json:"count"`
+}
+
+// Snapshot — метаданные снапшота.
+type Snapshot struct {
+	ID          string   `json:"id"`
+	Description string   `json:"description"`
+	Timestamp   int64    `json:"timestamp"`
+	Size        int64    `json:"size"`
+	Paths       []string `json:"paths"`
+	Filename    string   `json:"filename"`
+}
+
+// BackupRestorePayload — запрос на восстановление из снапшота.
+type BackupRestorePayload struct {
+	RequestID  string `json:"request_id"`
+	SnapshotID string `json:"snapshot_id"`
+}
+
+// BackupRestoreResponsePayload — результат восстановления.
+type BackupRestoreResponsePayload struct {
+	RequestID  string `json:"request_id"`
+	SnapshotID string `json:"snapshot_id"`
+	Success    bool   `json:"success"`
+	Error      string `json:"error,omitempty"`
+}
+
+// BackupDeletePayload — запрос на удаление снапшота.
+type BackupDeletePayload struct {
+	RequestID  string `json:"request_id"`
+	SnapshotID string `json:"snapshot_id"`
+}
+
+// BackupDeleteResponsePayload — результат удаления снапшота.
+type BackupDeleteResponsePayload struct {
+	RequestID  string `json:"request_id"`
+	SnapshotID string `json:"snapshot_id"`
+	Success    bool   `json:"success"`
+	Error      string `json:"error,omitempty"`
+}
+
+// BackupProgressPayload — прогресс создания бэкапа.
+type BackupProgressPayload struct {
+	RequestID string `json:"request_id"`
+	Progress  int    `json:"progress"`  // 0-100
+	Message   string `json:"message"`
 }
 
 // NewMessage — создаёт новое сообщение с UUID и timestamp.

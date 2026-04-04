@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/braincreator/flowlink/internal/audit"
 	"github.com/google/uuid"
 )
 
@@ -33,6 +34,8 @@ type AuditEntry struct {
 	DurationMs   int64     `json:"duration_ms"`
 	Error        string    `json:"error,omitempty"`
 	ClientIP     string    `json:"client_ip,omitempty"`
+	HMAC         string    `json:"hmac,omitempty"`         // HMAC-SHA256 подпись
+	Tampered     bool      `json:"tampered,omitempty"`     // true если HMAC невалиден
 }
 
 // AuditQuery — фильтр для поиска по audit log.
@@ -66,12 +69,18 @@ type AuditLogger struct {
 	baseDir     string
 	currentFile *os.File
 	currentDate string
-	maxSize     int64 // макс. размер файла в байтах (100MB)
-	retention   int   // дней хранения (90)
+	maxSize     int64    // макс. размер файла в байтах (100MB)
+	retention   int      // дней хранения (90)
+	hmacSecret  []byte   // секрет для HMAC подписи
 }
 
 // NewAuditLogger — создаёт новый audit logger.
 func NewAuditLogger(baseDir string) (*AuditLogger, error) {
+	return NewAuditLoggerWithHMAC(baseDir, "")
+}
+
+// NewAuditLoggerWithHMAC — создаёт audit logger с указанным путём к HMAC ключу.
+func NewAuditLoggerWithHMAC(baseDir, hmacKeyPath string) (*AuditLogger, error) {
 	if baseDir == "" {
 		home, _ := os.UserHomeDir()
 		baseDir = filepath.Join(home, ".flowlink", "audit")
@@ -81,10 +90,17 @@ func NewAuditLogger(baseDir string) (*AuditLogger, error) {
 		return nil, fmt.Errorf("ошибка создания директории audit: %w", err)
 	}
 
+	// Загружаем или генерируем HMAC секрет
+	hmacSecret, err := audit.LoadOrGenerateHMACSecret(hmacKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка загрузки HMAC ключа: %w", err)
+	}
+
 	logger := &AuditLogger{
-		baseDir:   baseDir,
-		maxSize:   100 * 1024 * 1024, // 100MB
-		retention: 90,                // 90 дней
+		baseDir:    baseDir,
+		maxSize:    100 * 1024 * 1024, // 100MB
+		retention:  90,                // 90 дней
+		hmacSecret: hmacSecret,
 	}
 
 	// Запускаем фоновую ротацию и очистку
@@ -123,8 +139,16 @@ func (l *AuditLogger) Log(entry AuditEntry) error {
 		l.currentDate = today
 	}
 
+	// Конвертируем в map для HMAC
+	entryMap := l.entryToMap(entry)
+
+	// Добавляем HMAC подпись
+	if len(l.hmacSecret) > 0 {
+		entryMap[audit.HMACField] = audit.SignEntry(entryMap, l.hmacSecret)
+	}
+
 	// Сериализуем в JSON
-	data, err := json.Marshal(entry)
+	data, err := json.Marshal(entryMap)
 	if err != nil {
 		return fmt.Errorf("ошибка сериализации entry: %w", err)
 	}
@@ -365,58 +389,8 @@ func (l *AuditLogger) Close() error {
 // === Вспомогательные методы ===
 
 func (l *AuditLogger) readFile(filename string) ([]AuditEntry, error) {
-	var entries []AuditEntry
-
-	// Проверяем сжатый файл
-	gzFile := filename + ".gz"
-	if _, err := os.Stat(gzFile); err == nil {
-		f, err := os.Open(gzFile)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-
-		gz, err := gzip.NewReader(f)
-		if err != nil {
-			return nil, err
-		}
-		defer gz.Close()
-
-		decoder := json.NewDecoder(gz)
-		for {
-			var entry AuditEntry
-			if err := decoder.Decode(&entry); err != nil {
-				if err == io.EOF {
-					break
-				}
-				return nil, err
-			}
-			entries = append(entries, entry)
-		}
-
-		return entries, nil
-	}
-
-	// Обычный файл
-	f, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	decoder := json.NewDecoder(f)
-	for {
-		var entry AuditEntry
-		if err := decoder.Decode(&entry); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
-		}
-		entries = append(entries, entry)
-	}
-
-	return entries, nil
+	// Используем readFileWithValidation для HMAC проверки
+	return l.readFileWithValidation(filename)
 }
 
 func (l *AuditLogger) matchQuery(entry AuditEntry, query AuditQuery) bool {
@@ -517,4 +491,223 @@ func (l *AuditLogger) backgroundTasks() {
 		// Очистка старых логов раз в сутки
 		l.Prune(0)
 	}
+}
+
+// VerifyAll — проверяет целостность всех логов и возвращает результат.
+func (l *AuditLogger) VerifyAll() (*AuditVerifyResult, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	result := &AuditVerifyResult{
+		ByDate: make(map[string]DateVerifyResult),
+	}
+
+	// Сканируем все файлы за retention период
+	now := time.Now()
+	for d := now.AddDate(0, 0, -l.retention); !d.After(now); d = d.AddDate(0, 0, 1) {
+		filename := filepath.Join(l.baseDir, fmt.Sprintf("audit-%s.jsonl", d.Format("2006-01-02")))
+		
+		dateResult := DateVerifyResult{Date: d.Format("2006-01-02")}
+		
+		entries, err := l.readFileWithValidation(filename)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+				dateResult.Error = err.Error()
+				result.ByDate[dateResult.Date] = dateResult
+				continue
+		}
+
+		for _, entry := range entries {
+			result.TotalEntries++
+			dateResult.Total++
+			if entry.Tampered {
+				result.TamperedEntries++
+				dateResult.Tampered++
+				result.TamperedIDs = append(result.TamperedIDs, entry.ID)
+			}
+		}
+
+		if dateResult.Total > 0 {
+			result.ByDate[dateResult.Date] = dateResult
+		}
+	}
+
+	result.Valid = result.TamperedEntries == 0
+	return result, nil
+}
+
+// AuditVerifyResult — результат верификации всех логов.
+type AuditVerifyResult struct {
+	Valid           bool                        `json:"valid"`
+	TotalEntries    int                         `json:"total_entries"`
+	TamperedEntries int                         `json:"tampered_entries"`
+	TamperedIDs     []string                    `json:"tampered_ids,omitempty"`
+	ByDate          map[string]DateVerifyResult `json:"by_date,omitempty"`
+}
+
+// DateVerifyResult — результат верификации за одну дату.
+type DateVerifyResult struct {
+	Date     string `json:"date"`
+	Total    int    `json:"total"`
+	Tampered int    `json:"tampered"`
+	Error    string `json:"error,omitempty"`
+}
+
+// entryToMap — конвертирует AuditEntry в map[string]interface{}.
+func (l *AuditLogger) entryToMap(entry AuditEntry) map[string]interface{} {
+	m := make(map[string]interface{})
+	m["id"] = entry.ID
+	m["timestamp"] = entry.Timestamp
+	m["agent_id"] = entry.AgentID
+	m["client_id"] = entry.ClientID
+	m["action"] = entry.Action
+	m["risk_level"] = entry.RiskLevel
+	m["approval_mode"] = entry.ApprovalMode
+	m["result"] = entry.Result
+	m["duration_ms"] = entry.DurationMs
+	
+	if entry.Command != "" {
+		m["command"] = entry.Command
+	}
+	if entry.Path != "" {
+		m["path"] = entry.Path
+	}
+	if entry.BackupID != "" {
+		m["backup_id"] = entry.BackupID
+	}
+	if entry.ExitCode != 0 {
+		m["exit_code"] = entry.ExitCode
+	}
+	if entry.Error != "" {
+		m["error"] = entry.Error
+	}
+	if entry.ClientIP != "" {
+		m["client_ip"] = entry.ClientIP
+	}
+	
+	return m
+}
+
+// readFileWithValidation — читает файл и валидирует HMAC.
+func (l *AuditLogger) readFileWithValidation(filename string) ([]AuditEntry, error) {
+	var entries []AuditEntry
+
+	// Проверяем сжатый файл
+	gzFile := filename + ".gz"
+	if _, err := os.Stat(gzFile); err == nil {
+		f, err := os.Open(gzFile)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+
+		decoder := json.NewDecoder(gz)
+		for {
+			var rawEntry map[string]interface{}
+			if err := decoder.Decode(&rawEntry); err != nil {
+				if err == io.EOF {
+					break
+				}
+				return nil, err
+			}
+			entry := l.mapToEntry(rawEntry)
+			// Валидируем HMAC
+			if len(l.hmacSecret) > 0 && !audit.VerifyEntry(rawEntry, l.hmacSecret) {
+				entry.Tampered = true
+			}
+			entries = append(entries, entry)
+		}
+
+		return entries, nil
+	}
+
+	// Обычный файл
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	decoder := json.NewDecoder(f)
+	for {
+		var rawEntry map[string]interface{}
+		if err := decoder.Decode(&rawEntry); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		entry := l.mapToEntry(rawEntry)
+		// Валидируем HMAC
+		if len(l.hmacSecret) > 0 && !audit.VerifyEntry(rawEntry, l.hmacSecret) {
+			entry.Tampered = true
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+// mapToEntry — конвертирует map в AuditEntry.
+func (l *AuditLogger) mapToEntry(m map[string]interface{}) AuditEntry {
+	entry := AuditEntry{}
+	
+	if v, ok := m["id"].(string); ok {
+		entry.ID = v
+	}
+	if v, ok := m["timestamp"].(string); ok {
+		entry.Timestamp, _ = time.Parse(time.RFC3339, v)
+	}
+	if v, ok := m["agent_id"].(string); ok {
+		entry.AgentID = v
+	}
+	if v, ok := m["client_id"].(string); ok {
+		entry.ClientID = v
+	}
+	if v, ok := m["action"].(string); ok {
+		entry.Action = v
+	}
+	if v, ok := m["command"].(string); ok {
+		entry.Command = v
+	}
+	if v, ok := m["path"].(string); ok {
+		entry.Path = v
+	}
+	if v, ok := m["risk_level"].(string); ok {
+		entry.RiskLevel = v
+	}
+	if v, ok := m["approval_mode"].(string); ok {
+		entry.ApprovalMode = v
+	}
+	if v, ok := m["backup_id"].(string); ok {
+		entry.BackupID = v
+	}
+	if v, ok := m["result"].(string); ok {
+		entry.Result = v
+	}
+	if v, ok := m["exit_code"].(float64); ok {
+		entry.ExitCode = int(v)
+	}
+	if v, ok := m["duration_ms"].(float64); ok {
+		entry.DurationMs = int64(v)
+	}
+	if v, ok := m["error"].(string); ok {
+		entry.Error = v
+	}
+	if v, ok := m["client_ip"].(string); ok {
+		entry.ClientIP = v
+	}
+	if v, ok := m["hmac"].(string); ok {
+		entry.HMAC = v
+	}
+	
+	return entry
 }
