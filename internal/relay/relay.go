@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,7 +40,8 @@ type Relay struct {
 	planStore   *billing.PlanStore   // тарифные планы
 	usage       *billing.UsageTracker
 	invoices    *billing.InvoiceStore
-	eventBus   *EventBus   // шина событий для SSE-уведомлений
+	eventBus      *EventBus        // шина событий для SSE-уведомлений
+	approvalQueue *ApprovalQueue  // очередь запросов на подтверждение
 }
 
 // AgentConn — подключённый агент.
@@ -155,8 +157,9 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		rateLimit: NewRateLimiter(30, 200, logger), // 30/min, 200/hour
 		audit:     audit,
 		registry:  registry,
-		eventBus:  NewEventBus(logger),
-		planStore: planStore,
+		eventBus:      NewEventBus(logger),
+		approvalQueue: NewApprovalQueue(NewEventBus(logger), logger, filepath.Join(os.Getenv("HOME"), ".flowlink")),
+		planStore:     planStore,
 		usage:     usageTracker,
 		invoices:  invoiceStore,
 	}
@@ -212,6 +215,8 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/audit", r.handleAuditQuery)
 	apiMux.HandleFunc("/api/v1/audit/export", r.handleAuditExport)
 	apiMux.HandleFunc("/api/v1/audit/stats", r.handleAuditStats)
+	apiMux.HandleFunc("/api/v1/approvals", r.handleApprovalsList)
+	apiMux.HandleFunc("/api/v1/approvals/", r.handleApprovalAction)
 
 	// Registry endpoints (multi-tenancy)
 	apiMux.HandleFunc("/api/v1/clients", r.handleClients)                  // POST — создать, GET — список
@@ -497,6 +502,15 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 					payloadData = m
 				}
 			}
+			// Store in approval queue
+			cmd, _ := payloadData["command"].(string)
+			risk, _ := payloadData["risk_level"].(string)
+			mode, _ := payloadData["approval_mode"].(string)
+			if cmd == "" {
+				cmd, _ = payloadData["description"].(string)
+			}
+			r.approvalQueue.Add(msg.AgentID, cmd, risk, mode)
+
 			r.eventBus.Publish(Event{
 				Type:    EventApprovalRequired,
 				AgentID: msg.AgentID,
@@ -1293,6 +1307,75 @@ func (r *Relay) handleAgentDelete(w http.ResponseWriter, req *http.Request) {
 }
 
 // === Billing HTTP Handlers ===
+
+// handleApprovalsList — GET /api/v1/approvals?agent_id=X&status=pending&limit=50
+func (r *Relay) handleApprovalsList(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	agentID := req.URL.Query().Get("agent_id")
+	status := req.URL.Query().Get("status")
+	limit := 50
+	if l := req.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	reqs := r.approvalQueue.List(agentID, ApprovalStatus(status), limit)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"approvals":     reqs,
+		"pending_count": r.approvalQueue.PendingCount(),
+	})
+}
+
+// handleApprovalAction — POST /api/v1/approvals/{id}/approve or /reject
+func (r *Relay) handleApprovalAction(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := strings.TrimPrefix(req.URL.Path, "/api/v1/approvals/")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 2 {
+		http.Error(w, "use /api/v1/approvals/{id}/approve or /reject", http.StatusBadRequest)
+		return
+	}
+	id := parts[0]
+	action := parts[1]
+
+	var body struct {
+		Comment string `json:"comment"`
+	}
+	json.NewDecoder(req.Body).Decode(&body)
+
+	// Get actor from token or default
+	actor := "dashboard"
+	if auth := req.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		actor = "token:" + auth[len("Bearer "):min(len(auth), 20)]
+	}
+
+	var req2 *ApprovalRequest
+	var err error
+	switch action {
+	case "approve":
+		req2, err = r.approvalQueue.Approve(id, actor, body.Comment)
+	case "reject":
+		req2, err = r.approvalQueue.Reject(id, actor, body.Comment)
+	default:
+		http.Error(w, "action must be 'approve' or 'reject'", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(req2)
+}
 
 // handleBillingUsage — GET /api/v1/billing/usage?client_id=X
 func (r *Relay) handleBillingUsage(w http.ResponseWriter, req *http.Request) {
