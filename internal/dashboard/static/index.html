@@ -29,6 +29,7 @@ tr:hover td{background:var(--surface2)}
 .badge-on.green{background:#22c55e22;color:var(--green)}
 .badge-on.red{background:#ef444422;color:var(--red)}
 .badge-on.yellow{background:#eab30822;color:var(--yellow)}
+.badge-on.blue{background:#3b82f622;color:var(--blue)}
 button{padding:8px 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface2);color:var(--text);cursor:pointer;font-size:13px;transition:.15s}
 button:hover{background:var(--border)}
 button.primary{background:var(--accent);border-color:var(--accent)}
@@ -59,6 +60,40 @@ pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(-
 .page{display:none}.page.active{display:block}
 .loading{opacity:.5;pointer-events:none}
 .tag{display:inline-block;padding:2px 8px;background:var(--surface2);border-radius:4px;font-size:11px;margin-right:4px;color:var(--dim)}
+
+/* Welcome */
+.welcome{text-align:center;max-width:600px;margin:60px auto}
+.welcome .icon{font-size:64px;margin-bottom:20px}
+.welcome h1{font-size:28px;margin-bottom:8px}
+.welcome .subtitle{color:var(--dim);font-size:16px;margin-bottom:32px}
+.steps{display:flex;flex-direction:column;gap:16px;text-align:left;margin-bottom:32px}
+.step{display:flex;gap:16px;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:.2s}
+.step:hover{border-color:var(--accent);background:var(--surface2)}
+.step .num{background:var(--accent);color:#fff;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+.step.done .num{background:var(--green)}
+.step .info h3{font-size:14px;margin-bottom:4px}
+.step .info p{font-size:12px;color:var(--dim)}
+.step .check{margin-left:auto;color:var(--green);font-size:20px;flex-shrink:0}
+
+/* Agent detail */
+.agent-header{display:flex;align-items:center;gap:16px;margin-bottom:24px}
+.agent-header .avatar{width:48px;height:48px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:24px}
+.agent-header .info h1{margin-bottom:2px}
+.agent-header .info .meta{color:var(--dim);font-size:13px}
+.detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px}
+.detail-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.detail-item .label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.detail-item .val{font-size:15px;font-weight:600}
+.section-tabs{display:flex;gap:4px;margin-bottom:16px;background:var(--surface);border-radius:var(--radius);padding:4px;border:1px solid var(--border)}
+.section-tabs button{border:none;background:transparent;color:var(--dim);padding:8px 16px;border-radius:6px;font-size:13px}
+.section-tabs button.active{background:var(--accent);color:#fff}
+.tab-content{display:none}.tab-content.active{display:block}
+.console-input{display:flex;gap:8px;margin-top:12px}
+.console-input input{flex:1;font-family:'SF Mono',Menlo,monospace}
+.console-line{font-family:'SF Mono',Menlo,monospace;font-size:12px;padding:3px 0;border-bottom:1px solid #1a1a2e}
+.console-line .prompt{color:var(--accent2)}
+.console-line .out{color:var(--text)}
+.console-line .err{color:var(--red)}
 </style>
 </head>
 <body>
@@ -66,6 +101,7 @@ pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(-
   <div class="logo">⚡ FlowLink</div>
   <a href="#/" data-page="overview" class="active">📊 Обзор</a>
   <a href="#/agents" data-page="agents">🖥 Агенты</a>
+  <a href="#/agents/" data-page="agents" style="padding-left:40px">📋 Детали</a>
   <a href="#/clients" data-page="clients">👥 Клиенты</a>
   <a href="#/exec" data-page="exec">⌨️ Выполнение</a>
   <a href="#/audit" data-page="audit">📋 Аудит</a>
@@ -81,6 +117,10 @@ pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(-
     <div class="bar-chart" id="hourly-chart"></div>
   </div>
 </div>
+<!-- WELCOME -->
+<div id="page-welcome" class="page">
+  <div class="welcome" id="welcome-content"></div>
+</div>
 <!-- AGENTS -->
 <div id="page-agents" class="page">
   <h1>Агенты</h1>
@@ -91,8 +131,12 @@ pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(-
   <div class="card" style="padding:0;overflow:auto">
     <table><thead><tr><th>Имя</th><th>OS</th><th>Статус</th><th>Последний визит</th><th>Теги</th><th>Действия</th></tr></thead>
     <tbody id="agents-tbody"></tbody></table>
-    <div class="empty" id="agents-empty" style="display:none">Нет агентов</div>
+    <div class="empty" id="agents-empty" style="display:none">Нет подключённых агентов.<br><br>Запустите агента на целевой машине:<br><code style="color:var(--accent2)">flowlink-agent init</code></div>
   </div>
+</div>
+<!-- AGENT DETAIL -->
+<div id="page-agent-detail" class="page">
+  <div id="agent-detail-content"></div>
 </div>
 <!-- CLIENTS -->
 <div id="page-clients" class="page">
@@ -163,10 +207,12 @@ pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(-
 const API='/api';
 const $=s=>document.querySelector(s);
 const $$=s=>document.querySelectorAll(s);
+let allAgents=[], allClients=[], currentAgentId=null;
 
 // === API ===
 async function api(path,opts={}){
   const r=await fetch(API+path,{headers:{'Content-Type':'application/json',...opts.headers},...opts});
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||r.statusText)}
   return r.json();
 }
 
@@ -175,29 +221,82 @@ function route(){
   const hash=location.hash||'#/';
   $$('.page').forEach(p=>p.classList.remove('active'));
   $$('nav a').forEach(a=>a.classList.remove('active'));
+
+  // Agent detail: #/agents/AGENT_ID
+  const agentMatch=hash.match(/^#\/agents\/([a-zA-Z0-9_-]+)$/);
+  if(agentMatch){
+    $('#page-agent-detail').classList.add('active');
+    loadAgentDetail(agentMatch[1]);
+    return;
+  }
+
   const page=hash.replace('#/','').replace(/\/.*/,'')||'overview';
   const el=$(`#page-${page}`);
   if(el){el.classList.add('active');$$(`nav a[data-page="${page}"]`).forEach(a=>a.classList.add('active'))}
-  const loaders={overview:loadOverview,agents:loadAgents,clients:loadClients,exec:loadExecAgents,audit:loadAudit,settings:loadSettings};
+  const loaders={overview:loadOverview,agents:loadAgents,clients:loadClients,exec:loadExecAgents,audit:loadAudit,settings:loadSettings,welcome:loadWelcome};
   if(loaders[page])loaders[page]();
 }
 window.addEventListener('hashchange',route);
 
+// === Welcome ===
+async function loadWelcome(){
+  try{
+    const stats=await api('/overview');
+    const agents=stats.agents||[];
+    const clients=stats.clients||[];
+    const hasAgents=agents.length>0;
+    const hasClients=clients.length>0;
+    const setupDone=localStorage.getItem('fl_setup_done');
+
+    const steps=[
+      {num:1,title:'Запустите реле',desc:'flowlink-relay setup — создать первого клиента и API-токен',done:hasClients||setupDone==='step1'},
+      {num:2,title:'Подключите агента',desc:'flowlink-agent init — на целевой машине, укажите WSS-адрес и токен',done:hasAgents},
+      {num:3,title:'Выполните команду',desc:'Выберите агента → введите команду → получите результат',done:false}
+    ];
+
+    $('#welcome-content').innerHTML=`
+      <div class="icon">⚡</div>
+      <h1>Добро пожаловать в FlowLink</h1>
+      <p class="subtitle">Управляйте удалёнными машинами через WebSocket реле.<br>3 шага до первой команды.</p>
+      <div class="steps">
+        ${steps.map(s=>`
+          <div class="step ${s.done?'done':''}" onclick="${s.done?'':`location.hash='#/${s.num===1?'clients':'agents'}'`}">
+            <div class="num">${s.done?'✓':s.num}</div>
+            <div class="info"><h3>${s.title}</h3><p>${s.desc}</p></div>
+            ${s.done?'<div class="check">✓</div>':''}
+          </div>`).join('')}
+      </div>
+      ${hasAgents?`<button class="primary" onclick="location.hash='#/agents'" style="margin-right:8px">🖥 Перейти к агентам</button>`:''}
+      ${!hasClients?`<button class="primary" onclick="location.hash='#/clients'">👥 Создать клиента</button>`:''}
+    `;
+  }catch(e){
+    // Fallback if API not ready
+    $('#welcome-content').innerHTML=`
+      <div class="icon">⚡</div>
+      <h1>Добро пожаловать в FlowLink</h1>
+      <p class="subtitle">Реле запускается... Обновите страницу через секунду.</p>
+      <button class="primary" onclick="loadWelcome()">🔄 Обновить</button>
+    `;
+  }
+}
+
 // === Overview ===
 async function loadOverview(){
   try{
-    const [stats,agents,clients]=await Promise.all([
-      api('/overview'),
-      api('/agents'),
-      api('/clients')
-    ]);
+    const stats=await api('/overview');
     const agentList=stats.agents||[];
     const clientList=stats.clients||[];
     const online=stats.online_agents||agentList.filter(a=>a.is_online).length;
+    allAgents=agentList; allClients=clientList;
+
+    // Redirect to welcome if no data
+    if(!agentList.length && !clientList.length){
+      location.hash='#/welcome';
+      return;
+    }
+
     const now=new Date();
     const last24=now.getTime()-24*3600*1000;
-
-    // Hourly chart data
     const entries=stats.stats?.entries||[];
     const hourly=new Array(24).fill(0);
     entries.forEach(e=>{
@@ -208,23 +307,26 @@ async function loadOverview(){
     $('#stats-grid').innerHTML=`
       <div class="card stat"><div class="label">Статус</div><div class="value" style="color:var(--green)">● Онлайн</div></div>
       <div class="card stat"><div class="label">Агенты</div><div class="value">${agentList.length} <span style="font-size:14px;color:var(--dim)">${online} онлайн</span></div></div>
-      <div class="card stat"><div class="label">Команд за 24ч</div><div class="value">${stats.last_24h_count||stats.Last24hCount||0}</div></div>
+      <div class="card stat"><div class="label">Команд за 24ч</div><div class="value">${stats.last_24h_count||0}</div></div>
       <div class="card stat"><div class="label">Клиенты</div><div class="value">${clientList.length}</div></div>`;
 
     const maxH=Math.max(...hourly,1);
     $('#hourly-chart').innerHTML=hourly.map((v,i)=>`<div class="bar" style="height:${Math.max(2,v/maxH*100)}%"><span>${i}</span></div>`).join('');
-  }catch(e){console.error(e)}
+  }catch(e){
+    // API might not be ready — show welcome
+    location.hash='#/welcome';
+  }
 }
 
 // === Agents ===
 async function loadAgents(){
   try{
-    const [agents,clients]=await Promise.all([api('/agents'),api('/clients')]);
-    const agentList=r.agents||[];
-    const clientList=r.clients||[];
+    const [ar,cr]=await Promise.all([api('/agents').catch(()=>({agents:[]})),api('/clients').catch(()=>({clients:[]}))]);
+    const agentList=ar.agents||[];
+    const clientList=cr.clients||[];
+    allAgents=agentList; allClients=clientList;
     const clientFilter=$('#agent-filter-client').value;
 
-    // Populate client filter
     const sel=$('#agent-filter-client');
     if(sel.options.length<=1){
       clientList.forEach(c=>{const o=document.createElement('option');o.value=c.id||c.ID;o.textContent=c.name||c.Name;sel.appendChild(o)});
@@ -241,9 +343,138 @@ async function loadAgents(){
       const seen=a.last_seen_at||'';
       const tags=(a.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
       const seenStr=seen?timeAgo(new Date(seen)):'никогда';
-      return `<tr><td>${host}</td><td>${os}</td><td><span class="badge-on ${online?'green':'red'}">${online?'Онлайн':'Оффлайн'}</span></td><td>${seenStr}</td><td>${tags}</td><td><button class="sm" onclick="execOnAgent('${id}','${host}')">⌨</button></td></tr>`;
+      return `<tr style="cursor:pointer" onclick="location.hash='#/agents/${id}'">
+        <td><strong>${host}</strong></td><td>${os}</td>
+        <td><span class="badge-on ${online?'green':'red'}">${online?'● Онлайн':'○ Оффлайн'}</span></td>
+        <td>${seenStr}</td><td>${tags}</td>
+        <td><button class="sm" onclick="event.stopPropagation();execOnAgent('${id}','${host}')">⌨</button></td></tr>`;
     }).join('');
   }catch(e){console.error(e)}
+}
+
+// === Agent Detail ===
+async function loadAgentDetail(id){
+  currentAgentId=id;
+  const el=$('#agent-detail-content');
+
+  try{
+    const [ar,audit]=await Promise.all([
+      api('/agents'),
+      api(`/audit?agent_id=${id}&limit=50`).catch(()=>({entries:[]}))
+    ]);
+    const agent=(ar.agents||[]).find(a=>a.id===id);
+    if(!agent){el.innerHTML=`<div class="empty">Агент ${id.slice(0,8)} не найден</div>`;return}
+
+    const online=agent.is_online||false;
+    const name=agent.label||agent.hostname||id.slice(0,8);
+    const os=agent.os||'-';
+    const arch=agent.arch||'-';
+    const version=agent.version||'-';
+    const client=allClients.find(c=>c.id===(agent.client_id||agent.ClientID));
+    const clientName=client?client.name:'—';
+    const tags=(agent.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('')||'<span style="color:var(--dim)">нет</span>';
+    const seen=agent.last_seen_at?timeAgo(new Date(agent.last_seen_at)):'никогда';
+    const entries=audit.entries||[];
+
+    el.innerHTML=`
+      <div style="margin-bottom:16px">
+        <button class="sm" onclick="location.hash='#/agents'">← Назад к списку</button>
+      </div>
+      <div class="agent-header">
+        <div class="avatar">🖥</div>
+        <div class="info">
+          <h1>${name}</h1>
+          <div class="meta">
+            <span class="badge-on ${online?'green':'red'}">${online?'● Подключён':'○ Отключён'}</span>
+            &nbsp; ID: <code style="font-size:12px;color:var(--dim)">${id}</code>
+          </div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          ${online?`<button class="primary" onclick="openConsole('${id}')">⌨ Консоль</button>`:'<button disabled>Оффлайн</button>'}
+        </div>
+      </div>
+
+      <div class="detail-grid">
+        <div class="detail-item"><div class="label">ОС</div><div class="val">${os}</div></div>
+        <div class="detail-item"><div class="label">Архитектура</div><div class="val">${arch}</div></div>
+        <div class="detail-item"><div class="label">Версия агента</div><div class="val">${version}</div></div>
+        <div class="detail-item"><div class="label">Клиент</div><div class="val">${clientName}</div></div>
+        <div class="detail-item"><div class="label">Последний визит</div><div class="val">${seen}</div></div>
+        <div class="detail-item"><div class="label">Теги</div><div class="val">${tags}</div></div>
+      </div>
+
+      <div class="section-tabs">
+        <button class="active" onclick="switchTab(this,'audit')">📋 История команд</button>
+        <button onclick="switchTab(this,'info')">ℹ️ Информация</button>
+        <button onclick="switchTab(this,'console')">⌨ Консоль</button>
+      </div>
+
+      <div id="tab-audit" class="tab-content active">
+        ${entries.length?`
+        <div class="card" style="padding:0;overflow:auto">
+          <table><thead><tr><th>Время</th><th>Действие</th><th>Команда</th><th>Результат</th><th>Длительность</th></tr></thead>
+          <tbody>${entries.map(e=>{
+            const ts=e.timestamp||e.Timestamp;
+            const action=e.action||e.Action;
+            const cmd=(e.command||e.Command||'').slice(0,80);
+            const result=e.result||e.Result;
+            const dur=e.duration_ms||e.DurationMs||0;
+            const rc=result==='success'?'green':result==='error'?'red':'yellow';
+            return `<tr><td>${formatTime(new Date(ts))}</td><td>${action}</td><td title="${e.command||''}"><code>${cmd}</code></td>
+              <td><span class="badge-on ${rc}">${result}</span></td><td>${dur}ms</td></tr>`;
+          }).join('')}</tbody></table>
+        </div>`:'<div class="empty">Нет выполненных команд</div>'}
+      </div>
+
+      <div id="tab-info" class="tab-content">
+        <div class="card">
+          <h2>Подробности агента</h2>
+          <pre class="output">${JSON.stringify(agent,null,2)}</pre>
+        </div>
+      </div>
+
+      <div id="tab-console" class="tab-content">
+        <div class="card">
+          <h2>Консоль ${name}</h2>
+          <div id="detail-console-output" class="output" style="min-height:200px;max-height:500px">
+            <div class="console-line"><span class="prompt">$</span> <span class="out">Готов к выполнению команд...</span></div>
+          </div>
+          <div class="console-input">
+            <input id="detail-console-cmd" placeholder="Введите команду..." onkeydown="if(event.key==='Enter')execDetailCmd('${id}')">
+            <button class="primary" onclick="execDetailCmd('${id}')">▶</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }catch(e){el.innerHTML=`<div class="empty">Ошибка загрузки: ${e.message}</div>`}
+}
+
+function switchTab(btn,tabId){
+  btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  btn.closest('.page').querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+tabId).classList.add('active');
+}
+
+async function execDetailCmd(agentId){
+  const cmd=$('#detail-console-cmd').value.trim();
+  if(!cmd)return;
+  const output=$('#detail-console-output');
+  output.innerHTML+=`<div class="console-line"><span class="prompt">$ </span><span class="out">${escHtml(cmd)}</span></div>`;
+  $('#detail-console-cmd').value='';
+  try{
+    const r=await api('/agents/exec',{method:'POST',body:JSON.stringify({agent_id:agentId,command:cmd})});
+    const out=r.output||r.stdout||JSON.stringify(r,null,2);
+    output.innerHTML+=`<div class="console-line"><span class="out">${escHtml(out)}</span></div>`;
+  }catch(e){
+    output.innerHTML+=`<div class="console-line"><span class="err">Ошибка: ${escHtml(e.message)}</span></div>`;
+  }
+  output.scrollTop=output.scrollHeight;
+}
+
+function openConsole(id){
+  switchTab(document.querySelector('#page-agent-detail .section-tabs button:nth-child(3)'),'console');
+  $('#detail-console-cmd').focus();
 }
 
 // === Clients ===
@@ -251,6 +482,7 @@ async function loadClients(){
   try{
     const r=await api('/clients');
     const list=r.clients||r||[];
+    allClients=list;
     const tbody=$('#clients-tbody');
     if(!list.length){tbody.innerHTML='';$('#clients-empty').style.display='block';return}
     $('#clients-empty').style.display='none';
@@ -266,11 +498,12 @@ async function loadClients(){
 async function loadExecAgents(){
   try{
     const r=await api('/agents');const list=r.agents||[];
+    allAgents=list;
     const sel=$('#exec-agent');
     sel.innerHTML='<option value="">Выберите агента</option>';
     list.forEach(a=>{
-      const id=a.id||a.ID;const name=a.label||a.hostname||a.Hostname||id.slice(0,8);
-      const online=a.is_online||a.IsOnline||false;
+      const id=a.id||a.ID;const name=a.label||a.hostname||id.slice(0,8);
+      const online=a.is_online||false;
       sel.innerHTML+=`<option value="${id}" ${!online?'disabled':''}>${name} (${online?'●':'○'})</option>`;
     });
     loadCmdHistory();
@@ -301,7 +534,7 @@ function saveCmdHistory(agent,cmd){
 }
 function loadCmdHistory(){
   const h=JSON.parse(localStorage.getItem('fl_cmd_history')||'[]');
-  $('#cmd-history').innerHTML=h.map(x=>`<div class="item" onclick="document.getElementById('exec-cmd').value='${x.cmd.replace(/'/g,"\\'")}'"><span style="color:var(--dim)">${x.agent}</span> ${x.cmd.slice(0,60)}</div>`).join('')||'<div class="empty">Нет истории</div>';
+  $('#cmd-history').innerHTML=h.map(x=>`<div class="item" onclick="document.getElementById('exec-cmd').value=decodeURIComponent('${encodeURIComponent(x.cmd)}')"><span style="color:var(--dim)">${x.agent.slice(0,8)}</span> ${x.cmd.slice(0,60)}</div>`).join('')||'<div class="empty">Нет истории</div>';
 }
 
 // === Audit ===
@@ -324,7 +557,7 @@ async function loadAudit(){
       const result=e.result||e.Result;
       const dur=e.duration_ms||e.DurationMs||0;
       const rc=result==='success'?'green':result==='error'?'red':'yellow';
-      return `<tr><td>${formatTime(new Date(ts))}</td><td>${aid.slice(0,8)}</td><td>${action}</td><td title="${(e.command||e.Command||'')}">${cmd}</td><td><span class="badge-on ${rc}">${result}</span></td><td>${dur}ms</td></tr>`;
+      return `<tr><td>${formatTime(new Date(ts))}</td><td>${aid.slice(0,8)}</td><td>${action}</td><td title="${e.command||e.Command||''}">${cmd}</td><td><span class="badge-on ${rc}">${result}</span></td><td>${dur}ms</td></tr>`;
     }).join('');
   }catch(e){console.error(e)}
 }
@@ -339,7 +572,7 @@ async function loadSettings(){
     const cfg=await api('/config');
     $('#settings-config').innerHTML=`<pre class="output" style="margin:0">${JSON.stringify(cfg,null,2)}</pre>`;
   }catch(e){
-    $('#settings-config').innerHTML=`<pre class="output" style="margin:0;color:var(--dim)">Не удалось загрузить конфигурацию. Проверьте endpoint /api/v1/config</pre>`;
+    $('#settings-config').innerHTML=`<pre class="output" style="margin:0;color:var(--dim)">Не удалось загрузить конфигурацию.</pre>`;
   }
   try{
     const r=await api('/clients');const list=r.clients||r||[];
@@ -368,6 +601,7 @@ async function createClient(){
   const name=$('#mc-name').value;const email=$('#mc-email').value;const plan=$('#mc-plan').value;
   if(!name)return;
   await api('/clients',{method:'POST',body:JSON.stringify({name,email,plan})});
+  localStorage.setItem('fl_setup_done','step1');
   closeModal();loadClients();
 }
 
@@ -376,16 +610,17 @@ function viewClient(id){
     showModal(`<h3>${c.name||c.Name}</h3>
       <p style="color:var(--dim);margin-bottom:12px">ID: ${id}</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px">
-        <div>Email: <strong>${c.email||c.Email||'-'}</strong></div>
-        <div>Тариф: <strong>${c.plan||c.Plan}</strong></div>
-        <div>Агенты: <strong>${c.agent_count||c.MaxAgents||0}</strong></div>
-        <div>Токен: <code style="font-size:11px">${(c.api_token||c.APIToken||'-').slice(0,20)}...</code></div>
+        <div>Email: <strong>${c.email||'-'}</strong></div>
+        <div>Тариф: <strong>${c.plan||'starter'}</strong></div>
+        <div>Агенты: <strong>${c.max_agents||0}</strong></div>
+        <div>Токен: <code style="font-size:11px">${(c.api_token||'-').slice(0,20)}...</code></div>
       </div>
       <div class="modal-actions"><button onclick="closeModal()">Закрыть</button></div>`);
-  });
+  }).catch(e=>{showModal(`<h3>Ошибка</h3><p>${e.message}</p><div class="modal-actions"><button onclick="closeModal()">OK</button></div>`)});
 }
 
 // === Utils ===
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function timeAgo(d){const s=Math.floor((Date.now()-d.getTime())/1000);if(s<60)return s+'с';if(s<3600)return Math.floor(s/60)+'м';if(s<86400)return Math.floor(s/3600)+'ч';return Math.floor(s/86400)+'д'}
 function formatTime(d){return d.toLocaleString('ru-RU',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 
