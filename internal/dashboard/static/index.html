@@ -204,7 +204,7 @@ pre.output{background:#0d0e14;border:1px solid var(--border);border-radius:var(-
 </main>
 <div id="modal-root"></div>
 <script>
-const API='/api';
+const API=location.pathname.replace(/\/$/,'').replace(/\/dashboard$/,'')+'/dashboard/api';
 const $=s=>document.querySelector(s);
 const $$=s=>document.querySelectorAll(s);
 let allAgents=[], allClients=[], currentAgentId=null;
