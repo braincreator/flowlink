@@ -3,15 +3,19 @@
 package relay
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/braincreator/flowlink/internal/billing"
@@ -163,6 +167,16 @@ func (r *Relay) SetLLMProxy(proxy *LLMProxy) {
 	r.llmProxy = proxy
 }
 
+// CreateFirstClient — создаёт первого клиента (для setup wizard).
+func (r *Relay) CreateFirstClient(name, email string) (*Client, error) {
+	return r.registry.CreateClient(name, email, "starter")
+}
+
+// CreateFirstAgent — создаёт первого агента (для setup wizard).
+func (r *Relay) CreateFirstAgent(clientID, label string) (*AgentRegistration, error) {
+	return r.registry.RegisterAgent(clientID, label, []string{"default"}, runtime.GOOS, runtime.GOARCH)
+}
+
 // Start — запускает WSS-сервер для агентов.
 func (r *Relay) Start() error {
 	// WSS endpoint для агентов
@@ -256,33 +270,83 @@ func (r *Relay) Start() error {
 		"tls_mode", r.cfg.TLSMode,
 	)
 
-	// WSS сервер
-	go func() {
-		var wssServer *http.Server
-		if tlsConfig != nil {
-			wssServer = &http.Server{
-				Addr:      r.cfg.WSSAddr,
-				TLSConfig: tlsConfig,
-			}
-			r.logger.Info("WSS сервер запущен (TLS)", "addr", r.cfg.WSSAddr)
-		} else {
-			wssServer = &http.Server{
-				Addr: r.cfg.WSSAddr,
-			}
-			r.logger.Info("WSS сервер запущен (без TLS)", "addr", r.cfg.WSSAddr)
-		}
+	// Контекст с graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-		if err := wssServer.ListenAndServe(); err != nil {
-			r.logger.Error("WSS сервер ошибка", "err", err)
+	// WSS сервер
+	wssServer := &http.Server{Addr: r.cfg.WSSAddr}
+	if tlsConfig != nil {
+		wssServer.TLSConfig = tlsConfig
+		r.logger.Info("WSS сервер запущен (TLS)", "addr", r.cfg.WSSAddr)
+	} else {
+		r.logger.Info("WSS сервер запущен (без TLS)", "addr", r.cfg.WSSAddr)
+	}
+	wssErr := make(chan error, 1)
+	go func() {
+		if tlsConfig != nil {
+			wssErr <- wssServer.ListenAndServeTLS("", "")
+		} else {
+			wssErr <- wssServer.ListenAndServe()
 		}
 	}()
 
 	// HTTP API сервер
-	r.logger.Info("HTTP API запущен", "addr", r.cfg.APIAddr)
-	if tlsConfig != nil {
-		return http.ListenAndServeTLS(r.cfg.APIAddr, "", "", handler)
+	apiServer := &http.Server{Addr: r.cfg.APIAddr, Handler: handler}
+	apiErr := make(chan error, 1)
+	go func() {
+		r.logger.Info("HTTP API запущен", "addr", r.cfg.APIAddr)
+		if tlsConfig != nil {
+			apiErr <- apiServer.ListenAndServeTLS("", "")
+		} else {
+			apiErr <- apiServer.ListenAndServe()
+		}
+	}()
+
+	// Ждём shutdown signal или ошибку
+	var serverErr error
+	select {
+	case <-ctx.Done():
+		r.logger.Info("получен сигнал shutdown, начинаем graceful shutdown...")
+	case err := <-wssErr:
+		if err != nil && err != http.ErrServerClosed {
+			serverErr = fmt.Errorf("WSS: %w", err)
+		}
+	case err := <-apiErr:
+		if err != nil && err != http.ErrServerClosed {
+			serverErr = fmt.Errorf("API: %w", err)
+		}
 	}
-	return http.ListenAndServe(r.cfg.APIAddr, handler)
+
+	// Graceful shutdown: 30 секунд на завершение
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	// 1. Compacting registry
+	r.logger.Info("сохранение реестра...")
+	if err := r.registry.Save(); err != nil {
+		r.logger.Error("ошибка сохранения реестра", "err", err)
+	}
+
+	// 2. Shutdown servers
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := wssServer.Shutdown(shutdownCtx); err != nil {
+			r.logger.Error("WSS shutdown error", "err", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := apiServer.Shutdown(shutdownCtx); err != nil {
+			r.logger.Error("API shutdown error", "err", err)
+		}
+	}()
+	wg.Wait()
+
+	r.logger.Info("graceful shutdown завершён")
+	return serverErr
 }
 
 // HandleAgentWSForTest — экспортированная версия handleAgentWS для тестов.

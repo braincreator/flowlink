@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/braincreator/flowlink/internal/billing"
@@ -154,12 +153,10 @@ func (ph *PaymentHandlers) HandleSubscribe(chatID int64, args []string) {
 	)
 
 	// Отправляем сообщение с inline кнопкой
-	keyboard := [][]InlineButton{
-		{
-			{Text: "💳 Оплатить картой", URL: session.PaymentURL},
-		},
-		{
-			{Text: "❌ Отмена", CallbackData: "cancel_sub:" + sub.ID},
+	keyboard := &tgInlineKeyboard{
+		InlineKeyboard: [][]tgButton{
+			{{Text: "💳 Оплатить картой", URL: session.PaymentURL}},
+			{{Text: "❌ Отмена", CallbackData: "cancel_sub:" + sub.ID}},
 		},
 	}
 	ph.bot.sendMessageWithKeyboard(chatID, msg, keyboard)
@@ -260,14 +257,12 @@ func (ph *PaymentHandlers) HandleMySubscription(chatID int64) {
 		}
 
 		// Добавляем кнопки
-		var keyboard [][]InlineButton
 		if sub.Status == billing.SubscriptionStatusActive {
-			keyboard = [][]InlineButton{
-				{{Text: "❌ Отменить подписку", CallbackData: "cancel_sub:" + sub.ID}},
+			keyboard := &tgInlineKeyboard{
+				InlineKeyboard: [][]tgButton{
+					{{Text: "❌ Отменить подписку", CallbackData: "cancel_sub:" + sub.ID}},
+				},
 			}
-		}
-
-		if keyboard != nil {
 			ph.bot.sendMessageWithKeyboard(chatID, msg, keyboard)
 		} else {
 			ph.bot.sendMessage(chatID, msg)
@@ -325,10 +320,12 @@ func (ph *PaymentHandlers) HandleCancel(chatID int64, args []string) {
 		targetSub.NextBillingDate.Format("02.01.2006"),
 	)
 
-	keyboard := [][]InlineButton{
-		{
-			{Text: "✅ Да, отменить", CallbackData: "confirm_cancel:" + targetSub.ID},
-			{Text: "❌ Нет, оставить", CallbackData: "dismiss"},
+	keyboard := &tgInlineKeyboard{
+		InlineKeyboard: [][]tgButton{
+			{
+				{Text: "✅ Да, отменить", CallbackData: "confirm_cancel:" + targetSub.ID},
+				{Text: "❌ Нет, оставить", CallbackData: "dismiss"},
+			},
 		},
 	}
 	ph.bot.sendMessageWithKeyboard(chatID, msg, keyboard)
@@ -530,18 +527,4 @@ func min(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// InlineButton — кнопка inline клавиатуры.
-type InlineButton struct {
-	Text         string `json:"text"`
-	URL          string `json:"url,omitempty"`
-	CallbackData string `json:"callback_data,omitempty"`
-}
-
-// sendMessageWithKeyboard — отправляет сообщение с inline клавиатурой (заглушка).
-func (b *Bot) sendMessageWithKeyboard(chatID int64, text string, keyboard [][]InlineButton) {
-	// TODO: Реализовать отправку с inline кнопками через Telegram API
-	// Пока просто отправляем текст
-	b.sendMessage(chatID, text)
 }

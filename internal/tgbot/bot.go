@@ -151,7 +151,8 @@ type tgInlineKeyboard struct {
 // tgButton — кнопка inline клавиатуры.
 type tgButton struct {
 	Text         string `json:"text"`
-	CallbackData string `json:"callback_data"`
+	URL          string `json:"url,omitempty"`
+	CallbackData string `json:"callback_data,omitempty"`
 }
 
 // tgAnswerCallback — ответ на callback query.
