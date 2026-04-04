@@ -236,7 +236,11 @@ func DefaultRelayConfig() RelayConfig {
 }
 
 // ConfigDir — директория конфигурации flowlink.
+// Поддерживает переменную окружения FLOWLINK_CONFIG_DIR.
 func ConfigDir() (string, error) {
+	if dir := os.Getenv("FLOWLINK_CONFIG_DIR"); dir != "" {
+		return dir, os.MkdirAll(dir, 0700)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

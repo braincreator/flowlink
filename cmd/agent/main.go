@@ -294,12 +294,21 @@ func agentStart() {
 			continue
 		}
 		slog.Info("connected to relay")
-		// Connection lost — reconnect
-		slog.Warn("connection lost, will reconnect...")
-	}
 
-	// Block
-	<-ctx.Done()
+		// Канал для сигнала о потере соединения
+		disconnected := make(chan struct{})
+		a.SetOnDisconnect(func() {
+			close(disconnected)
+		})
+
+		// Ждём потери соединения или shutdown
+		select {
+		case <-disconnected:
+			slog.Warn("connection lost, reconnecting...")
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func agentStop() {

@@ -24,10 +24,11 @@ const DefaultReadOnly = true
 // Agent — экземпляр агента.
 type Agent struct {
 	cfg    *config.Config
-	conn   *websocket.Conn
-	wsMu   sync.Mutex // мьютекс для записи в WebSocket
-	done   chan struct{}
-	logger *slog.Logger
+	conn         *websocket.Conn
+	wsMu         sync.Mutex       // мьютекс для записи в WebSocket
+	done         chan struct{}
+	onDisconnect func()            // callback при потере соединения
+	logger       *slog.Logger
 
 	// Подсистемы
 	executor    *Executor
@@ -175,8 +176,18 @@ func (a *Agent) Disconnect() {
 	a.logger.Info("отключён от реле")
 }
 
+// SetOnDisconnect устанавливает callback при потере соединения.
+func (a *Agent) SetOnDisconnect(fn func()) {
+	a.onDisconnect = fn
+}
+
 // readLoop — читает сообщения от реле и маршрутизирует их.
 func (a *Agent) readLoop(ctx context.Context) {
+	defer func() {
+		if a.onDisconnect != nil {
+			a.onDisconnect()
+		}
+	}()
 	for {
 		select {
 		case <-a.done:
