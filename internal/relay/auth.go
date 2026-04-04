@@ -976,3 +976,17 @@ func GetClientIDFromContext(r *http.Request) string {
 func SetClientIDInContext(w http.ResponseWriter, clientID string) {
 	w.Header().Set("X-Client-ID", clientID)
 }
+
+// TokenCount — количество активных токенов.
+func (am *AuthManager) TokenCount() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return len(am.tokens)
+}
+
+// BlacklistCount — количество токенов в blacklist.
+func (am *AuthManager) BlacklistCount() int {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return len(am.blacklist)
+}

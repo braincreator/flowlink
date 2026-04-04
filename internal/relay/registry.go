@@ -507,3 +507,17 @@ func generateAPIToken() (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
+
+// ClientCount — количество зарегистрированных клиентов.
+func (r *Registry) ClientCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.clients)
+}
+
+// AgentCount — количество зарегистрированных агентов.
+func (r *Registry) AgentCount() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.agents)
+}

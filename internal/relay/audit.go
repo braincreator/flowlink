@@ -711,3 +711,16 @@ func (l *AuditLogger) mapToEntry(m map[string]interface{}) AuditEntry {
 	
 	return entry
 }
+
+// IsWritable — проверяет что audit log доступен для записи.
+func (al *AuditLogger) IsWritable() bool {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	if al.currentFile != nil {
+		_, err := al.currentFile.Stat()
+		return err == nil
+	}
+	// Проверяем директорию
+	info, err := os.Stat(al.baseDir)
+	return err == nil && info.IsDir()
+}

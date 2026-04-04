@@ -22,6 +22,7 @@ import (
 	"github.com/braincreator/flowlink/internal/billing"
 	"github.com/braincreator/flowlink/internal/config"
 	"github.com/braincreator/flowlink/internal/dashboard"
+	"github.com/braincreator/flowlink/internal/health"
 	"github.com/braincreator/flowlink/internal/nginx"
 	"github.com/braincreator/flowlink/internal/protocol"
 	"github.com/google/uuid"
@@ -43,6 +44,7 @@ type Relay struct {
 	invoices    *billing.InvoiceStore
 	eventBus      *EventBus        // шина событий для SSE-уведомлений
 	approvalQueue *ApprovalQueue  // очередь запросов на подтверждение
+	healthChecker  *health.HealthChecker // мониторинг здоровья компонентов
 }
 
 // AgentConn — подключённый агент.
@@ -153,7 +155,12 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 	usageTracker := billing.NewUsageTracker(billingDir, planStore, logger)
 	invoiceStore := billing.NewInvoiceStore(billingDir, planStore, logger)
 
-	return &Relay{
+	// Инициализируем health checker
+	hc := health.NewHealthChecker("0.1.0")
+	hc.SetWSSAddr(cfg.WSSAddr)
+	hc.SetAPIAddr(cfg.APIAddr)
+
+	r := &Relay{
 		cfg:       cfg,
 		logger:    logger,
 		pool:      NewAgentPool(),
@@ -166,7 +173,16 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		planStore:     planStore,
 		usage:     usageTracker,
 		invoices:  invoiceStore,
+		healthChecker:  hc,
 	}
+
+	// Подключаем адаптеры health checker к реальным компонентам relay
+	hc.SetAgentPool(poolForHealth{pool: r.pool})
+	hc.SetAuthManager(authForHealth{auth: r.auth})
+	hc.SetAuditLogger(auditForHealth{audit: r.audit})
+	hc.SetRegistry(registryForHealth{registry: r.registry})
+
+	return r
 }
 
 // SetLLMProxy — устанавливает LLM proxy.
@@ -246,6 +262,11 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/rate-limits", r.handleRateLimits)           // GET — список, POST — сброс статистики
 	apiMux.HandleFunc("/api/v1/rate-limits/", r.handleRateLimitByClient)  // GET/PUT/DELETE для конкретного клиента
 	apiMux.HandleFunc("/api/v1/rate-limits/stats", r.handleRateLimitStats) // GET — общая статистика
+
+	// Health check endpoints
+	apiMux.HandleFunc("/api/v1/health", r.handleHealth)         // GET — полный отчёт
+	apiMux.HandleFunc("/api/v1/health/ready", r.handleHealthReady) // GET — 200/503
+	apiMux.HandleFunc("/api/v1/health/live", r.handleHealthLive)  // GET — 200/503
 
 	// Dashboard (с авторизацией через API token, регистрируем ДО middleware chain)
 	dashProvider := &dashboardProvider{r: r}
@@ -2246,4 +2267,85 @@ func (r *Relay) handleNginxConfig(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(output))
+}
+
+// --- Health Check Adapters ---
+
+// poolForHealth адаптирует AgentPool для health checker.
+type poolForHealth struct {
+	pool *AgentPool
+}
+
+func (p poolForHealth) Count() int {
+	return p.pool.Count()
+}
+
+// authForHealth адаптирует AuthManager для health checker.
+type authForHealth struct {
+	auth *AuthManager
+}
+
+func (a authForHealth) TokenCount() (int, int, int) {
+	total, blacklisted := 0, 0
+	if a.auth != nil {
+		total = a.auth.TokenCount()
+		blacklisted = a.auth.BlacklistCount()
+	}
+	return total, total - blacklisted, blacklisted
+}
+
+// auditForHealth адаптирует AuditLogger для health checker.
+type auditForHealth struct {
+	audit *AuditLogger
+}
+
+func (a auditForHealth) IsWritable() bool {
+	if a.audit != nil {
+		return a.audit.IsWritable()
+	}
+	return false
+}
+
+// registryForHealth адаптирует Registry для health checker.
+type registryForHealth struct {
+	registry *Registry
+}
+
+func (r registryForHealth) IsReadable() bool {
+	return true // registry всегда читаем (in-memory)
+}
+
+func (r registryForHealth) IsWritable() bool {
+	return true // registry с авто-сохранением
+}
+
+// --- Health Check Handlers ---
+
+// handleHealth — GET /api/v1/health — полный отчёт о здоровье.
+func (r *Relay) handleHealth(w http.ResponseWriter, req *http.Request) {
+	report := r.healthChecker.Check()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(report)
+}
+
+// handleHealthReady — GET /api/v1/health/ready — 200 если готов, 503 если нет.
+func (r *Relay) handleHealthReady(w http.ResponseWriter, req *http.Request) {
+	if r.healthChecker.IsReady() {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("NOT READY"))
+	}
+}
+
+// handleHealthLive — GET /api/v1/health/live — 200 если процесс жив.
+func (r *Relay) handleHealthLive(w http.ResponseWriter, req *http.Request) {
+	if r.healthChecker.IsLive() {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("NOT LIVE"))
+	}
 }
