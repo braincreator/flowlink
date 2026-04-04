@@ -62,6 +62,8 @@ func NewAgent(cfg *config.Config) *Agent {
 
 	// Инициализируем Kill Switch
 	killSwitch := NewKillSwitch()
+	killSwitch.SetDiskThreshold(cfg.KillSwitch.DiskThreshold)
+	killSwitch.SetCPUThreshold(cfg.KillSwitch.CPUThreshold, time.Duration(cfg.KillSwitch.CPUThresholdDur)*time.Second)
 
 	// Инициализируем Approver V2
 	approval := NewApproverV2(cfg.Approval)

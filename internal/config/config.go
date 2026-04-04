@@ -32,6 +32,9 @@ type Config struct {
 	// Backup — настройки резервного копирования
 	Backup BackupConfig `json:"backup"`
 
+	// KillSwitch — настройки защитного переключателя
+	KillSwitch KillSwitchConfig `json:"kill_switch"`
+
 	// E2EE — настройки end-to-end шифрования
 	E2EE E2EEConfig `json:"e2ee"`
 
@@ -102,6 +105,22 @@ type ApprovalConfigV2 struct {
 	HardAskTimeout int `json:"hard_ask_timeout_sec"`
 	// MaxRetries — максимум повторных запросов при hard_ask (default: 3)
 	MaxRetries int `json:"max_retries"`
+}
+
+// KillSwitchConfig — настройки защитного переключателя (kill switch).
+type KillSwitchConfig struct {
+	DiskThreshold    float64 `json:"disk_threshold"`    // порог диска для readonly (default: 90%)
+	CPUThreshold     float64 `json:"cpu_threshold"`     // порог CPU для паузы (default: 95%)
+	CPUThresholdDur  int    `json:"cpu_threshold_sec"` // длительность превышения CPU (default: 300s)
+}
+
+// DefaultKillSwitchConfig — дефолтные настройки.
+func DefaultKillSwitchConfig() KillSwitchConfig {
+	return KillSwitchConfig{
+		DiskThreshold:   90.0,
+		CPUThreshold:    95.0,
+		CPUThresholdDur: 300,
+	}
 }
 
 // BackupConfig — настройки резервного копирования.

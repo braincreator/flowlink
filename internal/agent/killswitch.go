@@ -70,6 +70,27 @@ func NewKillSwitch() *KillSwitch {
 	return ks
 }
 
+// SetDiskThreshold — устанавливает порог диска (0 = использовать default 90%).
+func (k *KillSwitch) SetDiskThreshold(percent float64) {
+	if percent > 0 {
+		k.mu.Lock()
+		k.diskThreshold = percent
+		k.mu.Unlock()
+	}
+}
+
+// SetCPUThreshold — устанавливает порог CPU и длительность превышения (0 = default).
+func (k *KillSwitch) SetCPUThreshold(percent float64, dur time.Duration) {
+	if percent > 0 {
+		k.mu.Lock()
+		k.cpuThreshold = percent
+		if dur > 0 {
+			k.cpuThresholdDur = dur
+		}
+		k.mu.Unlock()
+	}
+}
+
 // handleSignals — обрабатывает системные сигналы.
 func (k *KillSwitch) handleSignals() {
 	sigChan := make(chan os.Signal, 1)
