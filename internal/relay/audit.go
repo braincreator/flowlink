@@ -106,8 +106,10 @@ func NewAuditLoggerWithHMAC(baseDir, hmacKeyPath string) (*AuditLogger, error) {
 		stopBg:     make(chan struct{}),
 	}
 
-	// Запускаем фоновую ротацию и очистку
-	go logger.backgroundTasks()
+	// Запускаем фоновую ротацию и очистку (skip in test mode)
+	if os.Getenv("FLOWLINK_TEST_MODE") == "" {
+		go logger.backgroundTasks()
+	}
 
 	return logger, nil
 }

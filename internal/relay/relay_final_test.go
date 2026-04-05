@@ -453,7 +453,6 @@ func TestSetClientIDInContext(t *testing.T) {
 
 func TestAuthManager_CleanupBlacklist(t *testing.T) {
 	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	// Add some tokens to blacklist
 	for i := 0; i < 5; i++ {
@@ -461,8 +460,8 @@ func TestAuthManager_CleanupBlacklist(t *testing.T) {
 		auth.AddToBlacklist(token)
 	}
 
-	// Run cleanup
-	auth.cleanupBlacklist()
+	// Run cleanup (single pass)
+	auth.doCleanupBlacklist()
 
 	// Check blacklist count
 	count := auth.BlacklistCount()

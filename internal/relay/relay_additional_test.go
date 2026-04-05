@@ -429,7 +429,6 @@ func TestHandleRateLimitByClient_POST_Reset(t *testing.T) {
 
 func TestAuthManager_GenerateAgentToken(t *testing.T) {
 	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	token, err := auth.GenerateAgentToken("agent-1", 3600)
 	if err != nil {
@@ -443,7 +442,6 @@ func TestAuthManager_GenerateAgentToken(t *testing.T) {
 
 func TestAuthManager_ValidateAgentToken(t *testing.T) {
 	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	// Generate token
 	token, _ := auth.GenerateAgentToken("agent-1", 3600)
@@ -460,7 +458,6 @@ func TestAuthManager_ValidateAgentToken(t *testing.T) {
 
 func TestAuthManager_ValidateAgentToken_WrongAgent(t *testing.T) {
 	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	token, _ := auth.GenerateAgentToken("agent-1", 3600)
 
@@ -473,7 +470,6 @@ func TestAuthManager_ValidateAgentToken_WrongAgent(t *testing.T) {
 
 func TestAuthManager_ValidateAgentToken_Expired(t *testing.T) {
 	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	// Generate token that expires in 1 second
 	token, _ := auth.GenerateAgentToken("agent-1", 1)
@@ -487,7 +483,6 @@ func TestAuthManager_ValidateAgentToken_Expired(t *testing.T) {
 
 func TestAuthManager_RotateTokens(t *testing.T) {
 	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	// Generate initial token
 	token1, _ := auth.GenerateAgentToken("agent-1", 3600)
@@ -520,7 +515,6 @@ func TestAuthManager_RotateTokens(t *testing.T) {
 
 func TestAuthManager_RevokeToken(t *testing.T) {
 	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	token, _ := auth.GenerateAPIToken("client-1", 3600)
 

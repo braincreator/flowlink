@@ -190,7 +190,6 @@ func TestAuthMiddleware_DevMode(t *testing.T) {
 func TestAuthMiddleware_WithAuthManager(t *testing.T) {
 	logger := slog.Default()
 	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientID := r.Header.Get("X-Client-ID")
@@ -454,7 +453,6 @@ func TestWriteAuthError(t *testing.T) {
 func TestExtractClientIDFromToken(t *testing.T) {
 	logger := slog.Default()
 	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
-	defer auth.Stop()
 
 	token, _ := auth.GenerateAPIToken("client-123", 3600)
 

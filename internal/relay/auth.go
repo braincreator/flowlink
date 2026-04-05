@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -98,8 +99,10 @@ func NewAuthManager(logger *slog.Logger) *AuthManager {
 		stopCleanup:   make(chan struct{}),
 	}
 
-	// Запускаем periodic cleanup blacklist
-	go am.cleanupBlacklist()
+	// Запускаем periodic cleanup blacklist (skip in test mode)
+	if os.Getenv("FLOWLINK_TEST_MODE") == "" {
+		go am.cleanupBlacklistLoop()
+	}
 
 	return am
 }
@@ -601,22 +604,27 @@ func (am *AuthManager) ParseTokenStr(tokenStr string) (*Token, error) {
 	return am.parseToken(tokenStr)
 }
 
-// cleanupBlacklist — периодическая очистка blacklist от истёкших записей.
-func (am *AuthManager) cleanupBlacklist() {
+// doCleanupBlacklist — single-pass cleanup of expired blacklist entries.
+func (am *AuthManager) doCleanupBlacklist() {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	now := time.Now().Unix()
+	for tokenID, expiry := range am.blacklist {
+		if now > expiry {
+			delete(am.blacklist, tokenID)
+		}
+	}
+}
+
+// cleanupBlacklistLoop — background goroutine: periodic cleanup of expired blacklist entries.
+func (am *AuthManager) cleanupBlacklistLoop() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			am.mu.Lock()
-			now := time.Now().Unix()
-			for tokenID, expiry := range am.blacklist {
-				if now > expiry {
-					delete(am.blacklist, tokenID)
-				}
-			}
-			am.mu.Unlock()
+			am.doCleanupBlacklist()
 			am.logger.Debug("blacklist cleanup completed")
 		case <-am.stopCleanup:
 			return
