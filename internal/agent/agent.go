@@ -4,10 +4,12 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -147,6 +149,8 @@ func NewAgent(cfg *config.Config) *Agent {
 }
 
 // Connect — подключается к реле и запускает основной цикл.
+// Connect — подключается к реле и запускает основной цикл.
+// E2EE: обменивается публичными ключами при handshake.
 func (a *Agent) Connect(ctx context.Context) error {
 	osName, arch := config.OSInfo()
 
@@ -160,7 +164,7 @@ func (a *Agent) Connect(ctx context.Context) error {
 		arch,
 	)
 
-	a.logger.Info("connecting to relay", "url", a.cfg.RelayURL, "agent", a.cfg.AgentID)
+	a.logger.Info("connecting to relay", "url", a.cfg.RelayURL, "agent", a.cfg.AgentID, "e2ee", a.e2eeEnabled)
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
@@ -174,10 +178,10 @@ func (a *Agent) Connect(ctx context.Context) error {
 	a.conn = conn
 	a.logger.Info("connected to relay")
 
-	// Отправляем connect-сообщение
+	// Отправляем connect-сообщение с публичным ключом (E2EE)
 	connectMsg := protocol.NewMessage(protocol.MsgConnect)
 	connectMsg.AgentID = a.cfg.AgentID
-	connectMsg.Payload = protocol.ConnectPayload{
+	payload := protocol.ConnectPayload{
 		AgentID:   a.cfg.AgentID,
 		Token:     a.cfg.Token,
 		Hostname:  a.cfg.Label,
@@ -185,6 +189,23 @@ func (a *Agent) Connect(ctx context.Context) error {
 		Arch:      arch,
 		ClientVer: version.Version,
 	}
+
+	// E2EE: добавляем публичный ключ агента в connect message
+	if a.e2eeEnabled && a.keystore != nil {
+		if pubKeys := a.keystore.PublicKeys(); len(pubKeys) > 0 {
+			activeKey := pubKeys[0]
+			for _, pk := range pubKeys {
+				if pk.IsActive {
+					activeKey = pk
+					break
+				}
+			}
+			payload.PublicKey = base64Encode(activeKey.PublicKey)
+			a.logger.Debug("sending agent public key", "key_id", activeKey.KeyID)
+		}
+	}
+
+	connectMsg.Payload = payload
 	if err := a.write(connectMsg); err != nil {
 		return fmt.Errorf("connect send: %w", err)
 	}
@@ -240,8 +261,25 @@ func (a *Agent) readLoop(ctx context.Context) {
 func (a *Agent) handleMessage(msg protocol.Message) {
 	switch msg.Type {
 	case protocol.MsgConnected:
-		a.logger.Info("relay confirmed connection")
-		// TODO: сохранить relay info из payload
+		// E2EE: извлекаем публичный ключ relay из ответа
+		var connectedPayload protocol.ConnectedPayload
+		if err := unmarshalPayload(msg.Payload, &connectedPayload); err != nil {
+			a.logger.Warn("failed to parse connected payload", "err", err)
+		} else {
+			// E2EE: сохраняем публичный ключ relay
+			if connectedPayload.RelayPublicKey != "" {
+				pubKey, err := base64Decode(connectedPayload.RelayPublicKey)
+				if err != nil {
+					a.logger.Warn("failed to decode relay public key", "err", err)
+				} else {
+					a.relayPubKey = pubKey
+					a.relayKeyID = connectedPayload.RelayKeyID
+					a.logger.Info("relay E2EE enabled", "key_id", connectedPayload.RelayKeyID)
+				}
+			} else {
+				a.logger.Info("relay confirmed connection (plain mode)")
+			}
+		}
 
 	case protocol.MsgExecRequest:
 		a.handleExecRequest(msg)
@@ -778,4 +816,84 @@ func (a *Agent) executeCommand(payload protocol.ExecRequestPayload) {
 		}
 		a.write(outMsg)
 	}
+}
+
+// --- E2EE Helper Methods ---
+
+// decryptMessage — расшифровывает E2EE сообщение от relay.
+func (a *Agent) decryptMessage(msg *protocol.Message) ([]byte, error) {
+	if a.e2ee == nil || msg.E2EE == nil {
+		return nil, fmt.Errorf("E2EE not initialized or missing e2ee field")
+	}
+
+	// Decode base64 fields
+	ciphertext, err := base64Decode(msg.E2EE.Ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("decode ciphertext: %w", err)
+	}
+
+	var ephemeralPubKey []byte
+	if msg.E2EE.EphemeralPubKey != "" {
+		ephemeralPubKey, err = base64Decode(msg.E2EE.EphemeralPubKey)
+		if err != nil {
+			return nil, fmt.Errorf("decode ephemeral key: %w", err)
+		}
+	}
+
+	envelope := &crypto.EncryptedEnvelope{
+		Version:         1,
+		KeyID:           msg.E2EE.KeyID,
+		SenderKey:       msg.E2EE.SenderKeyID,
+		Ciphertext:      ciphertext,
+		EphemeralPubKey: ephemeralPubKey,
+	}
+
+	return a.e2ee.Open(envelope)
+}
+
+// sendEncrypted — отправляет зашифрованное сообщение relay.
+// Если E2EE включен и известен публичный ключ relay — шифрует.
+// Иначе отправляет в plain mode.
+func (a *Agent) sendEncrypted(msg protocol.Message) error {
+	// E2EE disabled or no relay public key → plain mode
+	if !a.e2eeEnabled || a.e2ee == nil || len(a.relayPubKey) == 0 {
+		return a.write(msg)
+	}
+
+	// Marshal payload to JSON
+	payloadBytes, err := json.Marshal(msg.Payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	// Encrypt
+	envelope, err := a.e2ee.Seal(a.relayPubKey, a.relayKeyID, payloadBytes)
+	if err != nil {
+		return fmt.Errorf("seal message: %w", err)
+	}
+
+	// Create encrypted message
+	msg.Encrypted = true
+	msg.E2EE = &protocol.EncryptedData{
+		KeyID:           envelope.KeyID,
+		SenderKeyID:     envelope.SenderKey,
+		Ciphertext:      base64Encode(envelope.Ciphertext),
+		EphemeralPubKey: base64Encode(envelope.EphemeralPubKey),
+	}
+	if envelope.Nonce != nil {
+		msg.E2EE.Nonce = base64Encode(envelope.Nonce)
+	}
+	msg.Payload = nil // clear plain payload
+
+	return a.write(msg)
+}
+
+// --- Base64 Helpers ---
+
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+func base64Decode(s string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(s)
 }
