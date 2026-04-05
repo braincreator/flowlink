@@ -519,7 +519,7 @@ func serveCmd() {
 		r.SetLLMProxy(relay.NewLLMProxy(backends))
 		slog.Info("LLM proxy настроен", "backends", len(backends))
 	} else {
-		slog.Warn("LLM backends не настроены — автономные задачи (L2) не будут работать")
+		slog.Warn("LLM backends not configured — autonomous tasks (L2) disabled")
 	}
 	if err := r.Start(); err != nil {
 		slog.Error("ошибка запуска реле", "err", err)

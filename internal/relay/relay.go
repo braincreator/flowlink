@@ -325,9 +325,9 @@ func (r *Relay) Start() error {
 	wssServer := &http.Server{Addr: r.cfg.WSSAddr}
 	if tlsConfig != nil {
 		wssServer.TLSConfig = tlsConfig
-		r.logger.Info("WSS сервер запущен (TLS)", "addr", r.cfg.WSSAddr)
+		r.logger.Info("WSS server started (TLS)", "addr", r.cfg.WSSAddr)
 	} else {
-		r.logger.Info("WSS сервер запущен (без TLS)", "addr", r.cfg.WSSAddr)
+		r.logger.Info("WSS server started (no TLS)", "addr", r.cfg.WSSAddr)
 	}
 	wssErr := make(chan error, 1)
 	go func() {
@@ -342,7 +342,7 @@ func (r *Relay) Start() error {
 	apiServer := &http.Server{Addr: r.cfg.APIAddr, Handler: handler}
 	apiErr := make(chan error, 1)
 	go func() {
-		r.logger.Info("HTTP API запущен", "addr", r.cfg.APIAddr)
+		r.logger.Info("HTTP API started", "addr", r.cfg.APIAddr)
 		if tlsConfig != nil {
 			apiErr <- apiServer.ListenAndServeTLS("", "")
 		} else {
