@@ -21,7 +21,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Go-1.24-00ADD8?logo=go" alt="Go" />
-  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
+  <img src="https://img.shields.io/badge/License-BSL%201.1-blue.svg" alt="License" />
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker" alt="Docker" />
   <img src="https://img.shields.io/github/v/release/braincreator/flowlink?color=blue" alt="Release" />
 </p>
@@ -434,7 +434,7 @@ FlowLink спроектирован так, чтобы **предотврати�
 | **Pro** | $30 | 25 | 10 000 | 50 | 10 GB | + MCP, API, Dashboard |
 | **Enterprise** | По запросу | 100+ | Безлимит | Безлимит | 100+ GB | Все фичи, SLA, white-label |
 
-> Self-hosted реле всегда бесплатен (MIT лицензия). Cloud тарифы — за управляемую инфраструктуру.
+> Self-hosted реле всегда бесплатен (BSL 1.1 лицензия). Cloud тарифы — за управляемую инфраструктуру.
 
 ---
 
@@ -647,7 +647,7 @@ commands:
 
 ## 📄 Лицензия
 
-[MIT](LICENSE) © 2026 FlowMasters
+[BSL 1.1](LICENSE) © 2026 FlowMasters — Self-hosted бесплатно навсегда. Конкурирующий SaaS/cloud запрещён. Автоматически конвертируется в GPL-3.0 с 5 апреля 2029 года.
 
 ---
 

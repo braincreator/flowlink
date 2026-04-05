@@ -133,7 +133,7 @@ If you use FlowLink Cloud:
 
 ## 9. Open Source License
 
-The FlowLink agent and relay are released under the [MIT License](LICENSE). This Terms of Service applies to the **Cloud service and any hosted infrastructure** provided by FlowMasters.
+The FlowLink agent and relay are released under the [BSL 1.1 License](LICENSE). Self-hosted is free forever. This Terms of Service applies to the **Cloud service and any hosted infrastructure** provided by FlowMasters.
 
 ---
 
