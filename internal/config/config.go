@@ -38,8 +38,11 @@ type Config struct {
 	// KillSwitch — настройки защитного переключателя
 	KillSwitch KillSwitchConfig `json:"kill_switch"`
 
-	// E2EE — настройки end-to-end шифрования
+	// E2EE — end-to-end encryption (always enabled)
 	E2EE E2EEConfig `json:"e2ee"`
+	
+	// LLM — настройки LLM
+	UseRelayLLM bool `json:"use_relay_llm"` // use relay LLM proxy (default: false — use own keys)
 
 	// Payment — настройки платёжной системы
 	Payment PaymentConfig `json:"payment"`
@@ -180,8 +183,7 @@ type RelayConfig struct {
 	IntegrationURL   string `json:"integration_url,omitempty"`   // e.g. "http://localhost:9082"
 	IntegrationToken string `json:"integration_token,omitempty"` // shared secret for relay→integration auth
 
-	// E2EE — настройки end-to-end шифрования
-	E2EE bool `json:"e2ee"` // включить E2EE (default: true)
+	// E2EE is always enabled — no toggle needed in relay config.
 }
 
 // TelegramBotConfig — конфигурация Telegram-бота.
@@ -245,7 +247,6 @@ func DefaultRelayConfig() RelayConfig {
 		APIAddr:          ":8080",
 		HeartbeatTimeout: 90,
 		MaxAgents:        100,
-		E2EE:             true, // E2EE enabled by default
 	}
 }
 
@@ -342,7 +343,8 @@ func LoadRelayConfig(path string) (*RelayConfig, error) {
 
 // E2EEConfig — настройки end-to-end шифрования.
 type E2EEConfig struct {
-	Enabled    bool `json:"enabled"`      // default: true
+	// Enabled — always true (E2EE cannot be disabled)
+	Enabled    bool `json:"enabled"` // always true
 	AutoRotate bool `json:"auto_rotate"`  // авто-ротация каждые 30 дней
 }
 

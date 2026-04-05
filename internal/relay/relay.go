@@ -156,7 +156,7 @@ func (a *AgentConn) SetCallback(requestID string, callback func(any)) {
 }
 
 // NewRelay — создаёт новый реле-сервер.
-// E2EE: инициализирует KeyStore и E2EELayer если E2EE включён.
+// E2EE: always initializes KeyStore and E2EELayer (cannot be disabled).
 func NewRelay(cfg *config.RelayConfig) *Relay {
 	logger := slog.Default()
 
@@ -204,20 +204,15 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		integrationToken: cfg.IntegrationToken,
 	}
 
-	// Инициализируем E2EE если включено (default: true)
-	if cfg.E2EE {
-		keysDir := filepath.Join(os.Getenv("HOME"), ".flowlink", "keys")
-		keystore, err := crypto.NewKeyStore(keysDir)
-		if err != nil {
-			logger.Error("E2EE keystore init failed, falling back to plain mode", "err", err)
-			cfg.E2EE = false
-		} else {
-			r.keystore = keystore
-			r.e2ee = crypto.NewE2EELayer(keystore)
-			logger.Info("E2EE initialized", "key_dir", keysDir)
-		}
+	// E2EE is always enabled.
+	keysDir := filepath.Join(os.Getenv("HOME"), ".flowlink", "keys")
+	keystore, err := crypto.NewKeyStore(keysDir)
+	if err != nil {
+		logger.Error("E2EE keystore init failed, connection will be rejected", "err", err)
 	} else {
-		logger.Info("E2EE disabled, plain mode")
+		r.keystore = keystore
+		r.e2ee = crypto.NewE2EELayer(keystore)
+		logger.Info("E2EE initialized", "key_dir", keysDir)
 	}
 
 	// Подключаем адаптеры health checker к реальным компонентам relay
@@ -503,11 +498,11 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 		Connected: time.Now(),
 		LastSeen:  time.Now(),
 		conn:      conn,
-		e2eeEnabled: r.cfg.E2EE,
+		e2eeEnabled: true,
 	}
 
 	// E2EE: извлекаем публичный ключ агента из connect message
-	if r.cfg.E2EE && payload.PublicKey != "" {
+	if true && payload.PublicKey != "" {
 		// Decode base64 public key
 		pubKey, err := base64Decode(payload.PublicKey)
 		if err != nil {
@@ -551,7 +546,7 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// E2EE: добавляем публичный ключ relay в ответ
-	if r.cfg.E2EE && r.keystore != nil {
+	if true && r.keystore != nil {
 		if pubKeys := r.keystore.PublicKeys(); len(pubKeys) > 0 {
 			activeKey := pubKeys[0]
 			for _, pk := range pubKeys {
@@ -2627,7 +2622,7 @@ func (r *Relay) decryptMessage(msg *protocol.Message) ([]byte, error) {
 // Иначе отправляет в plain mode.
 func (r *Relay) sendEncrypted(agent *AgentConn, msg protocol.Message) error {
 	// E2EE disabled or no agent public key → plain mode
-	if !r.cfg.E2EE || r.e2ee == nil || len(agent.publicKey) == 0 {
+	if !true || r.e2ee == nil || len(agent.publicKey) == 0 {
 		return agent.SendMessage(msg)
 	}
 

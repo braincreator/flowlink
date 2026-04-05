@@ -99,19 +99,25 @@ func (r *RemoteLLM) ChatSimple(systemPrompt, userMessage string) (string, error)
 	return resp.Content, nil
 }
 
-// IsConfigured — всегда true, т.к. LLM через реле (оператор настраивает на своей стороне).
+// IsConfigured — true only if agent is configured to use relay LLM proxy.
 func (r *RemoteLLM) IsConfigured() bool {
-	return true
+	return r.agent.cfg.UseRelayLLM
 }
 
-// Provider — возвращает "relay" (LLM на стороне оператора).
+// Provider — returns "relay" if using relay LLM, "direct" if using own keys.
 func (r *RemoteLLM) Provider() string {
-	return "relay"
+	if r.agent.cfg.UseRelayLLM {
+		return "relay"
+	}
+	return "direct"
 }
 
-// Model — unknown, определяется реле.
+// Model — returns model name if using relay, "direct" otherwise.
 func (r *RemoteLLM) Model() string {
-	return "relay-default"
+	if r.agent.cfg.UseRelayLLM {
+		return "relay-default"
+	}
+	return "direct"
 }
 
 // === Поддержка LLM в Agent ===
