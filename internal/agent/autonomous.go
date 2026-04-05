@@ -115,7 +115,7 @@ func (tm *TaskManager) runTask(task *Task) {
 	task.StartedAt = time.Now()
 	tm.mu.Unlock()
 
-	tm.logger.Info("запуск автономной задачи",
+	tm.logger.Info("starting autonomous task",
 		"task_id", task.ID,
 		"skill", task.SkillID,
 		"description", task.Description,
@@ -169,7 +169,7 @@ func (tm *TaskManager) runTask(task *Task) {
 		// Вызываем LLM через реле
 		resp, err := tm.llm.Chat(messages)
 		if err != nil {
-			tm.logger.Error("ошибка LLM", "step", step, "err", err)
+			tm.logger.Error("LLM error", "step", step, "err", err)
 			messages = append(messages, LLMMessage{
 				Role:    "assistant",
 				Content: fmt.Sprintf("Ошибка вызова LLM: %v. Попробуй ещё раз.", err),
@@ -319,7 +319,7 @@ func (tm *TaskManager) finishTask(task *Task, status, errMsg string) {
 	task.CompletedAt = time.Now()
 	task.Error = errMsg
 
-	tm.logger.Info("задача завершена", "task_id", task.ID, "status", status, "steps", len(task.Steps), "error", errMsg)
+	tm.logger.Info("task completed", "task_id", task.ID, "status", status, "steps", len(task.Steps), "error", errMsg)
 
 	finalStatus := "task_done"
 	if status == "error" {
@@ -334,7 +334,7 @@ func (tm *TaskManager) sendProgress(taskID string, progress TaskProgress) {
 	msg := protocol.NewMessage(protocol.MsgTaskProgress)
 	msg.Payload = progress
 	if err := tm.agent.write(msg); err != nil {
-		tm.logger.Error("ошибка отправки прогресса", "err", err)
+		tm.logger.Error("progress send error", "err", err)
 	}
 }
 

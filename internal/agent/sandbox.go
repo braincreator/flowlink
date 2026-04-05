@@ -26,14 +26,14 @@ func (s *Sandbox) AllowCommand(command string) bool {
 
 	// Проверка sudo
 	if !s.cfg.AllowSudo && containsSudo(command) {
-		slog.Warn("команда заблокирована: sudo не разрешён", "command", command)
+		slog.Warn("command blocked: sudo not allowed", "command", command)
 		return false
 	}
 
 	// Проверка заблокированных паттернов
 	for _, pattern := range s.cfg.BlockedPatterns {
 		if matchGlob(command, pattern) {
-			slog.Warn("команда заблокирована: совпадение с паттерном",
+			slog.Warn("command blocked: pattern match",
 				"command", command, "pattern", pattern)
 			return false
 		}
@@ -131,9 +131,9 @@ func (e *Executor) ExecSafe(cmd string, backup *BackupEngine, ks *KillSwitch) (o
 			snapshotID, backupErr := backup.CreateBefore(affectedPaths, cmd)
 			if backupErr != nil {
 				// Логируем ошибку, но продолжаем (backup не должен блокировать выполнение)
-				slog.Warn("ошибка создания бэкапа", "err", backupErr, "paths", affectedPaths)
+				slog.Warn("backup create error", "err", backupErr, "paths", affectedPaths)
 			} else {
-				slog.Info("бэкап создан", "snapshot_id", snapshotID, "command", cmd)
+				slog.Info("backup created", "snapshot_id", snapshotID, "command", cmd)
 			}
 		}
 	}

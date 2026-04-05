@@ -3,6 +3,7 @@
 package relay
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -62,13 +63,13 @@ func GenerateSelfSignedCert(domain, certPath, keyPath string) error {
 	// Генерируем RSA 2048
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return fmt.Errorf("генерация ключа: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSKeyGenerateError, err)
 	}
 
 	// Серийный номер
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return fmt.Errorf("генерация серийного номера: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSSerialGenerateError, err)
 	}
 
 	// Шаблон сертификата
@@ -93,21 +94,21 @@ func GenerateSelfSignedCert(domain, certPath, keyPath string) error {
 	// Создаём сертификат
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
 	if err != nil {
-		return fmt.Errorf("создание сертификата: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSCertCreateError, err)
 	}
 
 	// Создаём директории если нужно
 	if err := os.MkdirAll(filepath.Dir(certPath), 0700); err != nil {
-		return fmt.Errorf("создание директории для сертификата: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSCertDirError, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(keyPath), 0700); err != nil {
-		return fmt.Errorf("создание директории для ключа: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSCertDirError, err)
 	}
 
 	// Записываем сертификат
 	certFile, err := os.Create(certPath)
 	if err != nil {
-		return fmt.Errorf("создание файла сертификата: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSCertCreateError, err)
 	}
 	defer certFile.Close()
 
@@ -115,13 +116,13 @@ func GenerateSelfSignedCert(domain, certPath, keyPath string) error {
 		Type:  "CERTIFICATE",
 		Bytes: certDER,
 	}); err != nil {
-		return fmt.Errorf("запись сертификата: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSCertWriteError, err)
 	}
 
 	// Записываем ключ
 	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
-		return fmt.Errorf("создание файла ключа: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSCertWriteError, err)
 	}
 	defer keyFile.Close()
 
@@ -134,7 +135,7 @@ func GenerateSelfSignedCert(domain, certPath, keyPath string) error {
 		Type:  "PRIVATE KEY",
 		Bytes: privBytes,
 	}); err != nil {
-		return fmt.Errorf("запись ключа: %w", err)
+		return protocol.ErrCause(protocol.CodeTLSCertWriteError, err)
 	}
 
 	return nil
@@ -150,20 +151,20 @@ func LoadOrGenerate(certPath, keyPath, domain string) (*tls.Certificate, error) 
 	if certExists && keyExists {
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
-			return nil, fmt.Errorf("загрузка сертификата: %w", err)
+			return nil, protocol.ErrCause(protocol.CodeTLSCertLoadError, err)
 		}
 		return &cert, nil
 	}
 
 	// Иначе генерируем
 	if err := GenerateSelfSignedCert(domain, certPath, keyPath); err != nil {
-		return nil, fmt.Errorf("генерация сертификата: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTLSCertCreateError, err)
 	}
 
 	// Загружаем только что созданный
 	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
-		return nil, fmt.Errorf("загрузка созданного сертификата: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTLSCertLoadError, err)
 	}
 
 	return &cert, nil
@@ -178,7 +179,7 @@ func AutoTLSConfig(domain, cacheDir string) (*tls.Config, error) {
 
 	// Создаём директорию для кэша
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
-		return nil, fmt.Errorf("создание директории кэша: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTLSCertDirError, err)
 	}
 
 	// Создаём autocert manager
@@ -215,7 +216,7 @@ func ValidateCertPinning(expectedFingerprint string, cert *x509.Certificate) err
 	}
 
 	if cert == nil {
-		return fmt.Errorf("сертификат отсутствует")
+		return protocol.Err(protocol.CodeTLSCertMissing)
 	}
 
 	actualFingerprint := CertFingerprint(cert)
@@ -237,7 +238,7 @@ func (cm *CertManager) GetTLSConfig() (*tls.Config, error) {
 	case TLSModeManual:
 		return cm.getManualConfig()
 	default:
-		return nil, fmt.Errorf("неизвестный режим TLS: %s", cm.mode)
+		return nil, protocol.Err(protocol.CodeTLSModeUnknown, cm.mode)
 	}
 }
 
@@ -248,7 +249,7 @@ func (cm *CertManager) getSelfSignedConfig() (*tls.Config, error) {
 		return nil, err
 	}
 
-	cm.logger.Info("используется self-signed сертификат",
+	cm.logger.Info("using self-signed certificate",
 		"cert", cm.certPath,
 		"fingerprint", cm.getCertFingerprint(cert))
 
@@ -265,7 +266,7 @@ func (cm *CertManager) getLetsEncryptConfig() (*tls.Config, error) {
 		return nil, err
 	}
 
-	cm.logger.Info("используется Let's Encrypt", "domain", cm.domain)
+	cm.logger.Info("using Let's Encrypt", "domain", cm.domain)
 
 	return tlsConfig, nil
 }
@@ -274,10 +275,10 @@ func (cm *CertManager) getLetsEncryptConfig() (*tls.Config, error) {
 func (cm *CertManager) getManualConfig() (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(cm.certPath, cm.keyPath)
 	if err != nil {
-		return nil, fmt.Errorf("загрузка сертификата: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTLSCertLoadError, err)
 	}
 
-	cm.logger.Info("используется ручной сертификат", "cert", cm.certPath)
+	cm.logger.Info("using manual certificate", "cert", cm.certPath)
 
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},

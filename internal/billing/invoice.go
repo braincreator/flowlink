@@ -3,6 +3,7 @@
 package billing
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"fmt"
 	"log/slog"
 	"os"
@@ -81,7 +82,7 @@ func (is *InvoiceStore) GenerateInvoice(clientID, planID string) (*Invoice, erro
 
 	plan, ok := is.planStore.GetPlan(planID)
 	if !ok {
-		return nil, fmt.Errorf("план %s не найден", planID)
+		return nil, protocol.Err(protocol.CodeClientNotFound, planID)
 	}
 
 	now := time.Now()
@@ -101,7 +102,7 @@ func (is *InvoiceStore) GenerateInvoice(clientID, planID string) (*Invoice, erro
 	is.clientIdx[clientID] = appendIdx(is.clientIdx[clientID], inv.ID)
 	is.persistInvoice(inv)
 
-	is.logger.Info("счёт создан", "id", inv.ID, "client", clientID, "amount", inv.Amount)
+	is.logger.Info("invoice created", "id", inv.ID, "client", clientID, "amount", inv.Amount)
 	return inv, nil
 }
 
@@ -140,13 +141,13 @@ func (is *InvoiceStore) MarkPaid(invoiceID string) error {
 
 	inv, ok := is.invoices[invoiceID]
 	if !ok {
-		return fmt.Errorf("счёт %s не найден", invoiceID)
+		return protocol.Err(protocol.CodeBackupSnapshotNotFound, invoiceID)
 	}
 	now := time.Now()
 	inv.Status = InvoiceStatusPaid
 	inv.PaidAt = &now
 	is.persistInvoice(inv)
-	is.logger.Info("счёт оплачен", "id", invoiceID, "client", inv.ClientID)
+	is.logger.Info("invoice paid", "id", invoiceID, "client", inv.ClientID)
 	return nil
 }
 
@@ -173,7 +174,7 @@ func (is *InvoiceStore) CheckOverdue(clientID string) ([]*Invoice, error) {
 	}
 
 	if len(overdue) > 0 {
-		is.logger.Warn("просроченные счета", "client", clientID, "count", len(overdue))
+		is.logger.Warn("overdue invoices", "client", clientID, "count", len(overdue))
 	}
 	return overdue, nil
 }
@@ -202,7 +203,7 @@ func (is *InvoiceStore) SuspendClient(clientID string) error {
 	}
 
 	if suspended {
-		is.logger.Warn("клиент приостановлен", "client", clientID)
+		is.logger.Warn("client suspended", "client", clientID)
 	}
 	return nil
 }
@@ -241,7 +242,7 @@ func (is *InvoiceStore) persistInvoice(inv *Invoice) {
 	path := filepath.Join(is.dataDir, "invoices.jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		is.logger.Error("ошибка сохранения счёта", "err", err)
+		is.logger.Error("invoice save error", "err", err)
 		return
 	}
 	defer f.Close()
@@ -253,7 +254,7 @@ func (is *InvoiceStore) persistMethod(m *PaymentMethod) {
 	path := filepath.Join(is.dataDir, "payment_methods.jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		is.logger.Error("ошибка сохранения способа оплаты", "err", err)
+		is.logger.Error("payment method save error", "err", err)
 		return
 	}
 	defer f.Close()

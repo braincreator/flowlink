@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -38,7 +39,7 @@ type SkillStore struct {
 func NewSkillStore(baseDir string) (*SkillStore, error) {
 	dir := filepath.Join(baseDir, "skills")
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("создание директории скиллов: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeSkillDirError, err).Unwrap()
 	}
 
 	store := &SkillStore{
@@ -77,11 +78,11 @@ func (s *SkillStore) Save(skill *Skill) error {
 	path := s.skillPath(skill.ID)
 	data, err := json.MarshalIndent(skill, "", "  ")
 	if err != nil {
-		return fmt.Errorf("сериализация скилла: %w", err)
+		return protocol.ErrCause(protocol.CodeSkillSerializeError, err)
 	}
 
 	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("запись скилла: %w", err)
+		return protocol.ErrCause(protocol.CodeSkillSaveError, err)
 	}
 
 	s.skills[skill.ID] = skill
@@ -117,7 +118,7 @@ func (s *SkillStore) Delete(id string) error {
 
 	path := s.skillPath(id)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("удаление скилла: %w", err)
+		return protocol.ErrCause(protocol.CodeSkillDeleteError, err)
 	}
 	delete(s.skills, id)
 	return nil
@@ -164,7 +165,7 @@ func (s *SkillStore) LoadFromMarkdown(id, name, markdown string) (*Skill, error)
 func (s *SkillStore) ExportToMarkdown(id string) (string, error) {
 	skill, ok := s.Get(id)
 	if !ok {
-		return "", fmt.Errorf("скилл %s не найден", id)
+		return "", protocol.ErrSkillNotFound(id)
 	}
 
 	var sb strings.Builder
@@ -211,7 +212,7 @@ func (s *SkillStore) Search(query string) []*Skill {
 func (s *SkillStore) Hash(id string) (string, error) {
 	skill, ok := s.Get(id)
 	if !ok {
-		return "", fmt.Errorf("скилл %s не найден", id)
+		return "", protocol.ErrSkillNotFound(id)
 	}
 
 	data, _ := json.Marshal(skill)

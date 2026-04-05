@@ -23,7 +23,7 @@ func (b *Bot) handleCommand(msg *tgMessage) {
 
 	chatID := msg.Chat.ID
 
-	b.logger.Info("команда", "cmd", cmd, "user", msg.From.Username, "chat", chatID)
+	b.logger.Info("command received", "cmd", cmd, "user", msg.From.Username, "chat", chatID)
 
 	switch cmd {
 	case "start":

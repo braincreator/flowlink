@@ -2,8 +2,8 @@
 package config
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,7 +27,7 @@ type Config struct {
 	Sandbox SandboxConfig `json:"sandbox"`
 
 	// ReadOnly — агент запускается в read-only режиме (default: true для безопасности)
-	ReadOnly bool `json:"read_only"`
+	ReadOnly *bool `json:"read_only"`
 
 	// Approval — настройки подтверждения (v2 с 3 режимами)
 	Approval ApprovalConfigV2 `json:"approval"`
@@ -171,6 +171,10 @@ type RelayConfig struct {
 
 	// Audit — настройки audit логов
 	AuditHMACSecret string `json:"audit_hmac_secret"` // путь к файлу с HMAC ключом (default: ~/.flowlink/audit.key)
+
+	// Rate Limit — лимиты запросов
+	RateLimitPerMin  int `json:"rate_limit_per_min"`  // запросов в минуту (default: 30)
+	RateLimitPerHour int `json:"rate_limit_per_hour"` // запросов в час (default: 200)
 }
 
 // TelegramBotConfig — конфигурация Telegram-бота.
@@ -221,9 +225,11 @@ func DefaultConfig() Config {
 			BackupDir:     filepath.Join(home, ".flowlink", "backups"),
 			Enabled:       true,
 		},
-		ReadOnly: true, // безопасность: новый агент в read-only
+		ReadOnly: boolPtr(true), // безопасность: новый агент в read-only
 	}
 }
+
+func boolPtr(v bool) *bool { return &v }
 
 // DefaultRelayConfig — конфигурация по умолчанию для реле.
 func DefaultRelayConfig() RelayConfig {
@@ -272,12 +278,12 @@ func LoadConfig() (*Config, error) {
 			cfg := DefaultConfig()
 			return &cfg, nil
 		}
-		return nil, fmt.Errorf("чтение конфига: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeConfigLoadError, err)
 	}
 
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("парсинг конфига: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeConfigParseError, err)
 	}
 
 	// Fill defaults
@@ -300,7 +306,7 @@ func SaveConfig(cfg *Config) error {
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("сериализация конфига: %w", err)
+		return protocol.ErrCause(protocol.CodeConfigSaveError, err)
 	}
 
 	return os.WriteFile(path, data, 0600)
@@ -310,12 +316,12 @@ func SaveConfig(cfg *Config) error {
 func LoadRelayConfig(path string) (*RelayConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("чтение конфига реле: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeConfigLoadError, err)
 	}
 
 	var cfg RelayConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("парсинг конфига реле: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeConfigParseError, err)
 	}
 
 	// Fill defaults

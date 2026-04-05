@@ -3,6 +3,7 @@
 package relay
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"bufio"
 	"crypto/rand"
 	"encoding/base64"
@@ -77,7 +78,7 @@ func NewRegistry(dataDir string, logger *slog.Logger) *Registry {
 
 	// Загружаем из persistence
 	if err := reg.Load(); err != nil {
-		logger.Warn("ошибка загрузки реестра, начинаем с пустого", "err", err)
+		logger.Warn("registry load error, starting empty", "err", err)
 	}
 
 	return reg
@@ -102,7 +103,7 @@ func (r *Registry) CreateClient(name, email, plan string) (*Client, error) {
 	// Генерируем API токен
 	token, err := generateAPIToken()
 	if err != nil {
-		return nil, fmt.Errorf("генерация токена: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenGenerateError, err)
 	}
 
 	client := &Client{
@@ -120,10 +121,10 @@ func (r *Registry) CreateClient(name, email, plan string) (*Client, error) {
 
 	// Персистим
 	if err := r.appendJSONL("clients.jsonl", client); err != nil {
-		r.logger.Error("ошибка сохранения клиента", "err", err)
+		r.logger.Error("client save error", "err", err)
 	}
 
-	r.logger.Info("клиент создан", "id", client.ID, "name", name, "plan", plan)
+	r.logger.Info("client created", "id", client.ID, "name", name, "plan", plan)
 	return client, nil
 }
 
@@ -165,17 +166,17 @@ func (r *Registry) DeactivateClient(id string) error {
 
 	c, ok := r.clients[id]
 	if !ok {
-		return fmt.Errorf("клиент не найден: %s", id)
+		return protocol.ErrClientNotFound(id)
 	}
 
 	c.IsActive = false
 
 	// Персистим обновление
 	if err := r.appendJSONL("clients.jsonl", c); err != nil {
-		r.logger.Error("ошибка сохранения деактивации", "err", err)
+		r.logger.Error("client deactivation save error", "err", err)
 	}
 
-	r.logger.Info("клиент деактивирован", "id", id)
+	r.logger.Info("client deactivated", "id", id)
 	return nil
 }
 
@@ -189,19 +190,19 @@ func (r *Registry) RegisterAgent(clientID, label string, tags []string, os, arch
 	// Проверяем клиента
 	client, ok := r.clients[clientID]
 	if !ok || !client.IsActive {
-		return nil, fmt.Errorf("клиент не найден или деактивирован: %s", clientID)
+		return nil, protocol.Err(protocol.CodeClientDeactivated, clientID)
 	}
 
 	// Проверяем лимит агентов
 	currentCount := len(r.clientIdx[clientID])
 	if currentCount >= client.MaxAgents {
-		return nil, fmt.Errorf("лимит агентов превышен (%d/%d)", currentCount, client.MaxAgents)
+		return nil, protocol.Err(protocol.CodeAgentLimitExceeded, currentCount, client.MaxAgents)
 	}
 
 	// Генерируем токен
 	token, err := generateAPIToken()
 	if err != nil {
-		return nil, fmt.Errorf("генерация токена: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenGenerateError, err)
 	}
 
 	now := time.Now()
@@ -223,10 +224,10 @@ func (r *Registry) RegisterAgent(clientID, label string, tags []string, os, arch
 
 	// Персистим
 	if err := r.appendJSONL("agents.jsonl", agent); err != nil {
-		r.logger.Error("ошибка сохранения агента", "err", err)
+		r.logger.Error("agent save error", "err", err)
 	}
 
-	r.logger.Info("агент зарегистрирован", "id", agent.ID, "client", clientID, "label", label)
+	r.logger.Info("agent registered", "id", agent.ID, "client", clientID, "label", label)
 	return agent, nil
 }
 
@@ -282,7 +283,7 @@ func (r *Registry) UnregisterAgent(id string) error {
 
 	agent, ok := r.agents[id]
 	if !ok {
-		return fmt.Errorf("агент не найден: %s", id)
+		return protocol.ErrAgentNotFound(id)
 	}
 
 	// Удаляем из индекса клиента
@@ -299,10 +300,10 @@ func (r *Registry) UnregisterAgent(id string) error {
 
 	// Записываем tombstone
 	if err := r.appendJSONL("agents.jsonl", map[string]string{"_deleted": id}); err != nil {
-		r.logger.Error("ошибка сохранения удаления", "err", err)
+		r.logger.Error("agent deletion save error", "err", err)
 	}
 
-	r.logger.Info("агент удалён", "id", id, "client", clientID)
+	r.logger.Info("agent deleted", "id", id, "client", clientID)
 	return nil
 }
 
@@ -313,14 +314,14 @@ func (r *Registry) UpdateAgentTags(id string, tags []string) error {
 
 	agent, ok := r.agents[id]
 	if !ok {
-		return fmt.Errorf("агент не найден: %s", id)
+		return protocol.ErrAgentNotFound(id)
 	}
 
 	agent.Tags = tags
 
 	// Персистим
 	if err := r.appendJSONL("agents.jsonl", agent); err != nil {
-		r.logger.Error("ошибка сохранения тегов", "err", err)
+		r.logger.Error("agent tags save error", "err", err)
 	}
 
 	return nil
@@ -357,7 +358,7 @@ func (r *Registry) UpdateAgentOnlineStatus(agentID string, online bool) {
 
 	// Персистим
 	if err := r.appendJSONL("agents.jsonl", agent); err != nil {
-		r.logger.Error("ошибка сохранения статуса", "err", err)
+		r.logger.Error("agent status save error", "err", err)
 	}
 }
 
@@ -372,7 +373,7 @@ func (r *Registry) Load() error {
 			r.clients[c.ID] = &c
 		}
 	}); err != nil {
-		return fmt.Errorf("загрузка клиентов: %w", err)
+		return fmt.Errorf("clients load error: %w", err)
 	}
 
 	// Загружаем агентов
@@ -393,10 +394,10 @@ func (r *Registry) Load() error {
 			r.clientIdx[a.ClientID] = append(r.clientIdx[a.ClientID], a.ID)
 		}
 	}); err != nil {
-		return fmt.Errorf("загрузка агентов: %w", err)
+		return fmt.Errorf("agents load error: %w", err)
 	}
 
-	r.logger.Info("реестр загружен", "clients", len(r.clients), "agents", len(r.agents))
+	r.logger.Info("registry loaded", "clients", len(r.clients), "agents", len(r.agents))
 	return nil
 }
 

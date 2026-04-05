@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"compress/gzip"
 	"encoding/csv"
 	"encoding/json"
@@ -78,7 +79,7 @@ func NewAuditLogger(baseDir string) (*AuditLogger, error) {
 	}
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
-		return nil, fmt.Errorf("ошибка создания директории audit: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeAuditDirCreateError, err)
 	}
 
 	logger := &AuditLogger{
@@ -116,7 +117,7 @@ func (l *AuditLogger) Log(entry AuditEntry) error {
 		filename := filepath.Join(l.baseDir, fmt.Sprintf("audit-%s.jsonl", today))
 		f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			return fmt.Errorf("ошибка открытия audit файла: %w", err)
+			return protocol.ErrCause(protocol.CodeAuditFileOpenError, err)
 		}
 
 		l.currentFile = f
@@ -126,12 +127,12 @@ func (l *AuditLogger) Log(entry AuditEntry) error {
 	// Сериализуем в JSON
 	data, err := json.Marshal(entry)
 	if err != nil {
-		return fmt.Errorf("ошибка сериализации entry: %w", err)
+		return protocol.ErrCause(protocol.CodeAuditSerializeError, err)
 	}
 
 	// Записываем строку
 	if _, err := fmt.Fprintf(l.currentFile, "%s\n", data); err != nil {
-		return fmt.Errorf("ошибка записи entry: %w", err)
+		return protocol.ErrCause(protocol.CodeAuditWriteError, err)
 	}
 
 	// Flush на диск
@@ -216,7 +217,7 @@ func (l *AuditLogger) Export(format string, query AuditQuery) ([]byte, error) {
 	case "json":
 		return json.MarshalIndent(entries, "", "  ")
 	default:
-		return nil, fmt.Errorf("неподдерживаемый формат: %s", format)
+		return nil, protocol.Err(protocol.CodeAuditFormatUnsupported, format)
 	}
 }
 

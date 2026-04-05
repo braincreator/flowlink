@@ -12,14 +12,14 @@ import (
 // На Windows без golang.org/x/svc используется простой режим консольного приложения.
 // Для полноценного Windows Service нужен sc.exe или nssm (external).
 func RunAsService(name string) error {
-	slog.Info("запуск в режиме консольного приложения (Windows)",
+	slog.Info("running as console app (Windows)",
 		"name", name)
 
 	// Проверяем, запущены ли мы как сервис
 	// Windows Service запускается от Service Control Manager
 	// Без golang.org/x/sys/windows/svc мы работаем как обычный процесс
 	if os.Getenv("FLOWLINK_SERVICE") == "1" {
-		slog.Info("работа как Windows Service")
+		slog.Info("running as Windows Service")
 		// Здесь основной цикл работы агента
 		select {} // блокировка до завершения
 	}

@@ -55,7 +55,7 @@ func NewAgent(cfg *config.Config) *Agent {
 	configDir, _ := config.ConfigDir()
 	skills, err := NewSkillStore(configDir)
 	if err != nil {
-		logger.Warn("ошибка инициализации skill store", "err", err)
+		logger.Warn("skill store init failed", "err", err)
 		skills, _ = NewSkillStore(os.TempDir())
 	}
 
@@ -80,7 +80,11 @@ func NewAgent(cfg *config.Config) *Agent {
 	)
 
 	// Read-only по умолчанию (безопасность для новых агентов)
-	policy.SetReadOnly(cfg.ReadOnly)
+	if cfg.ReadOnly != nil {
+		policy.SetReadOnly(*cfg.ReadOnly)
+	} else {
+		policy.SetReadOnly(true) // default
+	}
 
 	agent := &Agent{
 		cfg:        cfg,
@@ -131,7 +135,7 @@ func (a *Agent) Connect(ctx context.Context) error {
 		arch,
 	)
 
-	a.logger.Info("подключение к реле", "url", a.cfg.RelayURL, "agent", a.cfg.AgentID)
+	a.logger.Info("connecting to relay", "url", a.cfg.RelayURL, "agent", a.cfg.AgentID)
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
@@ -139,11 +143,11 @@ func (a *Agent) Connect(ctx context.Context) error {
 
 	conn, _, err := dialer.Dial(url, nil)
 	if err != nil {
-		return fmt.Errorf("подключение к реле: %w", err)
+		return fmt.Errorf("relay connect: %w", err)
 	}
 
 	a.conn = conn
-	a.logger.Info("подключён к реле")
+	a.logger.Info("connected to relay")
 
 	// Отправляем connect-сообщение
 	connectMsg := protocol.NewMessage(protocol.MsgConnect)
@@ -157,7 +161,7 @@ func (a *Agent) Connect(ctx context.Context) error {
 		ClientVer: version.Version,
 	}
 	if err := a.write(connectMsg); err != nil {
-		return fmt.Errorf("отправка connect: %w", err)
+		return fmt.Errorf("connect send: %w", err)
 	}
 
 	// Запускаем обработку сообщений
@@ -173,7 +177,7 @@ func (a *Agent) Disconnect() {
 	if a.conn != nil {
 		a.conn.Close()
 	}
-	a.logger.Info("отключён от реле")
+	a.logger.Info("disconnected from relay")
 }
 
 // SetOnDisconnect устанавливает callback при потере соединения.
@@ -199,7 +203,7 @@ func (a *Agent) readLoop(ctx context.Context) {
 
 		var msg protocol.Message
 		if err := a.conn.ReadJSON(&msg); err != nil {
-			a.logger.Error("ошибка чтения сообщения", "err", err)
+			a.logger.Error("message read error", "err", err)
 			return
 		}
 
@@ -211,7 +215,7 @@ func (a *Agent) readLoop(ctx context.Context) {
 func (a *Agent) handleMessage(msg protocol.Message) {
 	switch msg.Type {
 	case protocol.MsgConnected:
-		a.logger.Info("подключение подтверждено реле")
+		a.logger.Info("relay confirmed connection")
 		// TODO: сохранить relay info из payload
 
 	case protocol.MsgExecRequest:
@@ -258,7 +262,7 @@ func (a *Agent) handleMessage(msg protocol.Message) {
 		a.handleConfigUpdate(msg)
 
 	default:
-		a.logger.Warn("неизвестный тип сообщения", "type", msg.Type)
+		a.logger.Warn("unknown message type", "type", msg.Type)
 	}
 }
 
@@ -277,7 +281,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 			msg := protocol.NewMessage(protocol.MsgHeartbeat)
 			msg.AgentID = a.cfg.AgentID
 			if err := a.write(msg); err != nil {
-				a.logger.Error("ошибка отправки heartbeat", "err", err)
+				a.logger.Error("heartbeat send error", "err", err)
 				return
 			}
 		}
@@ -289,7 +293,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 func (a *Agent) handleExecRequest(msg protocol.Message) {
 	var payload protocol.ExecRequestPayload
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeInvalidPayload, err)
 		return
 	}
 
@@ -301,8 +305,8 @@ func (a *Agent) handleExecRequest(msg protocol.Message) {
 
 	switch {
 	case result.Blocked:
-		a.sendError(msg.ID, result.Reason)
-		a.logger.Warn("команда заблокирована policy layer",
+		a.sendErrorWithReason(msg.ID, protocol.CodeExecBlocked, result.Reason)
+		a.logger.Warn("command blocked by policy layer",
 			"command", payload.Command,
 			"reason", result.Reason,
 			"risk", result.RiskLevel,
@@ -311,7 +315,7 @@ func (a *Agent) handleExecRequest(msg protocol.Message) {
 
 	case result.RequireApproval:
 		// Ожидание подтверждения через Telegram/Dashboard
-		a.logger.Info("команда ожидает подтверждения",
+		a.logger.Info("command awaiting approval",
 			"request_id", payload.RequestID,
 			"approval_id", result.ApprovalID,
 			"command", payload.Command,
@@ -329,12 +333,12 @@ func (a *Agent) handleExecRequest(msg protocol.Message) {
 		return
 
 	case !result.Allowed:
-		a.sendError(msg.ID, result.Reason)
+		a.sendErrorWithReason(msg.ID, protocol.CodeExecBlocked, result.Reason)
 		return
 	}
 
 	// ─── Все проверки пройдены, выполняем команду ───
-	a.logger.Info("команда одобрена policy layer",
+	a.logger.Info("command approved by policy",
 		"command", payload.Command,
 		"risk", result.RiskLevel,
 		"snapshot", result.SnapshotID,
@@ -347,10 +351,12 @@ func (a *Agent) handleExecRequest(msg protocol.Message) {
 
 // handleSysInfo — собирает и отправляет системную информацию.
 func (a *Agent) handleSysInfo(msg protocol.Message) {
+	a.logger.Info("sysinfo requested")
 	info := CollectSystemInfo()
 	resp := protocol.NewMessage(protocol.MsgSysInfoResp)
 	resp.Payload = info
 	a.write(resp)
+	a.logger.Info("sysinfo sent")
 }
 
 // writeResponse — отправляет ответ с request_id для корреляции.
@@ -382,7 +388,7 @@ func getRequestID(payload any) string {
 func (a *Agent) handleFileRead(msg protocol.Message) {
 	var payload protocol.FileReadPayload
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeInvalidPayload, err)
 		return
 	}
 
@@ -397,7 +403,7 @@ func (a *Agent) handleFileRead(msg protocol.Message) {
 func (a *Agent) handleFileWrite(msg protocol.Message) {
 	var payload protocol.FileWritePayload
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeInvalidPayload, err)
 		return
 	}
 
@@ -412,15 +418,17 @@ func (a *Agent) handleFileWrite(msg protocol.Message) {
 func (a *Agent) handleFileList(msg protocol.Message) {
 	var payload protocol.FileListPayload
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeInvalidPayload, err)
 		return
 	}
+	a.logger.Info("file list requested", "path", payload.Path)
 
 	resp := ListFiles(payload)
 	resp.RequestID = getRequestID(msg.Payload)
 	respMsg := protocol.NewMessage(protocol.MsgFileResponse)
 	respMsg.Payload = resp
 	a.write(respMsg)
+	a.logger.Info("file list sent", "count", len(resp.Entries))
 }
 
 // write — отправляет JSON-сообщение через WebSocket (thread-safe).
@@ -430,13 +438,27 @@ func (a *Agent) write(msg protocol.Message) error {
 	return a.conn.WriteJSON(msg)
 }
 
-// sendError — отправляет сообщение об ошибке.
-func (a *Agent) sendError(inReplyTo string, errMsg string) {
+// sendError — отправляет сообщение об ошибке с машинно-читаемым кодом.
+func (a *Agent) sendError(inReplyTo string, code string, args ...any) {
+	msg := protocol.NewMessage(protocol.MsgError)
+	msg.Payload = protocol.ErrorPayloadFromCode(code, args...)
+	a.write(msg)
+}
+
+// sendErrorWithReason — отправляет ошибку с кодом + произвольной причиной.
+func (a *Agent) sendErrorWithReason(inReplyTo string, code string, reason string) {
 	msg := protocol.NewMessage(protocol.MsgError)
 	msg.Payload = protocol.ErrorPayload{
-		Code:    "AGENT_ERROR",
-		Message: errMsg,
+		Code:    code,
+		Message: reason,
 	}
+	a.write(msg)
+}
+
+// sendErrorCause — отправляет ошибку с кодом + обёрнутой причиной.
+func (a *Agent) sendErrorCause(inReplyTo string, code string, cause error, args ...any) {
+	msg := protocol.NewMessage(protocol.MsgError)
+	msg.Payload = protocol.ErrorPayloadFromError(code, cause, args...)
 	a.write(msg)
 }
 
@@ -444,7 +466,7 @@ func (a *Agent) sendError(inReplyTo string, errMsg string) {
 func (a *Agent) handleTask(msg protocol.Message) {
 	var payload protocol.TaskPayload
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeInvalidPayload, err)
 		return
 	}
 
@@ -460,11 +482,11 @@ func (a *Agent) handleTask(msg protocol.Message) {
 	}
 
 	if err := a.taskManager.SubmitTask(task); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("ошибка задачи: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeTaskError, err)
 		return
 	}
 
-	a.logger.Info("автономная задача принята", "task_id", payload.TaskID, "skill", payload.SkillID)
+	a.logger.Info("task accepted", "task_id", payload.TaskID, "skill", payload.SkillID)
 }
 
 // handleTaskCancel — отменяет задачу.
@@ -473,12 +495,12 @@ func (a *Agent) handleTaskCancel(msg protocol.Message) {
 		TaskID string `json:"task_id"`
 	}
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeInvalidPayload, err)
 		return
 	}
 
 	if err := a.taskManager.CancelTask(payload.TaskID); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("ошибка отмены: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeTaskCancelError, err)
 		return
 	}
 }
@@ -487,14 +509,14 @@ func (a *Agent) handleTaskCancel(msg protocol.Message) {
 func (a *Agent) handleSkillPush(msg protocol.Message) {
 	var payload protocol.SkillPushPayload
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeInvalidPayload, err)
 		return
 	}
 
 	// Проверяем — не перезаписываем ли существующий скилл
 	if !payload.ForceUpdate {
 		if _, exists := a.skills.Get(payload.SkillID); exists {
-			a.sendError(msg.ID, fmt.Sprintf("скилл %s уже существует (используйте force_update)", payload.SkillID))
+			a.sendError(msg.ID, protocol.CodeSkillAlreadyExists, payload.SkillID)
 			return
 		}
 	}
@@ -510,11 +532,11 @@ func (a *Agent) handleSkillPush(msg protocol.Message) {
 	}
 
 	if err := a.skills.Save(skill); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("ошибка сохранения скилла: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeSkillSaveError, err)
 		return
 	}
 
-	a.logger.Info("скилл получен", "id", payload.SkillID, "name", payload.Name)
+	a.logger.Info("skill received", "id", payload.SkillID, "name", payload.Name)
 }
 
 // handleSkillDelete — удаляет скилл.
@@ -523,16 +545,16 @@ func (a *Agent) handleSkillDelete(msg protocol.Message) {
 		SkillID string `json:"skill_id"`
 	}
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("неверный payload: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeInvalidPayload, err)
 		return
 	}
 
 	if err := a.skills.Delete(payload.SkillID); err != nil {
-		a.sendError(msg.ID, fmt.Sprintf("ошибка удаления: %v", err))
+		a.sendErrorCause(msg.ID, protocol.CodeSkillDeleteError, err)
 		return
 	}
 
-	a.logger.Info("скилл удалён", "id", payload.SkillID)
+	a.logger.Info("skill deleted", "id", payload.SkillID)
 }
 
 // handleApprovalResponse — обрабатывает ответ на запрос подтверждения от реле.
@@ -543,7 +565,7 @@ func (a *Agent) handleApprovalResponse(msg protocol.Message) {
 		Comment    string `json:"comment"`
 	}
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.logger.Warn("неверный approval response payload", "err", err)
+		a.logger.Warn("invalid approval response payload", "err", err)
 		return
 	}
 	if payload.RequestID == "" {
@@ -554,12 +576,12 @@ func (a *Agent) handleApprovalResponse(msg protocol.Message) {
 	switch payload.Decision {
 	case "approved":
 		a.approval.Approve(payload.RequestID)
-		a.logger.Info("команда одобрена реле", "request_id", payload.RequestID, "comment", payload.Comment)
+		a.logger.Info("command approved by relay", "request_id", payload.RequestID, "comment", payload.Comment)
 	case "rejected":
 		a.approval.Reject(payload.RequestID)
-		a.logger.Info("команда отклонена реле", "request_id", payload.RequestID, "comment", payload.Comment)
+		a.logger.Info("command rejected by relay", "request_id", payload.RequestID, "comment", payload.Comment)
 	default:
-		a.logger.Warn("неизвестное решение approval", "decision", payload.Decision, "request_id", payload.RequestID)
+		a.logger.Warn("unknown approval decision", "decision", payload.Decision, "request_id", payload.RequestID)
 	}
 }
 
@@ -572,21 +594,21 @@ func (a *Agent) handleConfigUpdate(msg protocol.Message) {
 		KillSwitch *map[string]any    `json:"kill_switch"`
 	}
 	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
-		a.logger.Warn("неверный config update payload", "err", err)
+		a.logger.Warn("invalid config update payload", "err", err)
 		return
 	}
 
 	// Применяем read_only
 	if payload.ReadOnly != nil {
 		a.policy.SetReadOnly(*payload.ReadOnly)
-		a.cfg.ReadOnly = *payload.ReadOnly
-		a.logger.Info("режим read-only обновлён", "read_only", *payload.ReadOnly)
+		a.cfg.ReadOnly = payload.ReadOnly
+		a.logger.Info("read-only mode updated", "read_only", *payload.ReadOnly)
 	}
 
 	// Применяем label
 	if payload.Label != nil && *payload.Label != "" {
 		a.cfg.Label = *payload.Label
-		a.logger.Info("label обновлён", "label", *payload.Label)
+		a.logger.Info("label updated", "label", *payload.Label)
 	}
 
 	// Применяем kill_switch thresholds
@@ -595,7 +617,7 @@ func (a *Agent) handleConfigUpdate(msg protocol.Message) {
 		if dt, ok := ks["disk_threshold"].(float64); ok {
 			a.killSwitch.SetDiskThreshold(dt)
 			a.cfg.KillSwitch.DiskThreshold = dt
-			a.logger.Info("disk threshold обновлён", "value", dt)
+			a.logger.Info("disk threshold updated", "value", dt)
 		}
 		if ct, ok := ks["cpu_threshold"].(float64); ok {
 			// Duration: cpu_threshold_sec если задан, иначе 5 минут
@@ -644,11 +666,11 @@ func (a *Agent) handleConfigUpdate(msg protocol.Message) {
 	}
 
 	if err := a.write(ack); err != nil {
-		a.logger.Error("ошибка отправки config ack", "err", err)
+		a.logger.Error("config ack send error", "err", err)
 		return
 	}
 
-	a.logger.Info("конфигурация обновлена", "applied", applied)
+	a.logger.Info("config updated", "applied", applied)
 }
 
 // unmarshalPayload — десериализует payload сообщения.
@@ -707,7 +729,7 @@ func (a *Agent) notifyApprovalRequest(req *ApprovalRequest) {
 func (a *Agent) executeCommand(payload protocol.ExecRequestPayload) {
 	output, err := a.executor.Exec(payload.Command)
 	if err != nil {
-		a.sendError(payload.RequestID, fmt.Sprintf("ошибка выполнения: %v", err))
+		a.sendErrorCause(payload.RequestID, protocol.CodeExecFailed, err)
 		return
 	}
 

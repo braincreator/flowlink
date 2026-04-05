@@ -3,6 +3,7 @@
 package tgbot
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -47,12 +48,12 @@ func New(cfg *TelegramBotConfig, relayURL, apiToken string, logger *slog.Logger)
 
 // Start — запускает long polling цикл.
 func (b *Bot) Start() error {
-	b.logger.Info("запуск Telegram-бота", "allowed_ids", b.cfg.AllowedIDs)
+	b.logger.Info("Telegram bot starting", "allowed_ids", b.cfg.AllowedIDs)
 
 	for {
 		updates, err := b.getUpdates()
 		if err != nil {
-			b.logger.Error("ошибка getUpdates", "err", err)
+			b.logger.Error("getUpdates error", "err", err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -186,7 +187,7 @@ func (b *Bot) getUpdates() ([]tgUpdate, error) {
 		Result []tgUpdate `json:"result"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("декодинг ответа: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenDecodeFailed, err)
 	}
 
 	if !result.OK {
@@ -314,7 +315,7 @@ func (b *Bot) relayRequest(method, path string, payload any) (json.RawMessage, e
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("запрос к реле: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeInternalError, err)
 	}
 	defer resp.Body.Close()
 
@@ -353,7 +354,7 @@ func (b *Bot) relayStreamPost(path string, payload any, maxBytes int64) (string,
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("запрос к реле: %w", err)
+		return "", protocol.ErrCause(protocol.CodeInternalError, err)
 	}
 	defer resp.Body.Close()
 
@@ -362,7 +363,7 @@ func (b *Bot) relayStreamPost(path string, payload any, maxBytes int64) (string,
 	// Ограничиваем чтение
 	n, err := io.CopyN(&buf, br, maxBytes)
 	if err != nil && err != io.EOF {
-		return "", fmt.Errorf("чтение ответа: %w", err)
+		return "", protocol.ErrCause(protocol.CodeFileReadError, err)
 	}
 	if n >= maxBytes {
 		buf.WriteString("\n... (обрезано)")

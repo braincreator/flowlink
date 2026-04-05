@@ -3,6 +3,7 @@
 package relay
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
@@ -89,7 +90,7 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 				token = r.URL.Query().Get("token")
 			}
 			if token == "" {
-				writeAuthError(w, "токен не указан", http.StatusUnauthorized)
+				writeAuthError(w, protocol.CodeTokenMissing, http.StatusUnauthorized)
 				return
 			}
 
@@ -120,7 +121,7 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 				}
 
 				// Если токен истёк и есть refresh token — пробуем auto-refresh
-				if strings.Contains(err.Error(), "истёк") && refreshToken != "" {
+				if strings.Contains(err.Error(), protocol.CodeTokenExpired) && refreshToken != "" {
 					newPair, refreshErr := cfg.AuthManager.RefreshToken(refreshToken)
 					if refreshErr == nil {
 						// Auto-refresh успешен — возвращаем новые токены в заголовках
@@ -136,9 +137,9 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 					cfg.Logger.Debug("auto-refresh не удался", "err", refreshErr)
 				}
 
-				// Если ошибка не "токен не найден" и не "истёк" — логируем
-				if !strings.Contains(err.Error(), "не найден") && !strings.Contains(err.Error(), "истёк") {
-					cfg.Logger.Debug("ошибка валидации токена", "err", err)
+				// Skip expected auth errors (expired, revoked)
+				if !strings.Contains(err.Error(), protocol.CodeSecretNotFound) && !strings.Contains(err.Error(), protocol.CodeTokenExpired) {
+					cfg.Logger.Debug("token validation error", "err", err)
 				}
 			}
 
@@ -150,7 +151,7 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 			}
 
 			// Токен невалиден
-			writeAuthError(w, "неверный токен", http.StatusUnauthorized)
+			writeAuthError(w, protocol.CodeTokenInvalid, http.StatusUnauthorized)
 		})
 	}
 }
@@ -363,11 +364,11 @@ func RecoveryMiddleware(logger *slog.Logger) Middleware {
 // === Helpers ===
 
 // writeAuthError — записывает ошибку аутентификации в формате JSON.
-func writeAuthError(w http.ResponseWriter, message string, status int) {
+func writeAuthError(w http.ResponseWriter, protoCode string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{
-		"error": message,
-		"code":  fmt.Sprintf("%d", status),
+		"error": protocol.T(protoCode),
+		"code":  protoCode,
 	})
 }

@@ -142,7 +142,7 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 	// Инициализируем audit logger
 	audit, err := NewAuditLogger("")
 	if err != nil {
-		logger.Error("ошибка инициализации audit logger", "err", err)
+		logger.Error("audit logger init failed", "err", err)
 	}
 	
 	// Инициализируем реестр (multi-tenancy)
@@ -165,7 +165,7 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		logger:    logger,
 		pool:      NewAgentPool(),
 		auth:      NewAuthManager(logger),
-		rateLimit: NewRateLimiter(30, 200, logger), // 30/min, 200/hour
+		rateLimit: NewRateLimiter(cfg.RateLimitPerMin, cfg.RateLimitPerHour, logger),
 		audit:     audit,
 		registry:  registry,
 		eventBus:      NewEventBus(logger),
@@ -304,14 +304,14 @@ func (r *Relay) Start() error {
 		var err error
 		tlsConfig, err = certManager.GetTLSConfig()
 		if err != nil {
-			r.logger.Error("ошибка конфигурации TLS", "err", err)
+			r.logger.Error("TLS configuration error", "err", err)
 			return err
 		}
 		r.logger.Info("TLS настроен", "mode", mode)
 	}
 
 	// Запуск
-	r.logger.Info("запуск реле-сервера",
+	r.logger.Info("relay server starting",
 		"wss", r.cfg.WSSAddr,
 		"api", r.cfg.APIAddr,
 		"tls_mode", r.cfg.TLSMode,
@@ -354,7 +354,7 @@ func (r *Relay) Start() error {
 	var serverErr error
 	select {
 	case <-ctx.Done():
-		r.logger.Info("получен сигнал shutdown, начинаем graceful shutdown...")
+		r.logger.Info("shutdown signal received, starting graceful shutdown...")
 	case err := <-wssErr:
 		if err != nil && err != http.ErrServerClosed {
 			serverErr = fmt.Errorf("WSS: %w", err)
@@ -370,9 +370,9 @@ func (r *Relay) Start() error {
 	defer shutdownCancel()
 
 	// 1. Compacting registry
-	r.logger.Info("сохранение реестра...")
+	r.logger.Info("saving registry...")
 	if err := r.registry.Save(); err != nil {
-		r.logger.Error("ошибка сохранения реестра", "err", err)
+		r.logger.Error("registry save error", "err", err)
 	}
 
 	// 2. Shutdown servers
@@ -409,20 +409,20 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, req, nil)
 	if err != nil {
-		r.logger.Error("ошибка апгрейда WSS", "err", err)
+		r.logger.Error("WSS upgrade error", "err", err)
 		return
 	}
 
 	// Читаем первое сообщение (connect)
 	var connectMsg protocol.Message
 	if err := conn.ReadJSON(&connectMsg); err != nil {
-		r.logger.Error("ошибка чтения connect", "err", err)
+		r.logger.Error("connect read error", "err", err)
 		conn.Close()
 		return
 	}
 
 	if connectMsg.Type != protocol.MsgConnect {
-		r.logger.Error("первое сообщение не connect", "type", connectMsg.Type)
+		r.logger.Error("first message is not connect", "type", connectMsg.Type)
 		conn.Close()
 		return
 	}
@@ -430,14 +430,14 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	// Парсим payload
 	var payload protocol.ConnectPayload
 	if err := json.Unmarshal(jsonMarshal(connectMsg.Payload), &payload); err != nil {
-		r.logger.Error("ошибка парсинга connect payload", "err", err)
+		r.logger.Error("connect payload parse error", "err", err)
 		conn.Close()
 		return
 	}
 
 	// Проверяем токен
 	if !r.authenticateAgent(payload.AgentID, payload.Token) {
-		r.logger.Warn("агент не авторизован", "agent", payload.AgentID)
+		r.logger.Warn("agent not authorized", "agent", payload.AgentID)
 		conn.Close()
 		return
 	}
@@ -455,7 +455,7 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	}
 
 	r.pool.Add(agent)
-	r.logger.Info("агент подключён", "agent", payload.AgentID,
+	r.logger.Info("agent connected", "agent", payload.AgentID,
 		"hostname", payload.Hostname, "os", payload.OS)
 
 	// Публикуем событие подключения
@@ -493,7 +493,7 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 		if r.registry != nil {
 			r.registry.UpdateAgentOnlineStatus(payload.AgentID, false)
 		}
-		r.logger.Info("агент отключён", "agent", payload.AgentID)
+		r.logger.Info("agent disconnected", "agent", payload.AgentID)
 
 		// Публикуем событие отключения
 		r.eventBus.Publish(Event{
@@ -505,14 +505,14 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	for {
 		var msg protocol.Message
 		if err := conn.ReadJSON(&msg); err != nil {
-			r.logger.Error("ошибка чтения от агента", "agent", payload.AgentID, "err", err)
+			r.logger.Error("agent read error", "agent", payload.AgentID, "err", err)
 			return
 		}
 
 		msg.AgentID = payload.AgentID
 		agent.LastSeen = time.Now()
 
-		r.logger.Debug("сообщение от агента", "agent", msg.AgentID, "type", msg.Type)
+		r.logger.Debug("message from agent", "agent", msg.AgentID, "type", msg.Type)
 
 		// Проверяем callback (для MCP sendAndWait)
 		if msg.Payload != nil {
@@ -720,7 +720,7 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 
 		default:
 			// Для неизвестных сообщений — логируем
-			r.logger.Debug("неизвестный тип сообщения от агента", "agent", msg.AgentID, "type", msg.Type)
+			r.logger.Debug("unknown message type from agent", "agent", msg.AgentID, "type", msg.Type)
 		}
 	}
 }
@@ -810,18 +810,18 @@ func (r *Relay) handleExecCommand(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	if body.AgentID == "" || body.Command == "" {
-		writeError(w, http.StatusBadRequest, "agent_id и command обязательны")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidPayload)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -862,7 +862,7 @@ func (r *Relay) handleExecCommand(w http.ResponseWriter, req *http.Request) {
 			},
 		})
 
-		writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeAgentWriteFailed, err.Error())
 		return
 	}
 
@@ -907,13 +907,13 @@ func (r *Relay) handleFileRead(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -924,7 +924,7 @@ func (r *Relay) handleFileRead(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := agent.SendMessage(msg); err != nil {
-		writeError(w, http.StatusBadGateway, "ошибка: "+err.Error())
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeInternalError, err.Error())
 		return
 	}
 
@@ -941,13 +941,13 @@ func (r *Relay) handleFileWrite(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -960,7 +960,7 @@ func (r *Relay) handleFileWrite(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := agent.SendMessage(msg); err != nil {
-		writeError(w, http.StatusBadGateway, "ошибка: "+err.Error())
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeInternalError, err.Error())
 		return
 	}
 
@@ -975,13 +975,13 @@ func (r *Relay) handleFileList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -992,7 +992,7 @@ func (r *Relay) handleFileList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := agent.SendMessage(msg); err != nil {
-		writeError(w, http.StatusBadGateway, "ошибка: "+err.Error())
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeInternalError, err.Error())
 		return
 	}
 
@@ -1005,19 +1005,19 @@ func (r *Relay) handleSysInfo(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
 	msg := protocol.NewMessage(protocol.MsgSysInfo)
 	if err := agent.SendMessage(msg); err != nil {
-		writeError(w, http.StatusBadGateway, "ошибка: "+err.Error())
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeInternalError, err.Error())
 		return
 	}
 
@@ -1040,18 +1040,18 @@ func (r *Relay) handleTaskSubmit(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	if body.AgentID == "" || body.Description == "" {
-		writeError(w, http.StatusBadRequest, "agent_id и description обязательны")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidPayload)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1071,7 +1071,7 @@ func (r *Relay) handleTaskSubmit(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := agent.SendMessage(msg); err != nil {
-		writeError(w, http.StatusBadGateway, "ошибка: "+err.Error())
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeInternalError, err.Error())
 		return
 	}
 
@@ -1089,13 +1089,13 @@ func (r *Relay) handleTaskCancel(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1118,18 +1118,18 @@ func (r *Relay) handleSkillPush(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	if body.AgentID == "" || body.SkillID == "" || body.Instructions == "" {
-		writeError(w, http.StatusBadRequest, "agent_id, skill_id и instructions обязательны")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidPayload)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1153,13 +1153,13 @@ func (r *Relay) handleSkillList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1176,13 +1176,13 @@ func (r *Relay) handleSkillDelete(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1197,7 +1197,7 @@ func (r *Relay) handleSkillDelete(w http.ResponseWriter, req *http.Request) {
 // Отправляет MsgConfigUpdate агенту через WS.
 func (r *Relay) handleAgentConfigUpdate(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPut {
-		writeError(w, http.StatusMethodNotAllowed, "только PUT")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -1210,7 +1210,7 @@ func (r *Relay) handleAgentConfigUpdate(w http.ResponseWriter, req *http.Request
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 	if body.AgentID == "" {
@@ -1220,7 +1220,7 @@ func (r *Relay) handleAgentConfigUpdate(w http.ResponseWriter, req *http.Request
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1240,7 +1240,7 @@ func (r *Relay) handleAgentConfigUpdate(w http.ResponseWriter, req *http.Request
 	}
 
 	if len(payload) == 0 {
-		writeError(w, http.StatusBadRequest, "нет полей для обновления")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidPayload)
 		return
 	}
 
@@ -1248,8 +1248,8 @@ func (r *Relay) handleAgentConfigUpdate(w http.ResponseWriter, req *http.Request
 	msg := protocol.NewMessage(protocol.MsgConfigUpdate)
 	msg.Payload = payload
 	if err := agent.SendMessage(msg); err != nil {
-		r.logger.Error("не удалось отправить config update", "err", err, "agent", body.AgentID)
-		writeError(w, http.StatusBadGateway, "агент не получил конфиг")
+		r.logger.Error("config update send failed", "err", err, "agent", body.AgentID)
+		writeError(w, http.StatusBadGateway, protocol.CodeConfigFailed)
 		return
 	}
 
@@ -1272,7 +1272,7 @@ func (r *Relay) handleAgentConfigUpdate(w http.ResponseWriter, req *http.Request
 // handleBackupCreate — POST /api/v1/agents/backup: trigger backup на агенте.
 func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -1283,7 +1283,7 @@ func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
@@ -1294,7 +1294,7 @@ func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1307,7 +1307,7 @@ func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := agent.SendMessage(msg); err != nil {
-		writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeAgentWriteFailed, err.Error())
 		return
 	}
 
@@ -1321,7 +1321,7 @@ func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 // handleBackupList — GET /api/v1/agents/backup/list: list snapshots.
 func (r *Relay) handleBackupList(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -1333,7 +1333,7 @@ func (r *Relay) handleBackupList(w http.ResponseWriter, req *http.Request) {
 
 	agent, ok := r.pool.Get(agentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1344,7 +1344,7 @@ func (r *Relay) handleBackupList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := agent.SendMessage(msg); err != nil {
-		writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeAgentWriteFailed, err.Error())
 		return
 	}
 
@@ -1374,7 +1374,7 @@ func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request)
 	} else if req.Method == http.MethodDelete {
 		operation = "delete"
 	} else {
-		writeError(w, http.StatusBadRequest, "неподдерживаемая операция")
+		writeError(w, http.StatusBadRequest, protocol.CodeUnknownError)
 		return
 	}
 
@@ -1383,7 +1383,7 @@ func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request)
 		AgentID string `json:"agent_id"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
@@ -1394,7 +1394,7 @@ func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request)
 
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "агент не подключён")
+		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
 		return
 	}
 
@@ -1403,7 +1403,7 @@ func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request)
 	switch operation {
 	case "restore":
 		if req.Method != http.MethodPost {
-			writeError(w, http.StatusMethodNotAllowed, "только POST")
+			writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 			return
 		}
 		msg := protocol.NewMessage(protocol.MsgBackupRestore)
@@ -1412,7 +1412,7 @@ func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request)
 			SnapshotID: snapshotID,
 		}
 		if err := agent.SendMessage(msg); err != nil {
-			writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+			writeErrorCustom(w, http.StatusBadGateway, protocol.CodeAgentWriteFailed, err.Error())
 			return
 		}
 		writeJSON(w, map[string]string{
@@ -1424,7 +1424,7 @@ func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request)
 
 	case "delete":
 		if req.Method != http.MethodDelete {
-			writeError(w, http.StatusMethodNotAllowed, "только DELETE")
+			writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 			return
 		}
 		msg := protocol.NewMessage(protocol.MsgBackupDelete)
@@ -1433,7 +1433,7 @@ func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request)
 			SnapshotID: snapshotID,
 		}
 		if err := agent.SendMessage(msg); err != nil {
-			writeError(w, http.StatusBadGateway, "ошибка отправки команды: "+err.Error())
+			writeErrorCustom(w, http.StatusBadGateway, protocol.CodeAgentWriteFailed, err.Error())
 			return
 		}
 		writeJSON(w, map[string]string{
@@ -1511,7 +1511,7 @@ func (r *Relay) handleAuditQuery(w http.ResponseWriter, req *http.Request) {
 	// Запрашиваем
 	entries, err := r.audit.Query(query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "ошибка запроса: "+err.Error())
+		writeErrorCustom(w, http.StatusInternalServerError, protocol.CodeInternalError, err.Error())
 		return
 	}
 
@@ -1555,7 +1555,7 @@ func (r *Relay) handleAuditExport(w http.ResponseWriter, req *http.Request) {
 	// Экспортируем
 	data, err := r.audit.Export(format, query)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "ошибка экспорта: "+err.Error())
+		writeErrorCustom(w, http.StatusBadRequest, protocol.CodeInternalError, err.Error())
 		return
 	}
 
@@ -1580,7 +1580,7 @@ func (r *Relay) handleAuditStats(w http.ResponseWriter, req *http.Request) {
 
 	stats, err := r.audit.Stats()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "ошибка статистики: "+err.Error())
+		writeErrorCustom(w, http.StatusInternalServerError, protocol.CodeInternalError, err.Error())
 		return
 	}
 
@@ -1599,7 +1599,7 @@ func (r *Relay) handleClients(w http.ResponseWriter, req *http.Request) {
 			Plan  string `json:"plan"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "неверный JSON")
+			writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 			return
 		}
 		if body.Name == "" {
@@ -1625,7 +1625,7 @@ func (r *Relay) handleClients(w http.ResponseWriter, req *http.Request) {
 		})
 
 	default:
-		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 	}
 }
 
@@ -1658,7 +1658,7 @@ func (r *Relay) handleClientByID(w http.ResponseWriter, req *http.Request) {
 				Arch  string   `json:"arch"`
 			}
 			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-				writeError(w, http.StatusBadRequest, "неверный JSON")
+				writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 				return
 			}
 			if body.Label == "" {
@@ -1676,7 +1676,7 @@ func (r *Relay) handleClientByID(w http.ResponseWriter, req *http.Request) {
 			}
 			writeJSON(w, agent)
 		default:
-			writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+			writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		}
 		return
 	}
@@ -1686,7 +1686,7 @@ func (r *Relay) handleClientByID(w http.ResponseWriter, req *http.Request) {
 	case http.MethodGet:
 		client, ok := r.registry.GetClient(clientID)
 		if !ok {
-			writeError(w, http.StatusNotFound, "клиент не найден")
+			writeError(w, http.StatusNotFound, protocol.CodeClientNotFound)
 			return
 		}
 		writeJSON(w, client)
@@ -1700,14 +1700,14 @@ func (r *Relay) handleClientByID(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, map[string]string{"status": "deactivated", "client_id": clientID})
 
 	default:
-		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 	}
 }
 
 // handleAgentRegister — POST: зарегистрировать агента (альтернативный endpoint).
 func (r *Relay) handleAgentRegister(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -1719,7 +1719,7 @@ func (r *Relay) handleAgentRegister(w http.ResponseWriter, req *http.Request) {
 		Arch     string   `json:"arch"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 	if body.ClientID == "" || body.Label == "" {
@@ -1741,7 +1741,7 @@ func (r *Relay) handleAgentRegister(w http.ResponseWriter, req *http.Request) {
 // handleAgentDelete — DELETE: удалить агента по ID.
 func (r *Relay) handleAgentDelete(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodDelete {
-		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -1835,10 +1835,10 @@ func (r *Relay) handleApprovalAction(w http.ResponseWriter, req *http.Request) {
 			"comment":    body.Comment,
 		}
 		if err := agent.SendMessage(respMsg); err != nil {
-			r.logger.Error("не удалось отправить approval response агенту", "err", err, "agent", req2.AgentID)
+			r.logger.Error("approval response send failed", "err", err, "agent", req2.AgentID)
 		}
 	} else {
-		r.logger.Warn("агент не подключён для approval response", "agent", req2.AgentID)
+		r.logger.Warn("agent not connected for approval response", "agent", req2.AgentID)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1848,7 +1848,7 @@ func (r *Relay) handleApprovalAction(w http.ResponseWriter, req *http.Request) {
 // handleBillingUsage — GET /api/v1/billing/usage?client_id=X
 func (r *Relay) handleBillingUsage(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 	clientID := req.URL.Query().Get("client_id")
@@ -1877,7 +1877,7 @@ func (r *Relay) handleBillingUsage(w http.ResponseWriter, req *http.Request) {
 // handleBillingPlan — GET /api/v1/billing/plan?client_id=X
 func (r *Relay) handleBillingPlan(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 	clientID := req.URL.Query().Get("client_id")
@@ -1894,7 +1894,7 @@ func (r *Relay) handleBillingPlan(w http.ResponseWriter, req *http.Request) {
 	}
 	plan, ok := r.planStore.GetPlan(planID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "план не найден")
+		writeError(w, http.StatusNotFound, protocol.CodeClientNotFound)
 		return
 	}
 	writeJSON(w, plan)
@@ -1903,7 +1903,7 @@ func (r *Relay) handleBillingPlan(w http.ResponseWriter, req *http.Request) {
 // handleBillingPlanChange — POST /api/v1/billing/plan/change
 func (r *Relay) handleBillingPlanChange(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 	var body struct {
@@ -1911,7 +1911,7 @@ func (r *Relay) handleBillingPlanChange(w http.ResponseWriter, req *http.Request
 		PlanID   string `json:"plan_id"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 	if body.ClientID == "" || body.PlanID == "" {
@@ -1919,12 +1919,12 @@ func (r *Relay) handleBillingPlanChange(w http.ResponseWriter, req *http.Request
 		return
 	}
 	if _, ok := r.planStore.GetPlan(body.PlanID); !ok {
-		writeError(w, http.StatusBadRequest, "план не найден")
+		writeError(w, http.StatusBadRequest, protocol.CodeClientNotFound)
 		return
 	}
 	client, ok := r.registry.GetClient(body.ClientID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "клиент не найден")
+		writeError(w, http.StatusNotFound, protocol.CodeClientNotFound)
 		return
 	}
 	client.Plan = body.PlanID
@@ -1938,7 +1938,7 @@ func (r *Relay) handleBillingPlanChange(w http.ResponseWriter, req *http.Request
 // handleBillingInvoices — GET /api/v1/billing/invoices?client_id=X
 func (r *Relay) handleBillingInvoices(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 	clientID := req.URL.Query().Get("client_id")
@@ -1956,7 +1956,7 @@ func (r *Relay) handleBillingInvoices(w http.ResponseWriter, req *http.Request) 
 // handleBillingInvoicePay — POST /api/v1/billing/invoices/{id}/pay
 func (r *Relay) handleBillingInvoicePay(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 	invoiceID := strings.TrimPrefix(req.URL.Path, "/api/v1/billing/invoices/")
@@ -1975,7 +1975,7 @@ func (r *Relay) handleBillingInvoicePay(w http.ResponseWriter, req *http.Request
 // handleBillingPaymentMethods — GET /api/v1/billing/payment-methods?client_id=X
 func (r *Relay) handleBillingPaymentMethods(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 	clientID := req.URL.Query().Get("client_id")
@@ -2001,7 +2001,7 @@ func currentBillingMonth() string {
 // Response: {"access_token": "...", "refresh_token": "...", "expires_at": 1234567890, "token_type": "Bearer"}
 func (r *Relay) handleAuthToken(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -2011,7 +2011,7 @@ func (r *Relay) handleAuthToken(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
@@ -2023,7 +2023,7 @@ func (r *Relay) handleAuthToken(w http.ResponseWriter, req *http.Request) {
 	// Проверяем что клиент существует (если есть registry)
 	if r.registry != nil {
 		if _, ok := r.registry.GetClient(body.ClientID); !ok {
-			writeError(w, http.StatusNotFound, "клиент не найден")
+			writeError(w, http.StatusNotFound, protocol.CodeClientNotFound)
 			return
 		}
 	}
@@ -2031,8 +2031,8 @@ func (r *Relay) handleAuthToken(w http.ResponseWriter, req *http.Request) {
 	// Генерируем пару токенов
 	pair, err := r.auth.GenerateTokenPair(body.ClientID)
 	if err != nil {
-		r.logger.Error("ошибка генерации токенов", "err", err, "client_id", body.ClientID)
-		writeError(w, http.StatusInternalServerError, "ошибка генерации токенов")
+		r.logger.Error("token generation error", "err", err, "client_id", body.ClientID)
+		writeError(w, http.StatusInternalServerError, protocol.CodeTokenGenerateError)
 		return
 	}
 
@@ -2044,7 +2044,7 @@ func (r *Relay) handleAuthToken(w http.ResponseWriter, req *http.Request) {
 // Response: {"access_token": "...", "refresh_token": "...", "expires_at": 1234567890, "token_type": "Bearer"}
 func (r *Relay) handleAuthRefresh(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -2053,7 +2053,7 @@ func (r *Relay) handleAuthRefresh(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
@@ -2065,7 +2065,7 @@ func (r *Relay) handleAuthRefresh(w http.ResponseWriter, req *http.Request) {
 	// Refresh токены
 	pair, err := r.auth.RefreshToken(body.RefreshToken)
 	if err != nil {
-		r.logger.Warn("ошибка refresh токена", "err", err)
+		r.logger.Warn("token refresh error", "err", err)
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
@@ -2078,7 +2078,7 @@ func (r *Relay) handleAuthRefresh(w http.ResponseWriter, req *http.Request) {
 // Response: {"status": "logged_out"}
 func (r *Relay) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -2096,8 +2096,8 @@ func (r *Relay) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
 
 	// Добавляем в blacklist
 	if err := r.auth.Logout(token); err != nil {
-		r.logger.Warn("ошибка logout", "err", err)
-		writeError(w, http.StatusBadRequest, "неверный токен")
+		r.logger.Warn("logout error", "err", err)
+		writeError(w, http.StatusBadRequest, protocol.CodeTokenInvalid)
 		return
 	}
 
@@ -2110,7 +2110,7 @@ func (r *Relay) handleAuthLogout(w http.ResponseWriter, req *http.Request) {
 // Response: {"status": "revoked", "count": 5}
 func (r *Relay) handleAuthRevoke(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "только POST")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -2128,7 +2128,7 @@ func (r *Relay) handleAuthRevoke(w http.ResponseWriter, req *http.Request) {
 
 	// Только static token может revoke
 	if r.cfg.APIToken == "" || token != r.cfg.APIToken {
-		writeError(w, http.StatusForbidden, "требуется admin токен")
+		writeError(w, http.StatusForbidden, protocol.CodeForbidden)
 		return
 	}
 
@@ -2137,7 +2137,7 @@ func (r *Relay) handleAuthRevoke(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
@@ -2174,7 +2174,7 @@ func (r *Relay) handleRateLimits(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, map[string]string{"status": "stats_reset"})
 
 	default:
-		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 	}
 }
 
@@ -2203,7 +2203,7 @@ func (r *Relay) handleRateLimitByClient(w http.ResponseWriter, req *http.Request
 			MaxPerHour *int `json:"max_per_hour"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "неверный JSON")
+			writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 			return
 		}
 
@@ -2238,17 +2238,17 @@ func (r *Relay) handleRateLimitByClient(w http.ResponseWriter, req *http.Request
 			})
 			return
 		}
-		writeError(w, http.StatusBadRequest, "используйте POST .../reset для сброса счётчиков")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidPayload)
 
 	default:
-		writeError(w, http.StatusMethodNotAllowed, "метод не поддерживается")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 	}
 }
 
 // handleRateLimitStats — GET /api/v1/rate-limits/stats — общая статистика.
 func (r *Relay) handleRateLimitStats(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 
@@ -2261,12 +2261,21 @@ func writeJSON(w http.ResponseWriter, data any) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func writeError(w http.ResponseWriter, code int, message string) {
+func writeError(w http.ResponseWriter, httpCode int, protoCode string, args ...any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
+	w.WriteHeader(httpCode)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error": protocol.T(protoCode),
+		"code":  protoCode,
+	})
+}
+
+func writeErrorCustom(w http.ResponseWriter, httpCode int, protoCode string, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpCode)
 	json.NewEncoder(w).Encode(map[string]string{
 		"error": message,
-		"code":  fmt.Sprintf("%d", code),
+		"code":  protoCode,
 	})
 }
 

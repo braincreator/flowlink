@@ -5,6 +5,7 @@
 package agent
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"fmt"
 	"log/slog"
 	"os"
@@ -97,7 +98,7 @@ func (k *KillSwitch) handleSignals() {
 	notifyPlatformSignals(sigChan)
 
 	for sig := range sigChan {
-		k.logger.Info("получен сигнал", "signal", sig)
+		k.logger.Info("signal received", "signal", sig)
 		k.EmergencyStop()
 		os.Exit(0)
 	}
@@ -129,7 +130,7 @@ func (k *KillSwitch) checkResources() {
 			// CPU высокий более 5 минут → пауза
 			k.mode = ModePaused
 			k.pauseReason = fmt.Sprintf("CPU высокая загрузка: %.1f%%", cpuUsage)
-			k.logger.Warn("авто-пауза: высокая загрузка CPU", "cpu", cpuUsage)
+			k.logger.Warn("auto-pause: high CPU usage", "cpu", cpuUsage)
 			k.notify("cpu_pause", map[string]any{"cpu": cpuUsage})
 		}
 	} else {
@@ -144,8 +145,8 @@ func (k *KillSwitch) checkResources() {
 		// Диск почти полный → только чтение
 		if k.mode == ModeRunning {
 			k.mode = ModeReadonly
-			k.pauseReason = fmt.Sprintf("Диск почти полон: %.1f%%", diskUsage)
-			k.logger.Warn("авто-readonly: диск почти полон", "disk", diskUsage)
+			k.pauseReason = protocol.Tf(protocol.CodeKillSwitchDiskFull, diskUsage)
+			k.logger.Warn("auto-readonly: disk almost full", "disk", diskUsage)
 			k.notify("disk_readonly", map[string]any{"disk": diskUsage})
 		}
 	}
@@ -194,7 +195,7 @@ func (k *KillSwitch) EmergencyStop() {
 	defer k.mu.Unlock()
 
 	k.mode = ModeEmergency
-	k.pauseReason = "Экстренная остановка"
+	k.pauseReason = protocol.T(protocol.CodeKillSwitchEmergency)
 
 	k.logger.Warn("EMERGENCY STOP активирован")
 	k.notify("emergency_stop", nil)
@@ -208,7 +209,7 @@ func (k *KillSwitch) Pause(reason string) {
 	k.mode = ModePaused
 	k.pauseReason = reason
 
-	k.logger.Info("агент на паузе", "reason", reason)
+	k.logger.Info("agent paused", "reason", reason)
 	k.notify("paused", map[string]any{"reason": reason})
 }
 
@@ -221,7 +222,7 @@ func (k *KillSwitch) PauseFor(reason string, duration time.Duration) {
 	k.pauseReason = reason
 	k.pauseUntil = time.Now().Add(duration)
 
-	k.logger.Info("агент на паузе", "reason", reason, "duration", duration)
+	k.logger.Info("agent paused", "reason", reason, "duration", duration)
 	k.notify("paused", map[string]any{"reason": reason, "duration": duration.Seconds()})
 }
 
@@ -235,7 +236,7 @@ func (k *KillSwitch) Resume() {
 	k.pauseUntil = time.Time{}
 	k.consecutiveErrors = 0
 
-	k.logger.Info("агент возобновил работу")
+	k.logger.Info("agent resumed")
 	k.notify("resumed", nil)
 }
 
@@ -246,12 +247,12 @@ func (k *KillSwitch) CheckCommand(cmd string) error {
 
 	switch k.mode {
 	case ModeEmergency:
-		return fmt.Errorf("экстренная остановка: команды не выполняются")
+		return protocol.Err(protocol.CodeAgentEmergencyStop)
 	case ModePaused:
-		return fmt.Errorf("агент на паузе: %s", k.pauseReason)
+		return protocol.Err(protocol.CodeAgentPaused, k.pauseReason)
 	case ModeReadonly:
 		if IsWriteCommand(cmd) {
-			return fmt.Errorf("режим только чтения: write-команды отклонены")
+			return protocol.Err(protocol.CodeExecBlockedReadOnly)
 		}
 	case ModeRunning:
 		// Всё ок

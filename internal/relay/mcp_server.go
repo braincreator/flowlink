@@ -427,7 +427,7 @@ func (r *Relay) mcpExec(w http.ResponseWriter, id any, args map[string]any) {
 		"workdir": workdir,
 	}, 30*time.Second)
 	if err != nil {
-		writeMCPError(w, id, -32603, "агент ошибка: "+err.Error())
+		writeMCPError(w, id, -32603, protocol.CodeMCPAgentError+": "+err.Error())
 		return
 	}
 
@@ -673,7 +673,7 @@ func (r *Relay) resolveAgent(selector string) (*AgentConn, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("агент '%s' не найден (подключено: %d)", selector, len(agents))
+	return nil, protocol.Err(protocol.CodeMCPAgentNotFound, selector, len(agents))
 }
 
 // sendAndWait — отправляет команду агенту через WSS и ждёт ответ.
@@ -715,7 +715,7 @@ func (r *Relay) sendAndWait(ac *AgentConn, action string, payload any, timeout t
 		return string(b), nil
 
 	case <-time.After(timeout):
-		return "", fmt.Errorf("таймаут ожидания ответа от агента (%v)", timeout)
+		return "", protocol.Err(protocol.CodeMCPTimeout, timeout)
 	}
 }
 

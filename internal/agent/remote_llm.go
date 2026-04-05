@@ -68,7 +68,7 @@ func (r *RemoteLLM) Chat(messages []LLMMessage) (*RemoteLLMResponse, error) {
 
 	// Отправляем запрос через WSS
 	if err := r.agent.write(msg); err != nil {
-		return nil, fmt.Errorf("ошибка отправки LLM запроса: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeLLMRequestError, err)
 	}
 
 	// Ждём ответа — будет обработан в readLoop и записан в pendingLLM
@@ -152,7 +152,7 @@ func (a *Agent) handleLLMResponse(msg protocol.Message) {
 
 	var resp RemoteLLMResponse
 	if err := json.Unmarshal(payloadBytes, &resp); err != nil {
-		a.logger.Error("ошибка парсинга LLM ответа", "err", err)
+		a.logger.Error("LLM response parse error", "err", err)
 		return
 	}
 
@@ -177,8 +177,8 @@ func (a *Agent) waitForLLMResponse(requestID string, timeout time.Duration) (*Re
 	case resp := <-ch:
 		return resp, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("таймаут ожидания LLM ответа: %v", timeout)
+		return nil, protocol.Err(protocol.CodeMCPTimeout, timeout)
 	case <-a.done:
-		return nil, fmt.Errorf("агент отключён")
+		return nil, protocol.Err(protocol.CodeAgentNotConnected)
 	}
 }

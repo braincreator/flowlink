@@ -2,12 +2,12 @@
 package audit
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -68,7 +68,7 @@ func VerifyEntry(entry map[string]interface{}, secret []byte) bool {
 func NewHMACSecret() ([]byte, error) {
 	secret := make([]byte, HMACSecretLen)
 	if _, err := rand.Read(secret); err != nil {
-		return nil, fmt.Errorf("ошибка генерации ключа: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTLSKeyGenerateError, err)
 	}
 	return secret, nil
 }
@@ -82,7 +82,7 @@ func LoadOrGenerateHMACSecret(customPath string) ([]byte, error) {
 	} else {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return nil, fmt.Errorf("ошибка получения home директории: %w", err)
+			return nil, protocol.ErrCause(protocol.CodeInternalError, err)
 		}
 		keyPath = filepath.Join(home, ".flowlink", "audit.key")
 	}
@@ -102,12 +102,12 @@ func LoadOrGenerateHMACSecret(customPath string) ([]byte, error) {
 
 	// Создаём директорию если нужно
 	if err := os.MkdirAll(filepath.Dir(keyPath), 0700); err != nil {
-		return nil, fmt.Errorf("ошибка создания директории: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeAuditDirCreateError, err)
 	}
 
 	// Сохраняем ключ
 	if err := os.WriteFile(keyPath, secret, 0600); err != nil {
-		return nil, fmt.Errorf("ошибка сохранения ключа: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTLSCertWriteError, err)
 	}
 
 	return secret, nil

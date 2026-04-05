@@ -2,6 +2,7 @@
 package billing
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -49,13 +50,13 @@ func (ss *SubscriptionStore) CreateSubscription(customerID, customerEmail, planI
 	// Проверяем план
 	_, ok := ss.planStore.GetPlan(planID)
 	if !ok {
-		return nil, fmt.Errorf("план %s не найден", planID)
+		return nil, protocol.Err(protocol.CodeClientNotFound, planID)
 	}
 
 	// Проверяем, нет ли уже активной подписки
 	for _, subID := range ss.customerIdx[customerID] {
 		if sub, ok := ss.subscriptions[subID]; ok && sub.Status == SubscriptionStatusActive {
-			return nil, fmt.Errorf("у клиента %s уже есть активная подписка %s", customerID, subID)
+			return nil, protocol.Err(protocol.CodeSkillAlreadyExists, customerID, subID)
 		}
 	}
 
@@ -91,7 +92,7 @@ func (ss *SubscriptionStore) CreateSubscription(customerID, customerEmail, planI
 	ss.customerIdx[customerID] = appendIdx(ss.customerIdx[customerID], sub.ID)
 	ss.persist(sub)
 
-	ss.logger.Info("подписка создана", "id", sub.ID, "customer", customerID, "plan", planID, "period", period, "next_billing", nextBilling.Format("2006-01-02"))
+	ss.logger.Info("subscription created", "id", sub.ID, "customer", customerID, "plan", planID, "period", period, "next_billing", nextBilling.Format("2006-01-02"))
 
 	return sub, nil
 }
@@ -103,11 +104,11 @@ func (ss *SubscriptionStore) RenewSubscription(subscriptionID string) (*Subscrip
 
 	sub, ok := ss.subscriptions[subscriptionID]
 	if !ok {
-		return nil, fmt.Errorf("подписка %s не найдена", subscriptionID)
+		return nil, protocol.Err(protocol.CodeClientNotFound, subscriptionID)
 	}
 
 	if sub.Status != SubscriptionStatusActive {
-		return nil, fmt.Errorf("подписка %s не активна (status: %s)", subscriptionID, sub.Status)
+		return nil, protocol.Err(protocol.CodeClientDeactivated, subscriptionID)
 	}
 
 	// Получаем план
@@ -130,21 +131,21 @@ func (ss *SubscriptionStore) RenewSubscription(subscriptionID string) (*Subscrip
 	_ = NewInvoiceStore(ss.dataDir, ss.planStore, ss.logger)
 	_, err := NewInvoiceStore(ss.dataDir, ss.planStore, ss.logger).GenerateInvoice(sub.CustomerID, sub.PlanID)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка создания счёта: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeConfigFailed, err)
 	}
 
 	// Создаём recurring платёж через gateway
 	if tc, ok := ss.gateway.(*TochkaClient); ok {
 		session, err := tc.CreateRecurringPayment(sub.CustomerEmail, sub.PaymentMethodID, sub.PlanID, sub.Period)
 		if err != nil {
-			return nil, fmt.Errorf("ошибка recurring платежа: %w", err)
+			return nil, protocol.ErrCause(protocol.CodeInternalError, err)
 		}
 
 		sub.LastPaymentID = session.PaymentID
 		sub.NextBillingDate = ss.calculateNextBilling(time.Now(), sub.Period, sub.BillingDay)
 		ss.persist(sub)
 
-		ss.logger.Info("подписка продлена", "id", sub.ID, "payment", session.PaymentID, "next_billing", sub.NextBillingDate.Format("2006-01-02"))
+		ss.logger.Info("subscription renewed", "id", sub.ID, "payment", session.PaymentID, "next_billing", sub.NextBillingDate.Format("2006-01-02"))
 
 		return sub, nil
 	}
@@ -159,7 +160,7 @@ func (ss *SubscriptionStore) CancelSubscription(subscriptionID string, refund bo
 
 	sub, ok := ss.subscriptions[subscriptionID]
 	if !ok {
-		return fmt.Errorf("подписка %s не найдена", subscriptionID)
+		return protocol.Err(protocol.CodeClientNotFound, subscriptionID)
 	}
 
 	now := time.Now()
@@ -182,17 +183,17 @@ func (ss *SubscriptionStore) CancelSubscription(subscriptionID string, refund bo
 			if amount > 0 {
 				rubAmount := USDtoRUB(amount)
 				if err := ss.gateway.Refund(sub.LastPaymentID, rubAmount); err != nil {
-					ss.logger.Error("ошибка возврата", "err", err, "payment", sub.LastPaymentID)
+					ss.logger.Error("refund error", "err", err, "payment", sub.LastPaymentID)
 					// Не прерываем отмену, логируем ошибку
 				} else {
-					ss.logger.Info("возврат выполнен", "payment", sub.LastPaymentID, "amount", rubAmount)
+					ss.logger.Info("refund completed", "payment", sub.LastPaymentID, "amount", rubAmount)
 				}
 			}
 		}
 	}
 
 	ss.persist(sub)
-	ss.logger.Info("подписка отменена", "id", sub.ID, "refund", refund)
+	ss.logger.Info("subscription cancelled", "id", sub.ID, "refund", refund)
 
 	return nil
 }
@@ -299,7 +300,7 @@ func (ss *SubscriptionStore) persist(sub *Subscription) {
 	path := filepath.Join(ss.dataDir, "subscriptions.jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		ss.logger.Error("ошибка сохранения подписки", "err", err)
+		ss.logger.Error("subscription save error", "err", err)
 		return
 	}
 	defer f.Close()

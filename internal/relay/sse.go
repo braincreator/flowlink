@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -27,7 +28,7 @@ type sseLastEvent struct {
 // Поддерживает Last-Event-ID для reconnect после обрыва.
 func (r *Relay) handleSSE(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "только GET")
+		writeError(w, http.StatusMethodNotAllowed, protocol.CodeUnknownError)
 		return
 	}
 

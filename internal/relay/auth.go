@@ -3,6 +3,7 @@
 package relay
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -130,7 +131,7 @@ func (am *AuthManager) GenerateAgentToken(agentID string, expiresInSeconds int64
 	// Сериализуем токен
 	tokenJSON, err := json.Marshal(token)
 	if err != nil {
-		return "", fmt.Errorf("сериализация токена: %w", err)
+		return "", protocol.ErrCause(protocol.CodeTokenSerializeFail, err)
 	}
 
 	// Создаём подпись
@@ -143,7 +144,7 @@ func (am *AuthManager) GenerateAgentToken(agentID string, expiresInSeconds int64
 	am.tokens[tokenID] = token
 	am.clientTokens[agentID] = append(am.clientTokens[agentID], tokenID)
 
-	am.logger.Debug("сгенерирован токен агента", "agent_id", agentID, "token_id", tokenID)
+	am.logger.Debug("agent token generated", "agent_id", agentID, "token_id", tokenID)
 
 	return tokenStr, nil
 }
@@ -161,7 +162,7 @@ func (am *AuthManager) ValidateAgentToken(agentID, tokenStr string) (bool, error
 
 	// Проверяем тип
 	if token.Type != TokenTypeAgent {
-		return false, fmt.Errorf("неверный тип токена")
+		return false, protocol.Err(protocol.CodeTokenTypeInvalid)
 	}
 
 	// Проверяем agent_id
@@ -171,22 +172,22 @@ func (am *AuthManager) ValidateAgentToken(agentID, tokenStr string) (bool, error
 
 	// Проверяем отзыв
 	if am.revoked[token.ID] {
-		return false, fmt.Errorf("токен отозван")
+		return false, protocol.Err(protocol.CodeTokenRevoked)
 	}
 
 	// Проверяем expiration
 	if token.ExpiresAt > 0 && time.Now().Unix() > token.ExpiresAt {
-		return false, fmt.Errorf("токен истёк")
+		return false, protocol.Err(protocol.CodeTokenExpired)
 	}
 
 	// Проверяем подпись
 	secret := am.secrets[agentID]
 	if secret == nil {
-		return false, fmt.Errorf("секрет не найден")
+		return false, protocol.Err(protocol.CodeSecretNotFound)
 	}
 
 	if !verifyTokenSignature(tokenStr, secret) {
-		return false, fmt.Errorf("неверная подпись")
+		return false, protocol.Err(protocol.CodeSignatureInvalid)
 	}
 
 	return true, nil
@@ -224,7 +225,7 @@ func (am *AuthManager) GenerateAPIToken(clientID string, expiresInSeconds int64)
 	// Сериализуем токен
 	tokenJSON, err := json.Marshal(token)
 	if err != nil {
-		return "", fmt.Errorf("сериализация токена: %w", err)
+		return "", protocol.ErrCause(protocol.CodeTokenSerializeFail, err)
 	}
 
 	// Создаём подпись
@@ -237,7 +238,7 @@ func (am *AuthManager) GenerateAPIToken(clientID string, expiresInSeconds int64)
 	am.tokens[tokenID] = token
 	am.clientTokens[clientID] = append(am.clientTokens[clientID], tokenID)
 
-	am.logger.Info("сгенерирован API токен", "client_id", clientID, "token_id", tokenID)
+	am.logger.Info("API token generated", "client_id", clientID, "token_id", tokenID)
 
 	return tokenStr, nil
 }
@@ -255,27 +256,27 @@ func (am *AuthManager) ValidateAPIToken(tokenStr string) (string, error) {
 
 	// Проверяем тип
 	if token.Type != TokenTypeAPI {
-		return "", fmt.Errorf("неверный тип токена")
+		return "", protocol.Err(protocol.CodeTokenTypeInvalid)
 	}
 
 	// Проверяем отзыв
 	if am.revoked[token.ID] {
-		return "", fmt.Errorf("токен отозван")
+		return "", protocol.Err(protocol.CodeTokenRevoked)
 	}
 
 	// Проверяем expiration
 	if token.ExpiresAt > 0 && time.Now().Unix() > token.ExpiresAt {
-		return "", fmt.Errorf("токен истёк")
+		return "", protocol.Err(protocol.CodeTokenExpired)
 	}
 
 	// Проверяем подпись
 	secret := am.secrets[token.ClientID]
 	if secret == nil {
-		return "", fmt.Errorf("секрет не найден")
+		return "", protocol.Err(protocol.CodeSecretNotFound)
 	}
 
 	if !verifyTokenSignature(tokenStr, secret) {
-		return "", fmt.Errorf("неверная подпись")
+		return "", protocol.Err(protocol.CodeSignatureInvalid)
 	}
 
 	return token.ClientID, nil
@@ -315,7 +316,7 @@ func (am *AuthManager) RevokeToken(tokenStr string) error {
 	}
 
 	am.revoked[token.ID] = true
-	am.logger.Info("токен отозван", "token_id", token.ID, "client_id", token.ClientID)
+	am.logger.Info("token revoked", "token_id", token.ID, "client_id", token.ClientID)
 
 	return nil
 }
@@ -352,7 +353,7 @@ func (am *AuthManager) GenerateTokenPair(clientID string) (*TokenPair, error) {
 
 	accessJSON, err := json.Marshal(accessToken)
 	if err != nil {
-		return nil, fmt.Errorf("сериализация access токена: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenSerializeFail, err)
 	}
 	accessSig := signToken(accessJSON, secret)
 	accessStr := base64.RawURLEncoding.EncodeToString(accessJSON) + "." + accessSig
@@ -369,7 +370,7 @@ func (am *AuthManager) GenerateTokenPair(clientID string) (*TokenPair, error) {
 
 	refreshJSON, err := json.Marshal(refreshToken)
 	if err != nil {
-		return nil, fmt.Errorf("сериализация refresh токена: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenSerializeFail, err)
 	}
 	refreshSig := signToken(refreshJSON, secret)
 	refreshStr := base64.RawURLEncoding.EncodeToString(refreshJSON) + "." + refreshSig
@@ -380,7 +381,7 @@ func (am *AuthManager) GenerateTokenPair(clientID string) (*TokenPair, error) {
 	am.clientTokens[clientID] = append(am.clientTokens[clientID], accessID, refreshID)
 	am.refreshTokens[refreshID] = accessID // связь refresh → access
 
-	am.logger.Info("сгенерирована пара токенов",
+	am.logger.Info("token pair generated",
 		"client_id", clientID,
 		"access_id", accessID,
 		"refresh_id", refreshID,
@@ -402,12 +403,12 @@ func (am *AuthManager) RefreshToken(refreshTokenStr string) (*TokenPair, error) 
 	// Парсим refresh token
 	token, err := am.parseToken(refreshTokenStr)
 	if err != nil {
-		return nil, fmt.Errorf("парсинг refresh токена: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenParseFailed, err)
 	}
 
 	// Проверяем тип
 	if token.Type != TokenTypeRefresh {
-		return nil, fmt.Errorf("неверный тип токена: ожидается refresh")
+		return nil, protocol.Err(protocol.CodeTokenTypeInvalid)
 	}
 
 	am.mu.Lock()
@@ -431,11 +432,11 @@ func (am *AuthManager) RefreshToken(refreshTokenStr string) (*TokenPair, error) 
 	// Проверяем подпись
 	secret := am.secrets[token.ClientID]
 	if secret == nil {
-		return nil, fmt.Errorf("секрет не найден")
+		return nil, protocol.Err(protocol.CodeSecretNotFound)
 	}
 
 	if !verifyTokenSignature(refreshTokenStr, secret) {
-		return nil, fmt.Errorf("неверная подпись refresh токена")
+		return nil, protocol.Err(protocol.CodeSignatureInvalid)
 	}
 
 	// Rotation: добавляем старые токены в blacklist
@@ -454,10 +455,10 @@ func (am *AuthManager) RefreshToken(refreshTokenStr string) (*TokenPair, error) 
 	am.mu.Lock() // Re-lock для defer
 
 	if err != nil {
-		return nil, fmt.Errorf("генерация новой пары: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenGenerateError, err)
 	}
 
-	am.logger.Info("выполнен refresh токенов",
+	am.logger.Info("token refresh completed",
 		"client_id", token.ClientID,
 		"old_refresh_id", token.ID,
 		"old_access_id", oldAccessID,
@@ -492,7 +493,7 @@ func (am *AuthManager) AddToBlacklist(tokenStr string) error {
 	}
 
 	am.blacklist[token.ID] = expiry
-	am.logger.Info("токен добавлен в blacklist", "token_id", token.ID, "client_id", token.ClientID)
+	am.logger.Info("token added to blacklist", "token_id", token.ID, "client_id", token.ClientID)
 
 	return nil
 }
@@ -534,7 +535,7 @@ func (am *AuthManager) RevokeByClientID(clientID string) int {
 		}
 	}
 
-	am.logger.Info("отозваны токены клиента", "client_id", clientID, "count", count)
+	am.logger.Info("client tokens revoked", "client_id", clientID, "count", count)
 
 	return count
 }
@@ -553,32 +554,32 @@ func (am *AuthManager) ValidateTokenWithBlacklist(tokenStr string) (string, erro
 
 	// Проверяем blacklist (быстрая проверка)
 	if _, blacklisted := am.blacklist[token.ID]; blacklisted {
-		return "", fmt.Errorf("токен в blacklist")
+		return "", protocol.Err(protocol.CodeTokenBlacklisted)
 	}
 
 	// Проверяем тип (только API токены для HTTP)
 	if token.Type != TokenTypeAPI {
-		return "", fmt.Errorf("неверный тип токена")
+		return "", protocol.Err(protocol.CodeTokenTypeInvalid)
 	}
 
 	// Проверяем отзыв
 	if am.revoked[token.ID] {
-		return "", fmt.Errorf("токен отозван")
+		return "", protocol.Err(protocol.CodeTokenRevoked)
 	}
 
 	// Проверяем expiration
 	if token.ExpiresAt > 0 && time.Now().Unix() > token.ExpiresAt {
-		return "", fmt.Errorf("токен истёк")
+		return "", protocol.Err(protocol.CodeTokenExpired)
 	}
 
 	// Проверяем подпись
 	secret := am.secrets[token.ClientID]
 	if secret == nil {
-		return "", fmt.Errorf("секрет не найден")
+		return "", protocol.Err(protocol.CodeSecretNotFound)
 	}
 
 	if !verifyTokenSignature(tokenStr, secret) {
-		return "", fmt.Errorf("неверная подпись")
+		return "", protocol.Err(protocol.CodeSignatureInvalid)
 	}
 
 	return token.ClientID, nil
@@ -605,7 +606,7 @@ func (am *AuthManager) cleanupBlacklist() {
 				}
 			}
 			am.mu.Unlock()
-			am.logger.Debug("очистка blacklist завершена")
+			am.logger.Debug("blacklist cleanup completed")
 		case <-am.stopCleanup:
 			return
 		}
@@ -618,17 +619,17 @@ func (am *AuthManager) cleanupBlacklist() {
 func (am *AuthManager) parseToken(tokenStr string) (*Token, error) {
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("неверный формат токена")
+		return nil, protocol.Err(protocol.CodeTokenDecodeFailed)
 	}
 
 	tokenJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return nil, fmt.Errorf("декодирование токена: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenDecodeFailed, err)
 	}
 
 	var token Token
 	if err := json.Unmarshal(tokenJSON, &token); err != nil {
-		return nil, fmt.Errorf("парсинг токена: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeTokenParseFailed, err)
 	}
 
 	return &token, nil
@@ -706,6 +707,12 @@ type rateWindow struct {
 func NewRateLimiter(maxPerMin, maxPerHour int, logger *slog.Logger) *RateLimiter {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if maxPerMin <= 0 {
+		maxPerMin = 30
+	}
+	if maxPerHour <= 0 {
+		maxPerHour = 200
 	}
 	return &RateLimiter{
 		maxPerMin:  maxPerMin,
@@ -802,7 +809,7 @@ func (rl *RateLimiter) SetClientLimits(clientID string, maxPerMin, maxPerHour in
 		MaxPerHour: maxPerHour,
 	}
 	rl.clientLimits.Store(clientID, cfg)
-	rl.logger.Info("обновлены лимиты клиента",
+	rl.logger.Info("client rate limits updated",
 		"client_id", clientID,
 		"max_per_min", maxPerMin,
 		"max_per_hour", maxPerHour,
@@ -812,7 +819,7 @@ func (rl *RateLimiter) SetClientLimits(clientID string, maxPerMin, maxPerHour in
 // ResetClientLimits — сбрасывает кастомные лимиты клиента (return to defaults).
 func (rl *RateLimiter) ResetClientLimits(clientID string) {
 	rl.clientLimits.Delete(clientID)
-	rl.logger.Info("сброшены лимиты клиента", "client_id", clientID)
+	rl.logger.Info("client rate limits reset", "client_id", clientID)
 }
 
 // ClientStats — статистика rate limit для одного клиента.
@@ -923,7 +930,7 @@ func (rl *RateLimiter) ResetStats() {
 	rl.rejectedRequests = 0
 	rl.lastReset = time.Now()
 
-	rl.logger.Info("статистика rate limit сброшена")
+	rl.logger.Info("rate limit stats reset")
 }
 
 // ResetClientCounters — сбрасывает счётчики для конкретного клиента.
@@ -935,7 +942,7 @@ func (rl *RateLimiter) ResetClientCounters(clientID string) {
 	window.minuteWindow = window.minuteWindow[:0]
 	window.hourWindow = window.hourWindow[:0]
 
-	rl.logger.Info("сброшены счётчики клиента", "client_id", clientID)
+	rl.logger.Info("client rate counters reset", "client_id", clientID)
 }
 
 // filterTimestamps — фильтрует timestamps, оставляя только недавние.

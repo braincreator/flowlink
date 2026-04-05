@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -45,7 +46,7 @@ func TLSConfig(insecure bool, pinFingerprint string) *tls.Config {
 // verifyPinning — проверяет fingerprint сертификата.
 func verifyPinning(expectedFingerprint string, certs []*x509.Certificate) error {
 	if len(certs) == 0 {
-		return fmt.Errorf("нет сертификатов для проверки")
+		return protocol.Err(protocol.CodeTLSCertMissing)
 	}
 
 	// Проверяем первый сертификат (leaf)
@@ -102,7 +103,7 @@ func ParseFingerprint(fingerprint string) (string, error) {
 	if !strings.HasPrefix(strings.ToLower(fingerprint), "sha256:") {
 		// Проверяем что это hex строка
 		if _, err := hex.DecodeString(fingerprint); err != nil {
-			return "", fmt.Errorf("неверный формат fingerprint: %w", err)
+			return "", protocol.ErrCause(protocol.CodeSignatureInvalid, err)
 		}
 		fingerprint = "sha256:" + fingerprint
 	}

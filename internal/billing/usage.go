@@ -3,6 +3,7 @@
 package billing
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"fmt"
 	"log/slog"
 	"os"
@@ -156,7 +157,7 @@ func (ut *UsageTracker) CheckLimit(clientID string, resource Resource, planID st
 	if !ok {
 		return LimitCheck{
 			CanProceed: false,
-			Message:    fmt.Sprintf("план %s не найден", planID),
+			Message:    protocol.Tf(protocol.CodeClientNotFound, planID),
 		}
 	}
 
@@ -223,7 +224,7 @@ func (ut *UsageTracker) ResetMonthly(clientID string) {
 	r.Commands = 0
 	r.Backups = 0
 	ut.persist(r)
-	ut.logger.Info("месячные счётчики сброшены", "client", clientID, "month", month)
+	ut.logger.Info("monthly counters reset", "client", clientID, "month", month)
 }
 
 // === Persistence ===
@@ -233,7 +234,7 @@ func (ut *UsageTracker) persist(r *UsageRecord) {
 	path := filepath.Join(ut.dataDir, "usage.jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		ut.logger.Error("ошибка сохранения usage", "err", err)
+		ut.logger.Error("usage save error", "err", err)
 		return
 	}
 	defer f.Close()

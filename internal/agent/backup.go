@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"archive/tar"
 	"compress/gzip"
 	"encoding/json"
@@ -61,7 +62,7 @@ func NewBackupEngine(cfg config.BackupConfig) *BackupEngine {
 
 	// Создаём директорию для бэкапов
 	if err := os.MkdirAll(cfg.BackupDir, 0755); err != nil {
-		slog.Warn("ошибка создания директории бэкапов", "err", err)
+		slog.Warn("backup directory create error", "err", err)
 	}
 
 	return &BackupEngine{
@@ -74,7 +75,7 @@ func NewBackupEngine(cfg config.BackupConfig) *BackupEngine {
 // Возвращает ID снапшота или ошибку.
 func (b *BackupEngine) CreateBefore(paths []string, reason string) (string, error) {
 	if len(paths) == 0 {
-		return "", fmt.Errorf("пустой список путей для бэкапа")
+		return "", protocol.Err(protocol.CodeBackupEmptyPaths)
 	}
 
 	// Генерируем ID снапшота
@@ -83,7 +84,7 @@ func (b *BackupEngine) CreateBefore(paths []string, reason string) (string, erro
 	filename := snapshotID + ".tar.gz"
 	backupPath := filepath.Join(b.cfg.BackupDir, filename)
 
-	b.logger.Info("создание бэкапа",
+	b.logger.Info("creating backup",
 		"snapshot_id", snapshotID,
 		"paths", len(paths),
 		"reason", reason,
@@ -92,7 +93,7 @@ func (b *BackupEngine) CreateBefore(paths []string, reason string) (string, erro
 	// Создаём tar.gz архив
 	size, err := b.createTarGz(paths, backupPath)
 	if err != nil {
-		return "", fmt.Errorf("ошибка создания архива: %w", err)
+		return "", protocol.ErrCause(protocol.CodeBackupArchiveError, err)
 	}
 
 	// Сохраняем метаданные
@@ -106,7 +107,7 @@ func (b *BackupEngine) CreateBefore(paths []string, reason string) (string, erro
 	}
 
 	if err := b.saveMetadata(snapshot); err != nil {
-		b.logger.Warn("ошибка сохранения метаданных", "err", err)
+		b.logger.Warn("backup metadata save error", "err", err)
 	}
 
 	// Очистка старых бэкапов
@@ -119,7 +120,7 @@ func (b *BackupEngine) CreateBefore(paths []string, reason string) (string, erro
 func (b *BackupEngine) createTarGz(paths []string, outputPath string) (int64, error) {
 	file, err := os.Create(outputPath)
 	if err != nil {
-		return 0, fmt.Errorf("создание файла архива: %w", err)
+		return 0, protocol.ErrCause(protocol.CodeBackupArchiveError, err)
 	}
 	defer file.Close()
 
@@ -135,14 +136,14 @@ func (b *BackupEngine) createTarGz(paths []string, outputPath string) (int64, er
 		// Расширяем glob-паттерны
 		matches, err := filepath.Glob(path)
 		if err != nil {
-			b.logger.Warn("ошибка glob", "path", path, "err", err)
+			b.logger.Warn("backup glob error", "path", path, "err", err)
 			matches = []string{path}
 		}
 
 		for _, match := range matches {
 			size, err := b.addToArchive(tarWriter, match)
 			if err != nil {
-				b.logger.Warn("ошибка добавления в архив", "path", match, "err", err)
+				b.logger.Warn("backup file add error", "path", match, "err", err)
 				continue
 			}
 			totalSize += size
@@ -210,12 +211,12 @@ func (b *BackupEngine) addToArchive(tarWriter *tar.Writer, path string) (int64, 
 func (b *BackupEngine) Restore(snapshotID string) error {
 	snapshot, err := b.getSnapshot(snapshotID)
 	if err != nil {
-		return fmt.Errorf("снапшот не найден: %w", err)
+		return protocol.ErrCause(protocol.CodeBackupSnapshotNotFound, err)
 	}
 
 	backupPath := filepath.Join(b.cfg.BackupDir, snapshot.Filename)
 
-	b.logger.Info("восстановление из бэкапа",
+	b.logger.Info("restoring from backup",
 		"snapshot_id", snapshotID,
 		"file", snapshot.Filename,
 	)
@@ -223,13 +224,13 @@ func (b *BackupEngine) Restore(snapshotID string) error {
 	// Открываем архив
 	file, err := os.Open(backupPath)
 	if err != nil {
-		return fmt.Errorf("ошибка открытия архива: %w", err)
+		return protocol.ErrCause(protocol.CodeBackupRestoreOpenError, err)
 	}
 	defer file.Close()
 
 	gzReader, err := gzip.NewReader(file)
 	if err != nil {
-		return fmt.Errorf("ошибка распаковки gzip: %w", err)
+		return protocol.ErrCause(protocol.CodeBackupRestoreGzipError, err)
 	}
 	defer gzReader.Close()
 
@@ -242,7 +243,7 @@ func (b *BackupEngine) Restore(snapshotID string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("ошибка чтения архива: %w", err)
+			return protocol.ErrCause(protocol.CodeBackupRestoreReadError, err)
 		}
 
 		// Определяем путь назначения (в текущую директорию)
@@ -251,29 +252,29 @@ func (b *BackupEngine) Restore(snapshotID string) error {
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
-				return fmt.Errorf("ошибка создания директории: %w", err)
+				return protocol.ErrCause(protocol.CodeBackupRestoreDirError, err)
 			}
 		case tar.TypeReg:
 			// Создаём родительские директории
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return fmt.Errorf("ошибка создания родительской директории: %w", err)
+				return protocol.ErrCause(protocol.CodeBackupRestoreDirError, err)
 			}
 
 			// Создаём файл
 			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY, os.FileMode(header.Mode))
 			if err != nil {
-				return fmt.Errorf("ошибка создания файла: %w", err)
+				return protocol.ErrCause(protocol.CodeBackupRestoreFileError, err)
 			}
 
 			if _, err := io.Copy(outFile, tarReader); err != nil {
 				outFile.Close()
-				return fmt.Errorf("ошибка записи файла: %w", err)
+				return protocol.ErrCause(protocol.CodeBackupRestoreFileError, err)
 			}
 			outFile.Close()
 		}
 	}
 
-	b.logger.Info("восстановление завершено", "snapshot_id", snapshotID)
+	b.logger.Info("backup restore completed", "snapshot_id", snapshotID)
 	return nil
 }
 
@@ -298,7 +299,7 @@ func (b *BackupEngine) List() []Snapshot {
 func (b *BackupEngine) Diff(snapshotID string) ([]FileChange, error) {
 	snapshot, err := b.getSnapshot(snapshotID)
 	if err != nil {
-		return nil, fmt.Errorf("снапшот не найден: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeBackupSnapshotNotFound, err)
 	}
 
 	var changes []FileChange
@@ -397,7 +398,7 @@ func (b *BackupEngine) Cleanup() error {
 	}
 
 	if deletedCount > 0 {
-		b.logger.Info("очистка бэкапов",
+		b.logger.Info("backup cleanup",
 			"deleted", deletedCount,
 			"freed_bytes", deletedSize,
 			"kept", len(keepSnapshots),
@@ -416,14 +417,14 @@ func (b *BackupEngine) getSnapshot(snapshotID string) (*Snapshot, error) {
 			return &snapshot, nil
 		}
 	}
-	return nil, fmt.Errorf("снапшот не найден")
+	return nil, protocol.Err(protocol.CodeBackupSnapshotNotFound)
 }
 
 // deleteSnapshot — удаляет файл снапшота.
 func (b *BackupEngine) deleteSnapshot(snapshot Snapshot) {
 	backupPath := filepath.Join(b.cfg.BackupDir, snapshot.Filename)
 	if err := os.Remove(backupPath); err != nil {
-		b.logger.Warn("ошибка удаления бэкапа", "file", snapshot.Filename, "err", err)
+		b.logger.Warn("backup delete error", "file", snapshot.Filename, "err", err)
 	}
 }
 
@@ -440,7 +441,7 @@ func (b *BackupEngine) saveAllMetadata(snapshots []Snapshot) error {
 
 	data, err := json.MarshalIndent(snapshots, "", "  ")
 	if err != nil {
-		return fmt.Errorf("сериализация метаданных: %w", err)
+		return protocol.ErrCause(protocol.CodeBackupSerializeError, err)
 	}
 
 	return os.WriteFile(metadataPath, data, 0644)

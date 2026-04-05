@@ -71,7 +71,7 @@ func (p *LLMProxy) Chat(messages []any, model string, maxTokens int, temperature
 		return resp, nil
 	}
 
-	return nil, fmt.Errorf("все LLM backends недоступны: %w", lastErr)
+	return nil, protocol.ErrCause(protocol.CodeLLMAllBackendsDown, lastErr)
 }
 
 // chatBackend — отправляет запрос к конкретному backend.
@@ -100,14 +100,14 @@ func (p *LLMProxy) chatBackend(backend LLMBackend, messages []any, model string,
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("сериализация: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeInternalError, err)
 	}
 
 	start := time.Now()
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("создание запроса: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeLLMRequestError, err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -123,7 +123,7 @@ func (p *LLMProxy) chatBackend(backend LLMBackend, messages []any, model string,
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("чтение ответа: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeLLMResponseError, err)
 	}
 
 	if resp.StatusCode != 200 {
@@ -147,11 +147,11 @@ func (p *LLMProxy) chatBackend(backend LLMBackend, messages []any, model string,
 	}
 
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
-		return nil, fmt.Errorf("парсинг ответа: %w", err)
+		return nil, protocol.ErrCause(protocol.CodeLLMParseError, err)
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("пустой ответ от LLM")
+		return nil, protocol.Err(protocol.CodeLLMEmptyResponse)
 	}
 
 	choice := chatResp.Choices[0]
@@ -253,7 +253,7 @@ func (r *Relay) handleLLMChat(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "неверный JSON")
+		writeError(w, http.StatusBadRequest, protocol.CodeInvalidJSON)
 		return
 	}
 
@@ -322,7 +322,7 @@ func (r *Relay) handleAgentLLMRequest(agent *AgentConn, msg protocol.Message) {
 	if err := json.Unmarshal(payloadBytes, &reqData); err != nil {
 		resp := protocol.NewMessage(protocol.MsgLLMResponse)
 		resp.Payload = map[string]string{
-			"error":      fmt.Sprintf("неверный payload: %v", err),
+			"error":      protocol.Tf(protocol.CodeInvalidPayload, err),
 			"request_id": "",
 		}
 		agent.SendMessage(resp)

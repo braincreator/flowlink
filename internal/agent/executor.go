@@ -110,7 +110,7 @@ func (e *Executor) ExecAsync(
 
 		if err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
-				donePayload.Error = fmt.Sprintf("таймаут: команда не завершилась за %d сек", timeout)
+				donePayload.Error = protocol.Tf(protocol.CodeExecTimeout, timeout)
 				donePayload.ExitCode = -1
 			} else {
 				donePayload.Error = err.Error()
@@ -177,20 +177,20 @@ func ReadFile(payload protocol.FileReadPayload) protocol.FileResponsePayload {
 
 	// Проверка sandbox
 	if payload.Path == "" {
-		resp.Error = "пустой путь"
+		resp.Error = protocol.CodeFileEmptyPath + ": " + protocol.T(protocol.CodeFileEmptyPath)
 		return resp
 	}
 
 	// Абсолютный путь
 	absPath, err := filepath.Abs(payload.Path)
 	if err != nil {
-		resp.Error = fmt.Sprintf("неверный путь: %v", err)
+		resp.Error = protocol.CodeFileInvalidPath + ": " + protocol.Tf(protocol.CodeFileInvalidPath, err)
 		return resp
 	}
 
 	info, err := os.Stat(absPath)
 	if err != nil {
-		resp.Error = fmt.Sprintf("файл не найден: %v", err)
+		resp.Error = protocol.CodeFileNotFound + ": " + protocol.Tf(protocol.CodeFileNotFound, absPath)
 		return resp
 	}
 
@@ -204,13 +204,13 @@ func ReadFile(payload protocol.FileReadPayload) protocol.FileResponsePayload {
 
 	// Проверка размера
 	if info.Size() > 10*1024*1024 { // 10MB для чтения
-		resp.Error = fmt.Sprintf("файл слишком большой: %d bytes (макс 10MB)", info.Size())
+		resp.Error = protocol.CodeFileTooLarge + ": " + protocol.Tf(protocol.CodeFileTooLarge, absPath, info.Size(), 10485760)
 		return resp
 	}
 
 	data, err := os.ReadFile(absPath)
 	if err != nil {
-		resp.Error = fmt.Sprintf("ошибка чтения: %v", err)
+		resp.Error = protocol.CodeFileReadError + ": " + protocol.Tf(protocol.CodeFileReadError, err)
 		return resp
 	}
 
@@ -236,13 +236,13 @@ func WriteFile(payload protocol.FileWritePayload) protocol.FileResponsePayload {
 	resp := protocol.FileResponsePayload{Path: payload.Path}
 
 	if payload.Path == "" {
-		resp.Error = "пустой путь"
+		resp.Error = protocol.CodeFileEmptyPath + ": " + protocol.T(protocol.CodeFileEmptyPath)
 		return resp
 	}
 
 	absPath, err := filepath.Abs(payload.Path)
 	if err != nil {
-		resp.Error = fmt.Sprintf("неверный путь: %v", err)
+		resp.Error = protocol.CodeFileInvalidPath + ": " + protocol.Tf(protocol.CodeFileInvalidPath, err)
 		return resp
 	}
 
@@ -250,7 +250,7 @@ func WriteFile(payload protocol.FileWritePayload) protocol.FileResponsePayload {
 	if payload.Encoding == "base64" {
 		data, err = base64.StdEncoding.DecodeString(payload.Content)
 		if err != nil {
-			resp.Error = fmt.Sprintf("ошибка декодирования base64: %v", err)
+			resp.Error = protocol.CodeFileDecodeError + ": " + protocol.Tf(protocol.CodeFileDecodeError, err)
 			return resp
 		}
 	} else {
@@ -265,12 +265,12 @@ func WriteFile(payload protocol.FileWritePayload) protocol.FileResponsePayload {
 	// Создаём родительские директории
 	dir := filepath.Dir(absPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		resp.Error = fmt.Sprintf("ошибка создания директории: %v", err)
+		resp.Error = protocol.CodeFileDirCreateError + ": " + protocol.Tf(protocol.CodeFileDirCreateError, err)
 		return resp
 	}
 
 	if err := os.WriteFile(absPath, data, mode); err != nil {
-		resp.Error = fmt.Sprintf("ошибка записи: %v", err)
+		resp.Error = protocol.CodeFileWriteError + ": " + protocol.Tf(protocol.CodeFileWriteError, err)
 		return resp
 	}
 
@@ -293,13 +293,13 @@ func ListFiles(payload protocol.FileListPayload) protocol.FileResponsePayload {
 
 	absPath, err := filepath.Abs(payload.Path)
 	if err != nil {
-		resp.Error = fmt.Sprintf("неверный путь: %v", err)
+		resp.Error = protocol.CodeFileInvalidPath + ": " + protocol.Tf(protocol.CodeFileInvalidPath, err)
 		return resp
 	}
 
 	entries, err := os.ReadDir(absPath)
 	if err != nil {
-		resp.Error = fmt.Sprintf("ошибка чтения директории: %v", err)
+		resp.Error = protocol.CodeFileDirReadError + ": " + protocol.Tf(protocol.CodeFileDirReadError, err)
 		return resp
 	}
 

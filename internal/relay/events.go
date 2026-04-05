@@ -80,7 +80,7 @@ func (eb *EventBus) Publish(event Event) {
 		case ch <- event:
 		default:
 			// Канал полон — пропускаем, чтобы не блокировать издателя
-			eb.logger.Warn("подписчик не успевает, событие пропущено",
+			eb.logger.Warn("subscriber too slow, event dropped",
 				"event_type", event.Type, "event_id", event.ID)
 		}
 	}

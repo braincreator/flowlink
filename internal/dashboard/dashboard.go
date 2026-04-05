@@ -3,6 +3,7 @@
 package dashboard
 
 import (
+	"github.com/braincreator/flowlink/internal/protocol"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -84,7 +85,7 @@ func NewHandler(dp DataProvider, token string) http.Handler {
 			if !authed {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]string{"code": "401", "error": "токен не указан"})
+				json.NewEncoder(w).Encode(map[string]string{"code": "401", "error": protocol.T(protocol.CodeTokenMissing)})
 				return
 			}
 			next(w, r)
