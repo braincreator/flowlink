@@ -6,8 +6,9 @@ package agent
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"regexp"
 	"strings"
-	"time"
 
 	"github.com/braincreator/flowlink/internal/config"
 )
@@ -274,34 +275,138 @@ func (p *PolicyLayer) GetPendingApprovals() []*ApprovalRequest {
 
 // checkBlacklist — проверяет команду против расширенного чёрного списка.
 func (p *PolicyLayer) checkBlacklist(command string) string {
-	cmd := strings.ToLower(strings.TrimSpace(command))
+	// 1. Проверяем оригинальную команду
+	if cat := checkBlacklistPatterns(command); cat != "" {
+		p.logger.Warn("policy: command blocked by blacklist",
+			"command", command,
+			"category", cat,
+		)
+		return cat
+	}
 
-	for _, entry := range ExtendedBlacklist {
-		pattern := strings.ToLower(entry.Pattern)
-		// Use regex matching for patterns with special chars, simple contains otherwise
-		if strings.ContainsAny(pattern, "*?") {
-			if matchGlob(cmd, pattern) {
-				p.logger.Warn("policy: command blocked by blacklist",
+	// 2. Проверяем на subshell injection: $(cmd), `cmd`, bash -c "cmd"
+	if subshellPattern.MatchString(command) {
+		extracted := extractSubcommands(command)
+		for _, sub := range extracted {
+			if cat := checkBlacklistPatterns(sub); cat != "" {
+				p.logger.Warn("policy: dangerous command in subshell",
 					"command", command,
-					"pattern", entry.Pattern,
-					"category", entry.Category,
+					"subcommand", sub,
+					"category", cat,
 				)
-			return entry.Category
-			}
-		} else {
-			if strings.Contains(cmd, pattern) {
-				p.logger.Warn("policy: command blocked by blacklist",
-					"command", command,
-					"pattern", entry.Pattern,
-					"category", entry.Category,
-				)
-				return entry.Category
+				return cat
 			}
 		}
 	}
 
 	return ""
 }
+
+// subshellPattern — regex для обнаружения подмены команд через subshell/command substitution.
+var subshellPattern = regexp.MustCompile(`\$\(|` + "`" + `[^` + "`" + `]*` + "`" + `|\\b(bash|sh|zsh|fish)\\s+-c\\s+`)
+
+// checkBlacklistPatterns — проверяет одну команду против blacklist patterns.
+// Обрабатывает: полные пути (/bin/rm), перестановку флагов (rm -r -f), множественные пробелы.
+func checkBlacklistPatterns(command string) string {
+	// Нормализация: lowercase, collapse whitespace
+	normalized := strings.ToLower(strings.TrimSpace(command))
+	normalized = collapseWhitespace(normalized)
+
+	for _, entry := range ExtendedBlacklist {
+		pattern := strings.ToLower(entry.Pattern)
+
+		if strings.ContainsAny(pattern, "*?") {
+			if matchGlob(normalized, pattern) {
+				return entry.Category
+			}
+		} else {
+			// Прямое совпадение
+			if strings.Contains(normalized, pattern) {
+				return entry.Category
+			}
+			// Полный путь: /bin/rm -rf / → rm -rf /
+			fields := strings.Fields(normalized)
+			if len(fields) > 0 {
+				base := filepath.Base(fields[0])
+				fullCmd := base + strings.TrimPrefix(normalized, fields[0])
+				if strings.Contains(fullCmd, pattern) {
+					return entry.Category
+				}
+			}
+			// Перестановка флагов: rm -r -f / → rm -fr /
+			sorted := sortFlags(normalized)
+			if strings.Contains(sorted, pattern) {
+				return entry.Category
+			}
+		}
+	}
+	return ""
+}
+
+// collapseWhitespace — заменяет множественные пробелы на один.
+func collapseWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// sortFlags — для команд с флагами нормализует порядок флагов.
+// rm -r -f / → rm -fr / (алфавитная сортировка символов в одной группе флагов)
+func sortFlags(cmd string) string {
+	fields := strings.Fields(cmd)
+	if len(fields) < 2 {
+		return cmd
+	}
+	result := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") && len(f) > 2 && !strings.Contains(f, "=") {
+			chars := strings.Split(f[1:], "")
+			sortStrings(chars)
+			result = append(result, "-"+strings.Join(chars, ""))
+			continue
+		}
+		result = append(result, f)
+	}
+	return strings.Join(result, " ")
+}
+
+// sortStrings — сортировка слайса строк.
+func sortStrings(s []string) {
+	for i := 0; i < len(s)-1; i++ {
+		for j := i + 1; j < len(s); j++ {
+			if s[i] > s[j] {
+				s[i], s[j] = s[j], s[i]
+			}
+		}
+	}
+}
+
+// extractSubcommands — извлекает команды из subshell/context.
+func extractSubcommands(command string) []string {
+	var results []string
+
+	re1 := regexp.MustCompile(`\$\(([^)]+)\)`)
+	for _, m := range re1.FindAllStringSubmatch(command, -1) {
+		if len(m) > 1 {
+			results = append(results, strings.TrimSpace(m[1]))
+		}
+	}
+
+	re2 := regexp.MustCompile("`([^`]+)`")
+	for _, m := range re2.FindAllStringSubmatch(command, -1) {
+		if len(m) > 1 {
+			results = append(results, strings.TrimSpace(m[1]))
+		}
+	}
+
+	re3 := regexp.MustCompile(`(?:bash|sh|zsh|fish)\s+-c\s+["']([^"']+)["']`)
+	for _, m := range re3.FindAllStringSubmatch(command, -1) {
+		if len(m) > 1 {
+			results = append(results, strings.TrimSpace(m[1]))
+		}
+	}
+
+	return results
+}
+
 
 // isWriteOperation — определяет, является ли команда write-операцией.
 func (p *PolicyLayer) isWriteOperation(command string) bool {
@@ -341,28 +446,16 @@ func (p *PolicyLayer) isWriteOperation(command string) bool {
 
 // AuditCommand — логирует результат проверки команды для аудита.
 func (p *PolicyLayer) AuditCommand(command string, result *PolicyResult) {
-	// Формируем audit record
-	record := map[string]any{
-		"timestamp":    time.Now().Unix(),
-		"command":      command,
-		"allowed":      result.Allowed,
-		"blocked":      result.Blocked,
-		"reason":       result.Reason,
-		"risk_level":   result.RiskLevel,
-		"snapshot_id":  result.SnapshotID,
-		"approval_id":  result.ApprovalID,
-		"read_only":    p.readOnly,
-	}
-
 	p.logger.Info("policy audit",
 		"command", command,
 		"allowed", result.Allowed,
+		"blocked", result.Blocked,
 		"risk", result.RiskLevel,
 		"reason", result.Reason,
+		"snapshot_id", result.SnapshotID,
+		"approval_id", result.ApprovalID,
+		"read_only", p.readOnly,
 	)
-
-	// TODO: отправить audit record в relay для хранения
-	_ = record
 }
 
 // GetStatus — возвращает текущий статус Policy Layer.

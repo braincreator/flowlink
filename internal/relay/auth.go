@@ -301,7 +301,6 @@ func (am *AuthManager) ValidateAPIToken(tokenStr string) (string, error) {
 // RotateTokens — ротация токена агента (инвалидация старых, генерация нового).
 func (am *AuthManager) RotateTokens(agentID string, expiresInSeconds int64) (string, error) {
 	am.mu.Lock()
-	defer am.mu.Unlock()
 
 	// Отзываем все старые токены агента
 	tokenIDs := am.clientTokens[agentID]
@@ -313,9 +312,8 @@ func (am *AuthManager) RotateTokens(agentID string, expiresInSeconds int64) (str
 	am.clientTokens[agentID] = nil
 
 	am.mu.Unlock()
-	defer am.mu.Lock() // Re-lock для defer
 
-	// Генерируем новый токен
+	// Генерируем новый токен (сам лочит мьютекс внутри)
 	return am.GenerateAgentToken(agentID, expiresInSeconds)
 }
 
@@ -414,10 +412,10 @@ func (am *AuthManager) GenerateTokenPair(clientID string) (*TokenPair, error) {
 // RefreshToken — валидирует refresh token и генерирует новую пару (rotation).
 // Старый refresh token инвалидируется.
 func (am *AuthManager) RefreshToken(refreshTokenStr string) (*TokenPair, error) {
-	// Парсим refresh token
-	token, err := am.parseToken(refreshTokenStr)
-	if err != nil {
-		return nil, protocol.ErrCause(protocol.CodeTokenParseFailed, err)
+	// Парсинг (без блокировки)
+	token, parseErr := am.parseToken(refreshTokenStr)
+	if parseErr != nil {
+		return nil, protocol.ErrCause(protocol.CodeTokenParseFailed, parseErr)
 	}
 
 	// Проверяем тип
@@ -426,30 +424,34 @@ func (am *AuthManager) RefreshToken(refreshTokenStr string) (*TokenPair, error) 
 	}
 
 	am.mu.Lock()
-	defer am.mu.Unlock()
 
 	// Проверяем blacklist
 	if _, blacklisted := am.blacklist[token.ID]; blacklisted {
+		am.mu.Unlock()
 		return nil, fmt.Errorf("refresh токен в blacklist")
 	}
 
 	// Проверяем отзыв
 	if am.revoked[token.ID] {
+		am.mu.Unlock()
 		return nil, fmt.Errorf("refresh токен отозван")
 	}
 
 	// Проверяем expiration
 	if token.ExpiresAt > 0 && time.Now().Unix() > token.ExpiresAt {
+		am.mu.Unlock()
 		return nil, fmt.Errorf("refresh токен истёк")
 	}
 
 	// Проверяем подпись
 	secret := am.secrets[token.ClientID]
 	if secret == nil {
+		am.mu.Unlock()
 		return nil, protocol.Err(protocol.CodeSecretNotFound)
 	}
 
 	if !verifyTokenSignature(refreshTokenStr, secret) {
+		am.mu.Unlock()
 		return nil, protocol.Err(protocol.CodeSignatureInvalid)
 	}
 
@@ -463,13 +465,12 @@ func (am *AuthManager) RefreshToken(refreshTokenStr string) (*TokenPair, error) 
 	delete(am.tokens, token.ID)
 	delete(am.refreshTokens, token.ID)
 
-	// Генерируем новую пару
-	am.mu.Unlock() // Unlock для рекурсивного вызова
-	pair, err := am.GenerateTokenPair(token.ClientID)
-	am.mu.Lock() // Re-lock для defer
+	am.mu.Unlock()
 
-	if err != nil {
-		return nil, protocol.ErrCause(protocol.CodeTokenGenerateError, err)
+	// Генерируем новую пару (сам лочит мьютекс внутри)
+	pair, genErr := am.GenerateTokenPair(token.ClientID)
+	if genErr != nil {
+		return nil, protocol.ErrCause(protocol.CodeTokenGenerateError, genErr)
 	}
 
 	am.logger.Info("token refresh completed",

@@ -78,7 +78,12 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 			}
 
 			// Если нет AuthManager и нет StaticToken — пропускаем (dev mode)
+			// ⚠️ В production ОБЯЗАТЕЛЬНО настроить APIToken или AuthManager!
 			if cfg.AuthManager == nil && cfg.StaticToken == "" {
+				cfg.Logger.Warn("AUTH_DISABLED: no APIToken or AuthManager configured — all requests are UNAUTHENTICATED (dev/self-hosted mode)",
+					"remote_addr", r.RemoteAddr,
+					"path", r.URL.Path,
+				)
 				next.ServeHTTP(w, r)
 				return
 			}
