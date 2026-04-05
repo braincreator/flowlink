@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -212,18 +213,23 @@ func TestExecAsync(t *testing.T) {
 
 	executor := NewExecutor(cfg)
 
+	var mu sync.Mutex
 	outputReceived := false
 	doneReceived := false
 
 	onOutput := func(payload protocol.ExecOutputPayload) {
+		mu.Lock()
 		outputReceived = true
+		mu.Unlock()
 	}
 
 	onDone := func(payload protocol.ExecDonePayload) {
+		mu.Lock()
 		doneReceived = true
 		if payload.ExitCode != 0 {
 			t.Errorf("expected exit code 0, got %d", payload.ExitCode)
 		}
+		mu.Unlock()
 	}
 
 	execRequest := protocol.ExecRequestPayload{
@@ -237,11 +243,16 @@ func TestExecAsync(t *testing.T) {
 	// Wait for completion
 	time.Sleep(500 * time.Millisecond)
 
-	if !doneReceived {
+	mu.Lock()
+	dr := doneReceived
+	or := outputReceived
+	mu.Unlock()
+
+	if !dr {
 		t.Error("expected done callback to be called")
 	}
 
-	_ = outputReceived // May or may not be called depending on timing
+	_ = or // May or may not be called depending on timing
 }
 
 

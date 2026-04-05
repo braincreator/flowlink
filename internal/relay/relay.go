@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/braincreator/flowlink/internal/agent"
 	"github.com/braincreator/flowlink/internal/billing"
 	"github.com/braincreator/flowlink/internal/config"
 	"github.com/braincreator/flowlink/internal/crypto"
@@ -339,7 +340,10 @@ func (r *Relay) Start() error {
 	}
 
 	// Dashboard (с авторизацией через API token, регистрируем ДО middleware chain)
-	dashProvider := &dashboardProvider{r: r}
+	dashProvider := &dashboardProvider{
+		r:           r,
+		backupEngine: agent.NewBackupEngine(agent.DefaultBackupConfig()),
+	}
 	apiMux.Handle("/dashboard/", http.StripPrefix("/dashboard", dashboard.NewHandler(dashProvider, r.cfg.APIToken)))
 
 	// Middleware chain (dashboard имеет собственную авторизацию)
@@ -2508,7 +2512,8 @@ func getClientIP(req *http.Request) string {
 
 // dashboardProvider — реализует dashboard.DataProvider для избежания import cycle.
 type dashboardProvider struct {
-	r *Relay
+	r           *Relay
+	backupEngine *agent.BackupEngine
 }
 
 func (dp *dashboardProvider) DashboardAgents() []dashboard.AgentInfo {
@@ -2564,6 +2569,117 @@ func (dp *dashboardProvider) DashboardAuditStats() *dashboard.AuditStatsInfo {
 		TotalEntries: stats.TotalEntries, ByAction: stats.ByAction,
 		Last24hCount: stats.Last24hCount, Entries: entries,
 	}
+}
+
+// --- Dashboard: Config, Storage, Backup, Approvals ---
+
+func (dp *dashboardProvider) DashboardStorageConfig() *dashboard.StorageConfigInfo {
+	info := &dashboard.StorageConfigInfo{Type: "local"}
+	info.LocalDir = filepath.Join(os.Getenv("HOME"), ".flowlink", "storage")
+	return info
+}
+
+func (dp *dashboardProvider) DashboardBackupConfig() *dashboard.BackupConfigInfo {
+	bc := agent.DefaultBackupConfig()
+	return &dashboard.BackupConfigInfo{
+		Enabled:       true,
+		MaxSnapshots:  bc.MaxSnapshots,
+		MaxTotalSize:  bc.MaxTotalSize,
+		RetentionDays: bc.RetentionDays,
+		BackupDir:     bc.BackupDir,
+	}
+}
+
+func (dp *dashboardProvider) DashboardBackups() []dashboard.BackupInfo {
+	snapshots := dp.backupEngine.List()
+	result := make([]dashboard.BackupInfo, len(snapshots))
+	for i, s := range snapshots {
+		result[i] = dashboard.BackupInfo{
+			ID: s.ID, Description: s.Description, Timestamp: s.Timestamp,
+			Size: s.Size, Paths: s.Paths, Filename: s.Filename,
+		}
+	}
+	return result
+}
+
+func (dp *dashboardProvider) DashboardCreateBackup(paths []string, reason string) (*dashboard.BackupInfo, error) {
+	snapshotID, err := dp.backupEngine.CreateBefore(paths, reason)
+	if err != nil {
+		return nil, err
+	}
+	// Ищем созданный снапшот
+	for _, s := range dp.backupEngine.List() {
+		if s.ID == snapshotID {
+			return &dashboard.BackupInfo{
+				ID: s.ID, Description: s.Description, Timestamp: s.Timestamp,
+				Size: s.Size, Paths: s.Paths, Filename: s.Filename,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("snapshot not found after creation")
+}
+
+func (dp *dashboardProvider) DashboardRestoreBackup(snapshotID string) error {
+	return dp.backupEngine.Restore(snapshotID)
+}
+
+func (dp *dashboardProvider) DashboardDeleteBackup(snapshotID string) error {
+	// BackupEngine не имеет публичный Delete — добавляем через Remove-подход
+	snapshots := dp.backupEngine.List()
+	backupDir := agent.DefaultBackupConfig().BackupDir
+	for _, s := range snapshots {
+		if s.ID == snapshotID {
+			fp := filepath.Join(backupDir, s.Filename)
+			return os.Remove(fp)
+		}
+	}
+	return fmt.Errorf("snapshot %s not found", snapshotID)
+}
+
+func (dp *dashboardProvider) DashboardGetConfig() map[string]any {
+	cfg := dp.r.cfg
+	return map[string]any{
+		"wss_addr":     cfg.WSSAddr,
+		"api_addr":     cfg.APIAddr,
+		"tls_mode":     cfg.TLSMode,
+		"tls_domain":   cfg.TLSDomain,
+		"max_agents":   cfg.MaxAgents,
+		"rate_limit": map[string]any{
+			"per_min":  cfg.RateLimitPerMin,
+			"per_hour": cfg.RateLimitPerHour,
+		},
+	}
+}
+
+func (dp *dashboardProvider) DashboardUpdateConfig(updates map[string]any) error {
+	// Логируем изменения (применение к live config — future: persist to file)
+	dp.r.logger.Info("dashboard config update requested", "updates", updates)
+	return nil
+}
+
+func (dp *dashboardProvider) DashboardApprovals() []dashboard.ApprovalInfo {
+	reqs := dp.r.approvalQueue.List("", ApprovalPending, 50)
+	result := make([]dashboard.ApprovalInfo, len(reqs))
+	for i, r := range reqs {
+		result[i] = dashboard.ApprovalInfo{
+			ID:        r.ID,
+			AgentID:   r.AgentID,
+			Command:   r.Command,
+			RiskLevel: r.RiskLevel,
+			Reason:    r.ApprovalMode,
+			CreatedAt: r.CreatedAt.Unix(),
+		}
+	}
+	return result
+}
+
+func (dp *dashboardProvider) DashboardApproveCommand(approvalID string, approved bool) error {
+	if approved {
+		_, err := dp.r.approvalQueue.Approve(approvalID, "dashboard", "")
+		return err
+	}
+	_, err := dp.r.approvalQueue.Reject(approvalID, "dashboard", "")
+	return err
 }
 
 // handleNginxConfig обрабатывает GET /api/v1/nginx-config?domain=x&tls=true

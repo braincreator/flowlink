@@ -2,48 +2,15 @@
 
 Base URL: `https://relay.example.com`
 
-All endpoints require `Authorization: Bearer <token>` header unless noted otherwise.
+All endpoints require `Authorization: Bearer ***` header unless noted otherwise.
 
 ---
 
-## Authentication
+## Agent WebSocket
 
-### POST /api/v1/auth/login
+### WS /ws
 
-Authenticate and receive JWT tokens.
-
-```bash
-curl -X POST https://relay.example.com/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"client_id": "client-123", "api_key": "your-api-key"}'
-```
-
-**Response (200):**
-```json
-{
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "expires_in": 86400
-}
-```
-
-### POST /api/v1/auth/refresh
-
-Refresh an expired access token.
-
-```bash
-curl -X POST https://relay.example.com/api/v1/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token": "eyJ..."}'
-```
-
-**Response (200):**
-```json
-{
-  "access_token": "eyJ...",
-  "expires_in": 86400
-}
-```
+WebSocket endpoint for agent connections. Agents connect here to receive commands and send responses. Uses pairwise tokens issued at registration.
 
 ---
 
@@ -55,7 +22,7 @@ List all registered agents with their connection status.
 
 ```bash
 curl https://relay.example.com/api/v1/agents \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 **Response (200):**
@@ -83,7 +50,7 @@ Register a new agent and receive a pairwise token.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/agents/register \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{
     "client_id": "client-123",
@@ -96,7 +63,7 @@ curl -X POST https://relay.example.com/api/v1/agents/register \
 ```json
 {
   "agent_id": "agent-xyz-789",
-  "token": "pairwise-token-secret",
+  "token": "pairwi...cret",
   "relay_url": "wss://relay.example.com/ws"
 }
 ```
@@ -107,12 +74,32 @@ Remove an agent from the registry.
 
 ```bash
 curl -X DELETE https://relay.example.com/api/v1/agents/delete/agent-abc-123 \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 **Response (200):**
 ```json
 {"status": "deleted"}
+```
+
+### PUT /api/v1/agents/config
+
+Update agent configuration (e.g., labels, allowed skills).
+
+```bash
+curl -X PUT https://relay.example.com/api/v1/agents/config \
+  -H "Authorization: Bearer ***" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "agent-abc-123",
+    "label": "production",
+    "allowed_skills": ["deploy", "restart"]
+  }'
+```
+
+**Response (200):**
+```json
+{"status": "updated"}
 ```
 
 ### POST /api/v1/agents/exec
@@ -121,7 +108,7 @@ Execute a shell command on a connected agent.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/agents/exec \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{
     "agent_id": "agent-abc-123",
@@ -147,7 +134,7 @@ Read a file from an agent.
 
 ```bash
 curl "https://relay.example.com/api/v1/agents/files/read?agent_id=agent-abc-123&path=/etc/hostname" \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 **Response (200):**
@@ -165,7 +152,7 @@ Write a file to an agent.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/agents/files/write \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{
     "agent_id": "agent-abc-123",
@@ -189,7 +176,7 @@ List a directory on an agent.
 
 ```bash
 curl "https://relay.example.com/api/v1/agents/files/list?agent_id=agent-abc-123&dir=/var/log" \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 **Response (200):**
@@ -209,7 +196,7 @@ Get system information from an agent.
 
 ```bash
 curl "https://relay.example.com/api/v1/agents/sysinfo?agent_id=agent-abc-123" \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 **Response (200):**
@@ -234,7 +221,7 @@ Submit an autonomous task to an agent.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/agents/task \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{
     "agent_id": "agent-abc-123",
@@ -257,56 +244,40 @@ Cancel a running task.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/agents/task/cancel \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{"agent_id": "agent-abc-123", "task_id": "task-uuid"}'
-```
-
-### POST /api/v1/agents/pause
-
-Pause all operations on an agent (readonly mode).
-
-```bash
-curl -X POST https://relay.example.com/api/v1/agents/pause \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "agent-abc-123"}'
-```
-
-### POST /api/v1/agents/resume
-
-Resume normal operations on an agent.
-
-```bash
-curl -X POST https://relay.example.com/api/v1/agents/resume \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id": "agent-abc-123"}'
 ```
 
 ### Skills
 
 #### POST /api/v1/agents/skills/push
 
+Push a skill (script) to an agent.
+
 ```bash
 curl -X POST https://relay.example.com/api/v1/agents/skills/push \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{"agent_id": "agent-abc-123", "name": "deploy", "content": "..."}'
 ```
 
 #### GET /api/v1/agents/skills/list
 
+List skills available on an agent.
+
 ```bash
 curl "https://relay.example.com/api/v1/agents/skills/list?agent_id=agent-abc-123" \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 #### POST /api/v1/agents/skills/delete
 
+Delete a skill from an agent.
+
 ```bash
 curl -X POST https://relay.example.com/api/v1/agents/skills/delete \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{"agent_id": "agent-abc-123", "name": "deploy"}'
 ```
@@ -315,13 +286,32 @@ curl -X POST https://relay.example.com/api/v1/agents/skills/delete \
 
 ## Backups
 
-### GET /api/v1/backups
+### POST /api/v1/agents/backup
+
+Trigger a backup snapshot for an agent.
+
+```bash
+curl -X POST https://relay.example.com/api/v1/agents/backup \
+  -H "Authorization: Bearer ***" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id": "agent-abc-123", "description": "Pre-deployment snapshot"}'
+```
+
+**Response (200):**
+```json
+{
+  "backup_id": "snap-uuid",
+  "status": "created"
+}
+```
+
+### GET /api/v1/agents/backup/list
 
 List available backups for an agent.
 
 ```bash
-curl "https://relay.example.com/api/v1/backups?agent_id=agent-abc-123" \
-  -H "Authorization: Bearer <token>"
+curl "https://relay.example.com/api/v1/agents/backup/list?agent_id=agent-abc-123" \
+  -H "Authorization: Bearer ***"
 ```
 
 **Response (200):**
@@ -338,15 +328,93 @@ curl "https://relay.example.com/api/v1/backups?agent_id=agent-abc-123" \
 }
 ```
 
-### POST /api/v1/backups/{id}/restore
+### POST /api/v1/agents/backup/restore
 
 Restore from a backup snapshot.
 
 ```bash
-curl -X POST https://relay.example.com/api/v1/backups/snap-uuid/restore \
-  -H "Authorization: Bearer <token>" \
+curl -X POST https://relay.example.com/api/v1/agents/backup/restore \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id": "agent-abc-123"}'
+  -d '{"agent_id": "agent-abc-123", "backup_id": "snap-uuid"}'
+```
+
+### DELETE /api/v1/agents/backup/{id}
+
+Delete a backup snapshot.
+
+```bash
+curl -X DELETE https://relay.example.com/api/v1/agents/backup/snap-uuid \
+  -H "Authorization: Bearer ***"
+```
+
+**Response (200):**
+```json
+{"status": "deleted"}
+```
+
+---
+
+## LLM
+
+### POST /api/v1/llm/chat
+
+Send a chat completion request through the relay's LLM proxy.
+
+```bash
+curl -X POST https://relay.example.com/api/v1/llm/chat \
+  -H "Authorization: Bearer ***" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "agent_id": "agent-abc-123"
+  }'
+```
+
+**Response (200):**
+```json
+{
+  "id": "chatcmpl-uuid",
+  "choices": [
+    {"message": {"role": "assistant", "content": "Hello! How can I help?"}}
+  ]
+}
+```
+
+### GET /api/v1/llm/backends
+
+List configured LLM backends.
+
+```bash
+curl https://relay.example.com/api/v1/llm/backends \
+  -H "Authorization: Bearer ***"
+```
+
+**Response (200):**
+```json
+{
+  "backends": [
+    {"id": "openai", "provider": "openai", "models": ["gpt-4o", "gpt-4o-mini"], "default": true}
+  ]
+}
+```
+
+### GET /api/v1/llm/health
+
+Check health of LLM backend connections.
+
+```bash
+curl https://relay.example.com/api/v1/llm/health \
+  -H "Authorization: Bearer ***"
+```
+
+**Response (200):**
+```json
+{
+  "openai": {"status": "ok", "latency_ms": 120},
+  "anthropic": {"status": "ok", "latency_ms": 95}
+}
 ```
 
 ---
@@ -359,7 +427,7 @@ Query audit logs with filters.
 
 ```bash
 curl "https://relay.example.com/api/v1/audit?agent_id=agent-abc-123&limit=50&offset=0" \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 **Response (200):**
@@ -385,7 +453,7 @@ Export audit logs in JSON or CSV format.
 
 ```bash
 curl "https://relay.example.com/api/v1/audit/export?format=csv&from=2026-03-20&to=2026-03-27" \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -o audit-export.csv
 ```
 
@@ -395,7 +463,54 @@ Get audit statistics.
 
 ```bash
 curl "https://relay.example.com/api/v1/audit/stats?period=7d" \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
+```
+
+---
+
+## Approvals
+
+### GET /api/v1/approvals
+
+List pending approval requests.
+
+```bash
+curl https://relay.example.com/api/v1/approvals \
+  -H "Authorization: Bearer ***"
+```
+
+**Response (200):**
+```json
+{
+  "approvals": [
+    {
+      "id": "appr-uuid",
+      "agent_id": "agent-abc-123",
+      "action": "exec",
+      "details": {"command": "rm -rf /tmp/old-cache"},
+      "status": "pending",
+      "created_at": "2026-03-27T18:00:00Z"
+    }
+  ]
+}
+```
+
+### POST /api/v1/approvals/{id}/approve
+
+Approve a pending action.
+
+```bash
+curl -X POST https://relay.example.com/api/v1/approvals/appr-uuid/approve \
+  -H "Authorization: Bearer ***"
+```
+
+### POST /api/v1/approvals/{id}/reject
+
+Reject a pending action.
+
+```bash
+curl -X POST https://relay.example.com/api/v1/approvals/appr-uuid/reject \
+  -H "Authorization: Bearer ***"
 ```
 
 ---
@@ -408,7 +523,7 @@ List all registered clients.
 
 ```bash
 curl https://relay.example.com/api/v1/clients \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 ### POST /api/v1/clients
@@ -417,7 +532,7 @@ Create a new client.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/clients \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{"name": "Acme Corp", "email": "admin@acme.com", "plan": "business"}'
 ```
@@ -428,7 +543,7 @@ Get client details.
 
 ```bash
 curl https://relay.example.com/api/v1/clients/client-123 \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 ### POST /api/v1/clients/{id}/agents
@@ -437,7 +552,7 @@ Register an agent under a specific client.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/clients/client-123/agents \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{"hostname": "web-01", "label": "production"}'
 ```
@@ -452,7 +567,7 @@ Get usage statistics for the current billing period.
 
 ```bash
 curl https://relay.example.com/api/v1/billing/usage \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 **Response (200):**
@@ -475,7 +590,7 @@ Get current plan details.
 
 ```bash
 curl https://relay.example.com/api/v1/billing/plan \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 ### POST /api/v1/billing/plan/change
@@ -484,7 +599,7 @@ Change the subscription plan.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/billing/plan/change \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{"plan_id": "enterprise"}'
 ```
@@ -495,7 +610,7 @@ List invoices.
 
 ```bash
 curl https://relay.example.com/api/v1/billing/invoices \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 ### POST /api/v1/billing/invoices/{id}/pay
@@ -504,7 +619,7 @@ Pay an invoice.
 
 ```bash
 curl -X POST https://relay.example.com/api/v1/billing/invoices/inv-123/pay \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 ### GET /api/v1/billing/payment-methods
@@ -513,7 +628,151 @@ List available payment methods.
 
 ```bash
 curl https://relay.example.com/api/v1/billing/payment-methods \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
+```
+
+### POST /api/v1/billing/webhook
+
+Incoming webhook from payment provider (Tochka). No auth required — validated via webhook signature.
+
+```bash
+curl -X POST https://relay.example.com/api/v1/billing/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"event": "payment.completed", "invoice_id": "inv-123"}'
+```
+
+---
+
+## Nginx Config
+
+### GET /api/v1/nginx-config
+
+Generate an nginx configuration snippet for the relay (useful for reverse proxy setup).
+
+```bash
+curl https://relay.example.com/api/v1/nginx-config \
+  -H "Authorization: Bearer ***"
+```
+
+**Response (200):** Returns a text/plain nginx configuration block.
+
+---
+
+## Rate Limits
+
+### GET /api/v1/rate-limits
+
+List rate limit configurations for all clients.
+
+```bash
+curl https://relay.example.com/api/v1/rate-limits \
+  -H "Authorization: Bearer ***"
+```
+
+### POST /api/v1/rate-limits
+
+Reset rate limit statistics (admin action).
+
+```bash
+curl -X POST https://relay.example.com/api/v1/rate-limits \
+  -H "Authorization: Bearer ***"
+```
+
+### GET /api/v1/rate-limits/{client_id}
+
+Get rate limit configuration and current usage for a specific client.
+
+```bash
+curl https://relay.example.com/api/v1/rate-limits/client-123 \
+  -H "Authorization: Bearer ***"
+```
+
+### PUT /api/v1/rate-limits/{client_id}
+
+Update rate limit configuration for a specific client.
+
+```bash
+curl -X PUT https://relay.example.com/api/v1/rate-limits/client-123 \
+  -H "Authorization: Bearer ***" \
+  -H "Content-Type: application/json" \
+  -d '{"requests_per_minute": 100, "requests_per_hour": 1000}'
+```
+
+### DELETE /api/v1/rate-limits/{client_id}
+
+Remove custom rate limit configuration for a client (reverts to defaults).
+
+```bash
+curl -X DELETE https://relay.example.com/api/v1/rate-limits/client-123 \
+  -H "Authorization: Bearer ***"
+```
+
+### GET /api/v1/rate-limits/stats
+
+Get aggregate rate limit statistics across all clients.
+
+```bash
+curl https://relay.example.com/api/v1/rate-limits/stats \
+  -H "Authorization: Bearer ***"
+```
+
+---
+
+## Health
+
+### GET /api/v1/health
+
+Full health report including all subsystems (DB, agents, LLM, etc.).
+
+```bash
+curl https://relay.example.com/api/v1/health
+```
+
+No auth required.
+
+**Response (200):**
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "uptime_sec": 86400,
+  "agents_connected": 3,
+  "db": {"status": "ok"},
+  "llm": {"status": "ok"}
+}
+```
+
+### GET /api/v1/health/ready
+
+Readiness probe. Returns 200 if the relay is ready to accept traffic, 503 otherwise.
+
+```bash
+curl https://relay.example.com/api/v1/health/ready
+```
+
+No auth required.
+
+### GET /api/v1/health/live
+
+Liveness probe. Returns 200 if the relay process is alive, 503 otherwise.
+
+```bash
+curl https://relay.example.com/api/v1/health/live
+```
+
+No auth required.
+
+---
+
+## Integration Proxy
+
+### * /api/v1/integration/*
+
+Proxy endpoint for external service integrations (billing, S3, etc.). Only enabled when `integration_url` is configured. Routes are forwarded to the configured integration backend.
+
+```bash
+curl https://relay.example.com/api/v1/integration/billing/status \
+  -H "Authorization: Bearer ***"
 ```
 
 ---
@@ -526,7 +785,7 @@ Server-Sent Events stream for real-time notifications.
 
 ```bash
 curl -N https://relay.example.com/api/v1/events \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 **Event format:**
@@ -556,7 +815,7 @@ JSON-RPC 2.0 MCP endpoint. Used by OpenClaw via mcporter.
 
 ```bash
 curl -X POST https://relay.example.com/mcp \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -567,7 +826,7 @@ curl -X POST https://relay.example.com/mcp \
 
 ```bash
 curl -X POST https://relay.example.com/mcp \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -589,11 +848,11 @@ curl -X POST https://relay.example.com/mcp \
 
 ### GET /dashboard/
 
-Web Dashboard SPA (dark theme).
+Web Dashboard SPA (dark theme). Authenticated via API token.
 
 ```bash
 curl https://relay.example.com/dashboard/ \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ***"
 ```
 
 ---
