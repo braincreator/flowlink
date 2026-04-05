@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/braincreator/flowlink/internal/config"
+	"github.com/braincreator/flowlink/internal/crypto"
 	"github.com/braincreator/flowlink/internal/protocol"
 	"github.com/braincreator/flowlink/pkg/version"
 	"github.com/gorilla/websocket"
@@ -22,6 +23,7 @@ import (
 const DefaultReadOnly = true
 
 // Agent — экземпляр агента.
+// E2EE: поддерживает end-to-end шифрование сообщений с relay.
 type Agent struct {
 	cfg    *config.Config
 	conn         *websocket.Conn
@@ -45,9 +47,17 @@ type Agent struct {
 
 	// Pending LLM responses
 	pendingLLM map[string]*pendingLLMResponse
+
+	// E2EE — end-to-end encryption layer
+	keystore      *crypto.KeyStore
+	e2ee          *crypto.E2EELayer
+	relayPubKey   []byte
+	relayKeyID    string
+	e2eeEnabled   bool
 }
 
 // NewAgent — создаёт новый агент с конфигурацией.
+// E2EE: инициализирует KeyStore и E2EELayer если включено.
 func NewAgent(cfg *config.Config) *Agent {
 	logger := slog.Default()
 
@@ -99,6 +109,21 @@ func NewAgent(cfg *config.Config) *Agent {
 		skills:     skills,
 		notifyCh:   make(chan protocol.Message, 100),
 		llm:        nil, // инициализируется ниже
+		e2eeEnabled: cfg.E2EE.Enabled,
+	}
+
+	// E2EE: инициализируем KeyStore и E2EELayer если включено
+	if cfg.E2EE.Enabled {
+		keysDir := filepath.Join(configDir, "keys")
+		keystore, err := crypto.NewKeyStore(keysDir)
+		if err != nil {
+			logger.Warn("E2EE keystore init failed, falling back to plain mode", "err", err)
+			agent.e2eeEnabled = false
+		} else {
+			agent.keystore = keystore
+			agent.e2ee = crypto.NewE2EELayer(keystore)
+			logger.Info("E2EE initialized", "key_dir", keysDir)
+		}
 	}
 
 	// LLM через реле (нужен agent)

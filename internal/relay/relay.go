@@ -4,11 +4,16 @@ package relay
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +26,7 @@ import (
 
 	"github.com/braincreator/flowlink/internal/billing"
 	"github.com/braincreator/flowlink/internal/config"
+	"github.com/braincreator/flowlink/internal/crypto"
 	"github.com/braincreator/flowlink/internal/dashboard"
 	"github.com/braincreator/flowlink/internal/health"
 	"github.com/braincreator/flowlink/internal/nginx"
@@ -30,6 +36,7 @@ import (
 )
 
 // Relay — реле-сервер, связывающий агенты и OpenClaw.
+// E2EE: опционально шифрует сообщения между relay и agent.
 type Relay struct {
 	cfg         *config.RelayConfig
 	logger      *slog.Logger
@@ -45,9 +52,18 @@ type Relay struct {
 	eventBus      *EventBus        // шина событий для SSE-уведомлений
 	approvalQueue *ApprovalQueue  // очередь запросов на подтверждение
 	healthChecker  *health.HealthChecker // мониторинг здоровья компонентов
+	// E2EE — end-to-end encryption layer
+	keystore *crypto.KeyStore
+	e2ee     *crypto.E2EELayer
+
+	// Integration proxy
+	httpClient      *http.Client // HTTP client with 10s timeout
+	integrationURL   string       // URL of integration service (e.g. "http://localhost:9082")
+	integrationToken string       // shared secret for relay→integration auth
 }
 
 // AgentConn — подключённый агент.
+// E2EE: хранит публичный ключ агента для шифрования.
 type AgentConn struct {
 	ID        string
 	Hostname  string
@@ -59,6 +75,10 @@ type AgentConn struct {
 	conn      *websocket.Conn
 	mu        sync.Mutex
 	callbacks map[string]func(any) // request_id → callback
+	// E2EE — public key for encryption
+	publicKey     []byte
+	publicKeyID   string
+	e2eeEnabled   bool
 }
 
 // AgentPool — пул подключённых агентов.
@@ -136,6 +156,7 @@ func (a *AgentConn) SetCallback(requestID string, callback func(any)) {
 }
 
 // NewRelay — создаёт новый реле-сервер.
+// E2EE: инициализирует KeyStore и E2EELayer если E2EE включён.
 func NewRelay(cfg *config.RelayConfig) *Relay {
 	logger := slog.Default()
 
@@ -174,6 +195,29 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		usage:     usageTracker,
 		invoices:  invoiceStore,
 		healthChecker:  hc,
+
+		// Integration proxy
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+		integrationURL:   cfg.IntegrationURL,
+		integrationToken: cfg.IntegrationToken,
+	}
+
+	// Инициализируем E2EE если включено (default: true)
+	if cfg.E2EE {
+		keysDir := filepath.Join(os.Getenv("HOME"), ".flowlink", "keys")
+		keystore, err := crypto.NewKeyStore(keysDir)
+		if err != nil {
+			logger.Error("E2EE keystore init failed, falling back to plain mode", "err", err)
+			cfg.E2EE = false
+		} else {
+			r.keystore = keystore
+			r.e2ee = crypto.NewE2EELayer(keystore)
+			logger.Info("E2EE initialized", "key_dir", keysDir)
+		}
+	} else {
+		logger.Info("E2EE disabled, plain mode")
 	}
 
 	// Подключаем адаптеры health checker к реальным компонентам relay
@@ -268,6 +312,12 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/health", r.handleHealth)         // GET — полный отчёт
 	apiMux.HandleFunc("/api/v1/health/ready", r.handleHealthReady) // GET — 200/503
 	apiMux.HandleFunc("/api/v1/health/live", r.handleHealthLive)  // GET — 200/503
+
+	// Integration proxy (billing, S3, etc.)
+	if r.integrationURL != "" {
+		apiMux.HandleFunc("/api/v1/integration/", r.handleIntegrationProxy)
+		r.logger.Info("integration proxy enabled", "url", r.integrationURL)
+	}
 
 	// Dashboard (с авторизацией через API token, регистрируем ДО middleware chain)
 	dashProvider := &dashboardProvider{r: r}
@@ -402,6 +452,7 @@ func (r *Relay) HandleAgentWSForTest(w http.ResponseWriter, req *http.Request) {
 }
 
 // handleAgentWS — обрабатывает WSS-подключение от агента.
+// E2EE: обменивается публичными ключами при handshake, шифрует/расшифровывает сообщения.
 func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
@@ -452,11 +503,25 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 		Connected: time.Now(),
 		LastSeen:  time.Now(),
 		conn:      conn,
+		e2eeEnabled: r.cfg.E2EE,
+	}
+
+	// E2EE: извлекаем публичный ключ агента из connect message
+	if r.cfg.E2EE && payload.PublicKey != "" {
+		// Decode base64 public key
+		pubKey, err := base64Decode(payload.PublicKey)
+		if err != nil {
+			r.logger.Warn("agent public key decode error, E2EE disabled for this agent", "agent", payload.AgentID, "err", err)
+		} else {
+			agent.publicKey = pubKey
+			agent.publicKeyID = computeKeyID(pubKey)
+			r.logger.Info("agent E2EE enabled", "agent", payload.AgentID, "key_id", agent.publicKeyID)
+		}
 	}
 
 	r.pool.Add(agent)
 	r.logger.Info("agent connected", "agent", payload.AgentID,
-		"hostname", payload.Hostname, "os", payload.OS)
+		"hostname", payload.Hostname, "os", payload.OS, "e2ee", agent.e2eeEnabled)
 
 	// Публикуем событие подключения
 	r.eventBus.Publish(Event{
@@ -467,6 +532,7 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 			"os":       payload.OS,
 			"arch":     payload.Arch,
 			"version":  payload.ClientVer,
+			"e2ee":     agent.e2eeEnabled,
 		},
 	})
 
@@ -475,14 +541,32 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 		r.registry.UpdateAgentOnlineStatus(payload.AgentID, true)
 	}
 
-	// Отправляем подтверждение
+	// Отправляем подтверждение с relay public key (E2EE)
 	resp := protocol.NewMessage(protocol.MsgConnected)
-	resp.Payload = protocol.ConnectedPayload{
+	connectedPayload := protocol.ConnectedPayload{
 		AgentID:    payload.AgentID,
 		RelayID:    "relay-1",
 		Interval:   30,
 		ServerTime: time.Now().Unix(),
 	}
+
+	// E2EE: добавляем публичный ключ relay в ответ
+	if r.cfg.E2EE && r.keystore != nil {
+		if pubKeys := r.keystore.PublicKeys(); len(pubKeys) > 0 {
+			activeKey := pubKeys[0]
+			for _, pk := range pubKeys {
+				if pk.IsActive {
+					activeKey = pk
+					break
+				}
+			}
+			connectedPayload.RelayPublicKey = base64Encode(activeKey.PublicKey)
+			connectedPayload.RelayKeyID = activeKey.KeyID
+			r.logger.Debug("sending relay public key to agent", "key_id", activeKey.KeyID)
+		}
+	}
+
+	resp.Payload = connectedPayload
 	conn.WriteJSON(resp)
 
 	// Цикл чтения сообщений от агента
@@ -509,10 +593,25 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
+		// E2EE: расшифровываем сообщение если зашифровано
+		if msg.Encrypted && r.e2ee != nil && msg.E2EE != nil {
+			plaintext, err := r.decryptMessage(&msg)
+			if err != nil {
+				r.logger.Error("message decryption failed", "agent", payload.AgentID, "err", err)
+				continue
+			}
+			// Parse decrypted payload
+			if err := json.Unmarshal(plaintext, &msg.Payload); err != nil {
+				r.logger.Error("decrypted payload parse error", "agent", payload.AgentID, "err", err)
+				continue
+			}
+			r.logger.Debug("message decrypted", "agent", payload.AgentID, "type", msg.Type)
+		}
+
 		msg.AgentID = payload.AgentID
 		agent.LastSeen = time.Now()
 
-		r.logger.Debug("message from agent", "agent", msg.AgentID, "type", msg.Type)
+		r.logger.Debug("message from agent", "agent", msg.AgentID, "type", msg.Type, "encrypted", msg.Encrypted)
 
 		// Проверяем callback (для MCP sendAndWait)
 		if msg.Payload != nil {
@@ -530,7 +629,7 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 		case protocol.MsgHeartbeat:
 			ack := protocol.NewMessage(protocol.MsgHeartbeatAck)
 			ack.AgentID = msg.AgentID
-			conn.WriteJSON(ack)
+			r.sendEncrypted(agent, ack)
 
 		case protocol.MsgNeedsApproval, protocol.MsgApprovalRequest:
 			var payloadData map[string]any
@@ -2490,6 +2589,92 @@ func (r *Relay) handleNginxConfig(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(output))
 }
 
+// --- E2EE Helper Methods ---
+
+// decryptMessage — расшифровывает E2EE сообщение от агента.
+func (r *Relay) decryptMessage(msg *protocol.Message) ([]byte, error) {
+	if r.e2ee == nil || msg.E2EE == nil {
+		return nil, fmt.Errorf("E2EE not initialized or missing e2ee field")
+	}
+
+	// Decode base64 fields
+	ciphertext, err := base64Decode(msg.E2EE.Ciphertext)
+	if err != nil {
+		return nil, fmt.Errorf("decode ciphertext: %w", err)
+	}
+
+	var ephemeralPubKey []byte
+	if msg.E2EE.EphemeralPubKey != "" {
+		ephemeralPubKey, err = base64Decode(msg.E2EE.EphemeralPubKey)
+		if err != nil {
+			return nil, fmt.Errorf("decode ephemeral key: %w", err)
+		}
+	}
+
+	envelope := &crypto.EncryptedEnvelope{
+		Version:         1,
+		KeyID:           msg.E2EE.KeyID,
+		SenderKey:       msg.E2EE.SenderKeyID,
+		Ciphertext:      ciphertext,
+		EphemeralPubKey: ephemeralPubKey,
+	}
+
+	return r.e2ee.Open(envelope)
+}
+
+// sendEncrypted — отправляет зашифрованное сообщение агенту.
+// Если E2EE включен и известен публичный ключ агента — шифрует.
+// Иначе отправляет в plain mode.
+func (r *Relay) sendEncrypted(agent *AgentConn, msg protocol.Message) error {
+	// E2EE disabled or no agent public key → plain mode
+	if !r.cfg.E2EE || r.e2ee == nil || len(agent.publicKey) == 0 {
+		return agent.SendMessage(msg)
+	}
+
+	// Marshal payload to JSON
+	payloadBytes, err := json.Marshal(msg.Payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	// Encrypt
+	envelope, err := r.e2ee.Seal(agent.publicKey, agent.publicKeyID, payloadBytes)
+	if err != nil {
+		return fmt.Errorf("seal message: %w", err)
+	}
+
+	// Create encrypted message
+	msg.Encrypted = true
+	msg.E2EE = &protocol.EncryptedData{
+		KeyID:           envelope.KeyID,
+		SenderKeyID:     envelope.SenderKey,
+		Ciphertext:      base64Encode(envelope.Ciphertext),
+		EphemeralPubKey: base64Encode(envelope.EphemeralPubKey),
+	}
+	if envelope.Nonce != nil {
+		msg.E2EE.Nonce = base64Encode(envelope.Nonce)
+	}
+	msg.Payload = nil // clear plain payload
+
+	return agent.SendMessage(msg)
+}
+
+// --- Base64 Helpers ---
+
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
+
+func base64Decode(s string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(s)
+}
+
+// computeKeyID — вычисляет ID ключа (SHA-256 truncated).
+func computeKeyID(publicKey []byte) string {
+	h := sha256.Sum256(publicKey)
+	return hex.EncodeToString(h[:16])
+}
+
 // --- Health Check Adapters ---
 
 // poolForHealth адаптирует AgentPool для health checker.
@@ -2568,5 +2753,82 @@ func (r *Relay) handleHealthLive(w http.ResponseWriter, req *http.Request) {
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte("NOT LIVE"))
+	}
+}
+
+// --- Integration Proxy Handler ---
+
+// handleIntegrationProxy — проксирует запросы к Python integration service.
+// Path: /api/v1/integration/* → integration service (strip prefix, forward with auth header)
+func (r *Relay) handleIntegrationProxy(w http.ResponseWriter, req *http.Request) {
+	if r.integrationURL == "" {
+		writeError(w, http.StatusNotImplemented, protocol.CodeIntegrationNotConfigured)
+		return
+	}
+
+	// Strip /api/v1/integration prefix
+	targetPath := strings.TrimPrefix(req.URL.Path, "/api/v1/integration")
+	if targetPath == "" {
+		targetPath = "/"
+	}
+
+	// Build target URL
+	targetURL, err := url.Parse(r.integrationURL)
+	if err != nil {
+		r.logger.Error("integration URL parse error", "err", err, "url", r.integrationURL)
+		writeErrorCustom(w, http.StatusInternalServerError, protocol.CodeInternalError, "invalid integration URL")
+		return
+	}
+	targetURL.Path = targetPath
+	targetURL.RawQuery = req.URL.RawQuery
+
+	// Create proxy request
+	proxyReq, err := http.NewRequest(req.Method, targetURL.String(), req.Body)
+	if err != nil {
+		r.logger.Error("integration proxy request error", "err", err)
+		writeErrorCustom(w, http.StatusInternalServerError, protocol.CodeIntegrationRequestError, err.Error())
+		return
+	}
+
+	// Copy headers
+	proxyReq.Header = req.Header.Clone()
+
+	// Add internal auth header
+	if r.integrationToken != "" {
+		proxyReq.Header.Set("X-Internal-Auth", r.integrationToken)
+	}
+
+	// Forward client IP
+	proxyReq.Header.Set("X-Forwarded-For", getClientIP(req))
+
+	r.logger.Debug("integration proxy request",
+		"method", req.Method,
+		"path", targetPath,
+		"target", targetURL.String(),
+	)
+
+	// Execute request
+	resp, err := r.httpClient.Do(proxyReq)
+	if err != nil {
+		r.logger.Error("integration proxy error", "err", err, "path", targetPath)
+		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeIntegrationRequestError, err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy response headers
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+
+	// Set status code
+	w.WriteHeader(resp.StatusCode)
+
+	// Stream response body
+	_, err = io.Copy(w, resp.Body)
+	if err != nil {
+		r.logger.Error("integration proxy response error", "err", err)
 	}
 }

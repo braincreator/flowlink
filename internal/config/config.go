@@ -175,6 +175,13 @@ type RelayConfig struct {
 	// Rate Limit — лимиты запросов
 	RateLimitPerMin  int `json:"rate_limit_per_min"`  // запросов в минуту (default: 30)
 	RateLimitPerHour int `json:"rate_limit_per_hour"` // запросов в час (default: 200)
+
+	// Integration Service — проксирование к Python интеграции (billing, S3, etc.)
+	IntegrationURL   string `json:"integration_url,omitempty"`   // e.g. "http://localhost:9082"
+	IntegrationToken string `json:"integration_token,omitempty"` // shared secret for relay→integration auth
+
+	// E2EE — настройки end-to-end шифрования
+	E2EE bool `json:"e2ee"` // включить E2EE (default: true)
 }
 
 // TelegramBotConfig — конфигурация Telegram-бота.
@@ -238,6 +245,7 @@ func DefaultRelayConfig() RelayConfig {
 		APIAddr:          ":8080",
 		HeartbeatTimeout: 90,
 		MaxAgents:        100,
+		E2EE:             true, // E2EE enabled by default
 	}
 }
 

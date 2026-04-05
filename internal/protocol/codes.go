@@ -184,3 +184,9 @@ const (
 	CodeLLMEmptyResponse   = "LLM_EMPTY_RESPONSE"
 	CodeLLMParseError      = "LLM_PARSE_ERROR"
 )
+
+// --- Integration ---
+const (
+	CodeIntegrationNotConfigured = "INTEGRATION_NOT_CONFIGURED"
+	CodeIntegrationRequestError  = "INTEGRATION_REQUEST_ERROR"
+)
