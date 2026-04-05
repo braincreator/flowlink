@@ -1457,8 +1457,12 @@ func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Инкрементируем счётчик бэкапов после успешной отправки
-	r.usage.IncrementBackups(clientID)
+	// Инкрементируем счётчик бэкапов после успешной отправки (Cloud SaaS)
+	if clientID != "" {
+		if _, ok := r.registry.GetClient(clientID); ok {
+			r.usage.IncrementBackups(clientID)
+		}
+	}
 
 	writeJSON(w, map[string]string{
 		"status":    "sent",
