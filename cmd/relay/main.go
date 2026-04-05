@@ -517,7 +517,7 @@ func serveCmd() {
 			}
 		}
 		r.SetLLMProxy(relay.NewLLMProxy(backends))
-		slog.Info("LLM proxy настроен", "backends", len(backends))
+		slog.Info("LLM proxy configured", "backends", len(backends))
 	} else {
 		slog.Warn("LLM backends not configured — autonomous tasks (L2) disabled")
 	}

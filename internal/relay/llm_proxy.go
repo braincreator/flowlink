@@ -258,7 +258,7 @@ func (r *Relay) handleLLMChat(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if r.llmProxy == nil {
-		writeError(w, http.StatusServiceUnavailable, "LLM proxy не настроен")
+		writeError(w, http.StatusServiceUnavailable, "LLM proxy not configured")
 		return
 	}
 
@@ -290,7 +290,7 @@ func (r *Relay) handleLLMBackends(w http.ResponseWriter, req *http.Request) {
 // handleLLMHealth — проверяет доступность LLM бэкендов.
 func (r *Relay) handleLLMHealth(w http.ResponseWriter, req *http.Request) {
 	if r.llmProxy == nil {
-		writeError(w, http.StatusServiceUnavailable, "LLM proxy не настроен")
+		writeError(w, http.StatusServiceUnavailable, "LLM proxy not configured")
 		return
 	}
 	writeJSON(w, map[string]any{"health": r.llmProxy.CheckHealth()})
@@ -302,7 +302,7 @@ func (r *Relay) handleAgentLLMRequest(agent *AgentConn, msg protocol.Message) {
 	if r.llmProxy == nil {
 		resp := protocol.NewMessage(protocol.MsgLLMResponse)
 		resp.Payload = map[string]string{
-			"error":      "LLM proxy не настроен на реле",
+			"error":      "LLM proxy not configured на реле",
 			"request_id": "",
 		}
 		agent.SendMessage(resp)
