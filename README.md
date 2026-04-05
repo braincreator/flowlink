@@ -47,14 +47,11 @@ chmod +x flowlink-agent
 ```bash
 ./flowlink-relay -config ~/.flowlink/relay.json
 
-# Или через systemd (рекомендуется):
-./flowlink-relay install-service
-systemctl start flowlink-relay
 ```
 
 Relay запустится на:
-- **WSS:** `:9080` (подключение агентов)
-- **API:** `:9081` (HTTP API + Dashboard)
+- **WSS:** `:8443` (подключение агентов)
+- **API:** `:8080` (HTTP API + Dashboard)
 
 ### 4. Подключите агента
 
@@ -62,7 +59,7 @@ Relay запустится на:
 
 ```bash
 ./flowlink-agent init \
-  --relay ws://YOUR_SERVER:9080/ws \
+  --relay ws://YOUR_SERVER:8443/ws \
   --label "production-db" \
   --token "AGENT_TOKEN_FROM_SETUP"
 
@@ -151,8 +148,8 @@ GET /api/v1/events?token=<token>
 `~/.flowlink/relay.json`:
 ```json
 {
-  "wss_addr": ":9080",
-  "api_addr": ":9081",
+  "wss_addr": ":8443",
+  "api_addr": ":8080",
   "api_token": "your-secret-token",
   "tls_cert": "",
   "tls_key": ""
@@ -163,10 +160,8 @@ GET /api/v1/events?token=<token>
 
 | План | Агенты | Цена |
 |------|--------|------|
-| Starter | 3 | Бесплатно |
-| Business | 25 | 2 990 ₽/мес |
-| Enterprise | 100 | 9 990 ₽/мес |
+| Free | 3 | Бесплатно |
+| Starter | 10 | 1 990 ₽/мес |
+| Pro | 50 | 4 990 ₽/мес |
+| Enterprise | 100+ | По запросу |
 
-## Лицензия
-
-BSL 1.1 — Self-hosted бесплатно навсегда. Конкурирующий SaaS/cloud запрещён. Автоматически конвертируется в GPL-3.0 с 5 апреля 2029 года.
