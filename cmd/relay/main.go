@@ -78,6 +78,10 @@ func printHelp() {
 	fmt.Println("  FLOWLINK_ADMIN_NAME     Admin name")
 	fmt.Println("  FLOWLINK_ADMIN_EMAIL    Admin email")
 	fmt.Println()
+	fmt.Println("Logging configuration:")
+	fmt.Println("  FLOWLINK_LOG_FORMAT     Log format: text (default) or json")
+	fmt.Println("  FLOWLINK_LOG_LEVEL      Log level: debug, info (default), warn, error")
+	fmt.Println()
 	fmt.Println("Flags for serve:")
 	fmt.Println("  -config <path>         Config file path (default: relay.json)")
 	fmt.Println("  -api-token <token>      API token (or FLOWLINK_API_TOKEN)")
@@ -463,9 +467,27 @@ func serveCmd() {
 		return
 	}
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
+	// Configure logging from env vars
+	logFormat := os.Getenv("FLOWLINK_LOG_FORMAT")
+	logLevel := slog.LevelInfo
+	if lvl := os.Getenv("FLOWLINK_LOG_LEVEL"); lvl != "" {
+		switch strings.ToLower(lvl) {
+		case "debug":
+			logLevel = slog.LevelDebug
+		case "warn":
+			logLevel = slog.LevelWarn
+		case "error":
+			logLevel = slog.LevelError
+		}
+	}
+
+	var handler slog.Handler
+	if strings.EqualFold(logFormat, "json") {
+		handler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})
+	} else {
+		handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})
+	}
+	slog.SetDefault(slog.New(handler))
 
 	if configPath == "" {
 		configPath = "relay.json"

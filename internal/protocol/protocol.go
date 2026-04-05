@@ -72,6 +72,7 @@ const (
 
 // Message — базовое сообщение протокола.
 // Все сообщения сериализуются в JSON.
+// E2EE: если Encrypted = true, Payload содержит EncryptedPayload.
 type Message struct {
 	ID        string          `json:"id"`
 	Type      MessageType     `json:"type"`
@@ -80,6 +81,18 @@ type Message struct {
 	Payload   jsonPayload     `json:"payload,omitempty"`
 	Timestamp int64           `json:"timestamp"`
 	Error     string          `json:"error,omitempty"`
+	Encrypted bool            `json:"encrypted,omitempty"` // true if payload is encrypted
+	E2EE      *EncryptedData  `json:"e2ee,omitempty"`      // encrypted payload data
+}
+
+// EncryptedData — зашифрованные данные для E2EE.
+// Формат совместим с crypto.EncryptedEnvelope.
+type EncryptedData struct {
+	KeyID           string `json:"key_id"`            // peer key ID
+	SenderKeyID     string `json:"sender_key_id"`     // sender key ID
+	Nonce           string `json:"nonce,omitempty"`   // base64-encoded nonce (optional)
+	Ciphertext      string `json:"ciphertext"`        // base64-encoded ciphertext
+	EphemeralPubKey string `json:"ephemeral_pub_key,omitempty"` // base64-encoded ephemeral public key
 }
 
 // jsonPayload — aliased для кастомной маршалинга (no-op, просто any → JSON)
@@ -98,11 +111,14 @@ type ConnectPayload struct {
 }
 
 // ConnectedPayload — ответ реле на подключение.
+// E2EE: опционально содержит публичный ключ relay для шифрования.
 type ConnectedPayload struct {
-	AgentID    string `json:"agent_id"`
-	RelayID    string `json:"relay_id"`
-	Interval   int    `json:"heartbeat_interval_sec"` // сколько секунд между пингами
-	ServerTime int64  `json:"server_time"`
+	AgentID        string `json:"agent_id"`
+	RelayID        string `json:"relay_id"`
+	Interval       int    `json:"heartbeat_interval_sec"` // сколько секунд между пингами
+	ServerTime     int64  `json:"server_time"`
+	RelayPublicKey string `json:"relay_public_key,omitempty"` // base64-encoded X25519 public key
+	RelayKeyID     string `json:"relay_key_id,omitempty"`     // key identifier
 }
 
 // ExecRequestPayload — запрос на выполнение команды.
