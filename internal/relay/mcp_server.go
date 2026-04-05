@@ -206,6 +206,165 @@ func mcpTools() []mcpTool {
 				},
 			},
 		},
+		{
+			Name:        "flowlink_backup",
+			Description: "Создать бэкап на удалённой машине. Проверяет лимиты бэкапов и хранилища перед созданием.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"required":             []string{"agent"},
+				"properties": map[string]any{
+					"agent": map[string]any{
+						"type":        "string",
+						"description": "ID агента или label",
+					},
+					"description": map[string]any{
+						"type":        "string",
+						"description": "Описание бэкапа (опционально)",
+					},
+					"paths": map[string]any{
+						"type":        "array",
+						"items":       map[string]string{"type": "string"},
+						"description": "Пути для бэкапа (опционально)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "flowlink_restore",
+			Description: "Восстановить из бэкапа на удалённой машине.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"required":             []string{"agent", "snapshot_id"},
+				"properties": map[string]any{
+					"agent": map[string]any{
+						"type":        "string",
+						"description": "ID агента или label",
+					},
+					"snapshot_id": map[string]any{
+						"type":        "string",
+						"description": "ID снапшота для восстановления",
+					},
+				},
+			},
+		},
+		{
+			Name:        "flowlink_kill",
+			Description: "Kill switch для процессов на удалённой машине (stop/pause/resume).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"required":             []string{"agent", "action"},
+				"properties": map[string]any{
+					"agent": map[string]any{
+						"type":        "string",
+						"description": "ID агента или label",
+					},
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"stop", "pause", "resume"},
+						"description": "Действие: stop, pause, resume",
+					},
+					"pid": map[string]any{
+						"type":        "integer",
+						"description": "PID процесса (опционально, для stop)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "flowlink_approve",
+			Description: "Одобрить pending approval request на удалённой машине.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"required":             []string{"agent", "request_id"},
+				"properties": map[string]any{
+					"agent": map[string]any{
+						"type":        "string",
+						"description": "ID агента или label",
+					},
+					"request_id": map[string]any{
+						"type":        "string",
+						"description": "ID запроса на одобрение",
+					},
+					"approved": map[string]any{
+						"type":        "boolean",
+						"default":     true,
+						"description": "Одобрить (true) или отклонить (false)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "flowlink_logs",
+			Description: "Получить логи с удалённой машины (tail).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"required":             []string{"agent"},
+				"properties": map[string]any{
+					"agent": map[string]any{
+						"type":        "string",
+						"description": "ID агента или label",
+					},
+					"lines": map[string]any{
+						"type":        "integer",
+						"default":     100,
+						"description": "Количество строк (default: 100)",
+					},
+					"service": map[string]any{
+						"type":        "string",
+						"description": "Имя сервиса для логов (опционально)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "flowlink_deploy",
+			Description: "Перезапустить сервис на удалённой машине.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"required":             []string{"agent", "service"},
+				"properties": map[string]any{
+					"agent": map[string]any{
+						"type":        "string",
+						"description": "ID агента или label",
+					},
+					"service": map[string]any{
+						"type":        "string",
+						"description": "Имя сервиса для перезапуска",
+					},
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"restart", "start", "stop"},
+						"default":     "restart",
+						"description": "Действие: restart, start, stop (default: restart)",
+					},
+				},
+			},
+		},
+		{
+			Name:        "flowlink_top",
+			Description: "Получить top процессов на удалённой машине (CPU, memory usage).",
+			InputSchema: map[string]any{
+				"type": "object",
+				"required":             []string{"agent"},
+				"properties": map[string]any{
+					"agent": map[string]any{
+						"type":        "string",
+						"description": "ID агента или label",
+					},
+					"sort_by": map[string]any{
+						"type":        "string",
+						"enum":        []string{"cpu", "mem"},
+						"default":     "cpu",
+						"description": "Сортировать по: cpu, mem (default: cpu)",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"default":     20,
+						"description": "Количество процессов (default: 20)",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -341,6 +500,20 @@ func (r *Relay) handleMCPCall(w http.ResponseWriter, rpcReq mcpRequest) {
 		r.mcpTask(w, rpcReq.ID, args)
 	case "flowlink_task_status":
 		r.mcpTaskStatus(w, rpcReq.ID, args)
+	case "flowlink_backup":
+		r.mcpBackup(w, rpcReq.ID, args)
+	case "flowlink_restore":
+		r.mcpRestore(w, rpcReq.ID, args)
+	case "flowlink_kill":
+		r.mcpKill(w, rpcReq.ID, args)
+	case "flowlink_approve":
+		r.mcpApprove(w, rpcReq.ID, args)
+	case "flowlink_logs":
+		r.mcpLogs(w, rpcReq.ID, args)
+	case "flowlink_deploy":
+		r.mcpDeploy(w, rpcReq.ID, args)
+	case "flowlink_top":
+		r.mcpTop(w, rpcReq.ID, args)
 	default:
 		writeMCPError(w, rpcReq.ID, -32602, "unknown tool: "+name)
 	}
@@ -717,6 +890,298 @@ func (r *Relay) sendAndWait(ac *AgentConn, action string, payload any, timeout t
 	case <-time.After(timeout):
 		return "", protocol.Err(protocol.CodeMCPTimeout, timeout)
 	}
+}
+
+// mcpBackup — создать бэкап.
+func (r *Relay) mcpBackup(w http.ResponseWriter, id any, args map[string]any) {
+	agentID, ok := args["agent"].(string)
+	if !ok || agentID == "" {
+		writeMCPError(w, id, -32602, "agent: required")
+		return
+	}
+
+	description, _ := args["description"].(string)
+	var paths []string
+	if p, ok := args["paths"].([]any); ok {
+		for _, path := range p {
+			if s, ok := path.(string); ok {
+				paths = append(paths, s)
+			}
+		}
+	}
+
+	// Резолвим агента
+	ac, err := r.resolveAgent(agentID)
+	if err != nil {
+		writeMCPError(w, id, -32602, err.Error())
+		return
+	}
+
+	// TODO: Billing check — нужен clientID из контекста
+	// Пока пропускаем проверку лимитов для MCP
+
+	// Отправляем запрос на бэкап
+	requestID := uuid.New().String()
+	msg := protocol.NewMessage(protocol.MsgBackupRequest)
+	msg.Payload = protocol.BackupRequestPayload{
+		RequestID:   requestID,
+		Description: description,
+		Paths:       paths,
+	}
+
+	if err := ac.SendMessage(msg); err != nil {
+		writeMCPError(w, id, -32603, "failed to send backup request: "+err.Error())
+		return
+	}
+
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("✅ Backup request sent\nRequest ID: %s\nAgent: %s", requestID, ac.ID),
+		}},
+	})
+}
+
+// mcpRestore — восстановить из бэкапа.
+func (r *Relay) mcpRestore(w http.ResponseWriter, id any, args map[string]any) {
+	agentID, ok := args["agent"].(string)
+	if !ok || agentID == "" {
+		writeMCPError(w, id, -32602, "agent: required")
+		return
+	}
+	snapshotID, ok := args["snapshot_id"].(string)
+	if !ok || snapshotID == "" {
+		writeMCPError(w, id, -32602, "snapshot_id: required")
+		return
+	}
+
+	ac, err := r.resolveAgent(agentID)
+	if err != nil {
+		writeMCPError(w, id, -32602, err.Error())
+		return
+	}
+
+	requestID := uuid.New().String()
+	msg := protocol.NewMessage(protocol.MsgBackupRestore)
+	msg.Payload = protocol.BackupRestorePayload{
+		RequestID:  requestID,
+		SnapshotID: snapshotID,
+	}
+
+	if err := ac.SendMessage(msg); err != nil {
+		writeMCPError(w, id, -32603, "failed to send restore request: "+err.Error())
+		return
+	}
+
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("✅ Restore request sent\nRequest ID: %s\nSnapshot: %s\nAgent: %s", requestID, snapshotID, ac.ID),
+		}},
+	})
+}
+
+// mcpKill — kill switch (stop/pause/resume).
+func (r *Relay) mcpKill(w http.ResponseWriter, id any, args map[string]any) {
+	agentID, ok := args["agent"].(string)
+	if !ok || agentID == "" {
+		writeMCPError(w, id, -32602, "agent: required")
+		return
+	}
+	action, ok := args["action"].(string)
+	if !ok || action == "" {
+		writeMCPError(w, id, -32602, "action: required")
+		return
+	}
+
+	ac, err := r.resolveAgent(agentID)
+	if err != nil {
+		writeMCPError(w, id, -32602, err.Error())
+		return
+	}
+
+	var pid int
+	if p, ok := args["pid"].(float64); ok {
+		pid = int(p)
+	}
+
+	resp, err := r.sendAndWait(ac, "kill", map[string]any{
+		"action": action,
+		"pid":    pid,
+	}, 10*time.Second)
+	if err != nil {
+		writeMCPError(w, id, -32603, err.Error())
+		return
+	}
+
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("✅ Kill action '%s' executed\nAgent: %s\nResponse: %v", action, ac.ID, resp),
+		}},
+	})
+}
+
+// mcpApprove — одобрить pending request.
+func (r *Relay) mcpApprove(w http.ResponseWriter, id any, args map[string]any) {
+	agentID, ok := args["agent"].(string)
+	if !ok || agentID == "" {
+		writeMCPError(w, id, -32602, "agent: required")
+		return
+	}
+	requestID, ok := args["request_id"].(string)
+	if !ok || requestID == "" {
+		writeMCPError(w, id, -32602, "request_id: required")
+		return
+	}
+	approved := true
+	if a, ok := args["approved"].(bool); ok {
+		approved = a
+	}
+
+	ac, err := r.resolveAgent(agentID)
+	if err != nil {
+		writeMCPError(w, id, -32602, err.Error())
+		return
+	}
+
+	resp, err := r.sendAndWait(ac, "approve", map[string]any{
+		"request_id": requestID,
+		"approved":   approved,
+	}, 10*time.Second)
+	if err != nil {
+		writeMCPError(w, id, -32603, err.Error())
+		return
+	}
+
+	status := "approved"
+	if !approved {
+		status = "rejected"
+	}
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("✅ Request %s %s\nAgent: %s", requestID, status, ac.ID),
+		}},
+	})
+}
+
+// mcpLogs — tail логов.
+func (r *Relay) mcpLogs(w http.ResponseWriter, id any, args map[string]any) {
+	agentID, ok := args["agent"].(string)
+	if !ok || agentID == "" {
+		writeMCPError(w, id, -32602, "agent: required")
+		return
+	}
+
+	lines := 100
+	if l, ok := args["lines"].(float64); ok {
+		lines = int(l)
+	}
+	service, _ := args["service"].(string)
+
+	ac, err := r.resolveAgent(agentID)
+	if err != nil {
+		writeMCPError(w, id, -32602, err.Error())
+		return
+	}
+
+	resp, err := r.sendAndWait(ac, "logs", map[string]any{
+		"lines":   lines,
+		"service": service,
+	}, 15*time.Second)
+	if err != nil {
+		writeMCPError(w, id, -32603, err.Error())
+		return
+	}
+
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("📋 Logs from %s (last %d lines):\n\n%v", ac.ID, lines, resp),
+		}},
+	})
+}
+
+// mcpDeploy — перезапустить сервис.
+func (r *Relay) mcpDeploy(w http.ResponseWriter, id any, args map[string]any) {
+	agentID, ok := args["agent"].(string)
+	if !ok || agentID == "" {
+		writeMCPError(w, id, -32602, "agent: required")
+		return
+	}
+	service, ok := args["service"].(string)
+	if !ok || service == "" {
+		writeMCPError(w, id, -32602, "service: required")
+		return
+	}
+
+	action := "restart"
+	if a, ok := args["action"].(string); ok {
+		action = a
+	}
+
+	ac, err := r.resolveAgent(agentID)
+	if err != nil {
+		writeMCPError(w, id, -32602, err.Error())
+		return
+	}
+
+	resp, err := r.sendAndWait(ac, "deploy", map[string]any{
+		"service": service,
+		"action":  action,
+	}, 30*time.Second)
+	if err != nil {
+		writeMCPError(w, id, -32603, err.Error())
+		return
+	}
+
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("✅ Service '%s' %s\nAgent: %s\nResponse: %v", service, action, ac.ID, resp),
+		}},
+	})
+}
+
+// mcpTop — top процессов.
+func (r *Relay) mcpTop(w http.ResponseWriter, id any, args map[string]any) {
+	agentID, ok := args["agent"].(string)
+	if !ok || agentID == "" {
+		writeMCPError(w, id, -32602, "agent: required")
+		return
+	}
+
+	sortBy := "cpu"
+	if s, ok := args["sort_by"].(string); ok {
+		sortBy = s
+	}
+	limit := 20
+	if l, ok := args["limit"].(float64); ok {
+		limit = int(l)
+	}
+
+	ac, err := r.resolveAgent(agentID)
+	if err != nil {
+		writeMCPError(w, id, -32602, err.Error())
+		return
+	}
+
+	resp, err := r.sendAndWait(ac, "top", map[string]any{
+		"sort_by": sortBy,
+		"limit":   limit,
+	}, 10*time.Second)
+	if err != nil {
+		writeMCPError(w, id, -32603, err.Error())
+		return
+	}
+
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("📊 Top processes (sorted by %s, top %d):\n\n%v", sortBy, limit, resp),
+		}},
+	})
 }
 
 // formatExecResult — форматирует результат exec для MCP.

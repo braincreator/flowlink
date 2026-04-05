@@ -133,6 +133,41 @@ func (ut *UsageTracker) IncrementBackups(clientID string) {
 	ut.persist(r)
 }
 
+// DecrementBackups — уменьшает счётчик бэкапов.
+func (ut *UsageTracker) DecrementBackups(clientID string) {
+	ut.mu.Lock()
+	defer ut.mu.Unlock()
+
+	r := ut.getOrCreate(clientID, currentMonth())
+	if r.Backups > 0 {
+		r.Backups--
+	}
+	ut.persist(r)
+}
+
+// IncrementStorage — увеличивает размер хранилища бэкапов.
+func (ut *UsageTracker) IncrementStorage(clientID string, bytes int64) {
+	ut.mu.Lock()
+	defer ut.mu.Unlock()
+
+	r := ut.getOrCreate(clientID, currentMonth())
+	r.Storage += bytes
+	ut.persist(r)
+}
+
+// DecrementStorage — уменьшает размер хранилища бэкапов.
+func (ut *UsageTracker) DecrementStorage(clientID string, bytes int64) {
+	ut.mu.Lock()
+	defer ut.mu.Unlock()
+
+	r := ut.getOrCreate(clientID, currentMonth())
+	r.Storage -= bytes
+	if r.Storage < 0 {
+		r.Storage = 0
+	}
+	ut.persist(r)
+}
+
 // GetUsage — возвращает текущее использование для клиента и месяца.
 func (ut *UsageTracker) GetUsage(clientID, month string) *UsageRecord {
 	ut.mu.Lock()

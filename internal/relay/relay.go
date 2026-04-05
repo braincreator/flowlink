@@ -1372,6 +1372,20 @@ func (r *Relay) handleAgentConfigUpdate(w http.ResponseWriter, req *http.Request
 	})
 }
 
+// getUpsellMessage — возвращает сообщение с рекомендацией апгрейда плана.
+func getUpsellMessage(currentPlan string) string {
+	switch currentPlan {
+	case "free":
+		return "Улучшите до Cloud Starter ($19/мес) — 20 бэкапов, 5GB хранилище."
+	case "starter":
+		return "Улучшите до Cloud Pro ($49/мес) — безлимит бэкапов, 50GB хранилище."
+	case "pro":
+		return "Улучшите до Cloud Enterprise ($99/мес) — безлимит бэкапов, 500GB хранилище."
+	default:
+		return "Свяжитесь с поддержкой для улучшения плана."
+	}
+}
+
 // === Backup API Handlers ===
 
 // handleBackupCreate — POST /api/v1/agents/backup: trigger backup на агенте.
@@ -1397,6 +1411,37 @@ func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Billing: проверяем лимиты перед созданием бэкапа
+	clientID := getClientID(req)
+	if clientID == "" {
+		writeError(w, http.StatusUnauthorized, protocol.CodeUnauthorized)
+		return
+	}
+
+	client, ok := r.registry.GetClient(clientID)
+	if !ok {
+		writeError(w, http.StatusNotFound, protocol.CodeClientNotFound)
+		return
+	}
+
+	// Проверяем лимит бэкапов
+	check := r.usage.CheckLimit(clientID, billing.ResourceBackups, client.Plan)
+	if !check.CanProceed {
+		upsellMsg := fmt.Sprintf("BACKUP_LIMIT_REACHED: Лимит бэкапов исчерпан (%d/%d). %s",
+			check.Used, check.Limit, getUpsellMessage(client.Plan))
+		writeError(w, http.StatusPaymentRequired, upsellMsg)
+		return
+	}
+
+	// Проверяем лимит хранилища (если знаем размер)
+	storageCheck := r.usage.CheckLimit(clientID, billing.ResourceStorage, client.Plan)
+	if !storageCheck.CanProceed {
+		upsellMsg := fmt.Sprintf("STORAGE_LIMIT_REACHED: Лимит хранилища исчерпан (%d/%d bytes). %s",
+			storageCheck.Used, storageCheck.Limit, getUpsellMessage(client.Plan))
+		writeError(w, http.StatusPaymentRequired, upsellMsg)
+		return
+	}
+
 	agent, ok := r.pool.Get(body.AgentID)
 	if !ok {
 		writeError(w, http.StatusNotFound, protocol.CodeAgentNotConnected)
@@ -1415,6 +1460,9 @@ func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 		writeErrorCustom(w, http.StatusBadGateway, protocol.CodeAgentWriteFailed, err.Error())
 		return
 	}
+
+	// Инкрементируем счётчик бэкапов после успешной отправки
+	r.usage.IncrementBackups(clientID)
 
 	writeJSON(w, map[string]string{
 		"status":    "sent",
