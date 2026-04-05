@@ -130,9 +130,9 @@ func TestMCPToolsList(t *testing.T) {
 		t.Fatal("tools не массив")
 	}
 
-	// Ожидаем 15 инструментов
-	if len(tools) != 15 {
-		t.Errorf("expected 15 tools, got %d", len(tools))
+	// Ожидаем 17 инструментов (15 оригинальных + backup_list + backup_delete)
+	if len(tools) != 17 {
+		t.Errorf("expected 17 tools, got %d", len(tools))
 	}
 
 	// Проверяем имена инструментов
@@ -151,6 +151,7 @@ func TestMCPToolsList(t *testing.T) {
 		"flowlink_list", "flowlink_sysinfo", "flowlink_task", "flowlink_task_status",
 		"flowlink_backup", "flowlink_restore", "flowlink_kill", "flowlink_approve",
 		"flowlink_logs", "flowlink_deploy", "flowlink_top",
+		"flowlink_backup_list", "flowlink_backup_delete",
 	}
 	for _, name := range expected {
 		if !names[name] {

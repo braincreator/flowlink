@@ -32,6 +32,7 @@ import (
 	"github.com/braincreator/flowlink/internal/health"
 	"github.com/braincreator/flowlink/internal/nginx"
 	"github.com/braincreator/flowlink/internal/protocol"
+	"github.com/braincreator/flowlink/pkg/version"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -56,6 +57,7 @@ type Relay struct {
 	eventBus      *EventBus        // шина событий для SSE-уведомлений
 	approvalQueue *ApprovalQueue  // очередь запросов на подтверждение
 	healthChecker  *health.HealthChecker // мониторинг здоровья компонентов
+	backupEngine   *agent.BackupEngine    // relay-side backup engine for MCP tools
 	// E2EE — end-to-end encryption layer
 	keystore *crypto.KeyStore
 	e2ee     *crypto.E2EELayer
@@ -198,7 +200,7 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 	webhookHandler := billing.NewWebhookHandler(webhookSecret, invoiceStore, subStore, tochkaClient, logger)
 
 	// Инициализируем health checker
-	hc := health.NewHealthChecker("0.1.0")
+	hc := health.NewHealthChecker(version.Version)
 	hc.SetWSSAddr(cfg.WSSAddr)
 	hc.SetAPIAddr(cfg.APIAddr)
 
@@ -340,9 +342,15 @@ func (r *Relay) Start() error {
 	}
 
 	// Dashboard (с авторизацией через API token, регистрируем ДО middleware chain)
+	// Use backup config from relay config if available, otherwise use defaults
+backupCfg := agent.DefaultBackupConfig()
+if r.cfg.Backup.BackupDir != "" {
+	backupCfg = r.cfg.Backup
+}
+	r.backupEngine = agent.NewBackupEngine(backupCfg)
 	dashProvider := &dashboardProvider{
 		r:           r,
-		backupEngine: agent.NewBackupEngine(agent.DefaultBackupConfig()),
+		backupEngine: r.backupEngine,
 	}
 	apiMux.Handle("/dashboard/", http.StripPrefix("/dashboard", dashboard.NewHandler(dashProvider, r.cfg.APIToken)))
 
@@ -357,7 +365,7 @@ func (r *Relay) Start() error {
 	handler := Chain(
 		RecoveryMiddleware(r.logger),
 		RequestLoggerMiddleware(r.logger),
-		CORSMiddleware(nil, r.logger), // nil = deny all (configure allowed origins for production)
+		CORSMiddleware(r.cfg.CORSOrigins, r.logger),
 		RateLimitMiddleware(r.rateLimit, r.logger),
 		AuthMiddleware(authCfg),
 	)(apiMux)
@@ -508,6 +516,23 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 	var payload protocol.ConnectPayload
 	if err := json.Unmarshal(jsonMarshal(connectMsg.Payload), &payload); err != nil {
 		r.logger.Error("connect payload parse error", "err", err)
+		conn.Close()
+		return
+	}
+
+	// Проверяем версию протокола
+	if payload.ClientProtocolVersion > protocol.CurrentProtocolVersion {
+		r.logger.Warn("protocol version mismatch",
+			"agent", payload.AgentID,
+			"client_version", payload.ClientProtocolVersion,
+			"server_version", protocol.CurrentProtocolVersion,
+		)
+		errMsg := protocol.NewMessage(protocol.MsgError)
+		errMsg.Payload = protocol.ErrorPayloadFromCode(
+			protocol.CodeProtocolVersionMismatch,
+			payload.ClientProtocolVersion, protocol.CurrentProtocolVersion,
+		)
+		conn.WriteJSON(errMsg)
 		conn.Close()
 		return
 	}
@@ -2624,16 +2649,7 @@ func (dp *dashboardProvider) DashboardRestoreBackup(snapshotID string) error {
 }
 
 func (dp *dashboardProvider) DashboardDeleteBackup(snapshotID string) error {
-	// BackupEngine не имеет публичный Delete — добавляем через Remove-подход
-	snapshots := dp.backupEngine.List()
-	backupDir := agent.DefaultBackupConfig().BackupDir
-	for _, s := range snapshots {
-		if s.ID == snapshotID {
-			fp := filepath.Join(backupDir, s.Filename)
-			return os.Remove(fp)
-		}
-	}
-	return fmt.Errorf("snapshot %s not found", snapshotID)
+	return dp.backupEngine.Delete(snapshotID)
 }
 
 func (dp *dashboardProvider) DashboardGetConfig() map[string]any {

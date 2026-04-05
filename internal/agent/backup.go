@@ -3,9 +3,11 @@
 package agent
 
 import (
-	"github.com/braincreator/flowlink/internal/protocol"
 	"archive/tar"
 	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/braincreator/flowlink/internal/config"
+	"github.com/braincreator/flowlink/internal/protocol"
 )
 
 // DefaultBackupConfig — конфигурация по умолчанию.
@@ -39,6 +42,7 @@ type Snapshot struct {
 	Size        int64    `json:"size"`
 	Paths       []string `json:"paths"`
 	Filename    string   `json:"filename"`
+	Checksum    string   `json:"checksum"`
 }
 
 // FileChange — изменение файла (для diff).
@@ -51,9 +55,10 @@ type FileChange struct {
 
 // BackupEngine — движок резервного копирования.
 type BackupEngine struct {
-	cfg    config.BackupConfig
-	logger *slog.Logger
-	mu     sync.Mutex // protects metadata read/write
+	cfg       config.BackupConfig
+	logger    *slog.Logger
+	mu        sync.Mutex // protects metadata read/write
+	scheduler *time.Ticker
 }
 
 // NewBackupEngine — создаёт новый backup engine.
@@ -98,6 +103,13 @@ func (b *BackupEngine) CreateBefore(paths []string, reason string) (string, erro
 		return "", protocol.ErrCause(protocol.CodeBackupArchiveError, err)
 	}
 
+	// Вычисляем SHA-256 контрольную сумму архива
+	checksum, err := b.computeFileChecksum(backupPath)
+	if err != nil {
+		b.logger.Warn("backup checksum compute error", "err", err)
+		// Не прерываем создание бэкапа из-за ошибки чексуммы
+	}
+
 	// Сохраняем метаданные
 	snapshot := Snapshot{
 		ID:          snapshotID,
@@ -106,6 +118,7 @@ func (b *BackupEngine) CreateBefore(paths []string, reason string) (string, erro
 		Size:        size,
 		Paths:       paths,
 		Filename:    filename,
+		Checksum:    checksum,
 	}
 
 	b.mu.Lock()
@@ -450,6 +463,32 @@ func (b *BackupEngine) deleteSnapshot(snapshot Snapshot) {
 	}
 }
 
+// Delete — публичный метод для удаления снапшота по ID.
+// Находит снапшот, удаляет файл и обновляет метаданные.
+func (b *BackupEngine) Delete(snapshotID string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	snapshot, err := b.getSnapshot(snapshotID)
+	if err != nil {
+		return protocol.ErrCause(protocol.CodeBackupSnapshotNotFound, err)
+	}
+
+	// Удаляем файл снапшота
+	b.deleteSnapshot(*snapshot)
+
+	// Обновляем метаданные: сохраняем всё кроме удалённого снапшота
+	snapshots := b.list()
+	var remaining []Snapshot
+	for _, s := range snapshots {
+		if s.ID != snapshotID {
+			remaining = append(remaining, s)
+		}
+	}
+
+	return b.saveAllMetadata(remaining)
+}
+
 // saveMetadata — добавляет метаданные снапшота (caller must hold mu).
 func (b *BackupEngine) saveMetadata(snapshot Snapshot) error {
 	snapshots := b.list()
@@ -467,6 +506,88 @@ func (b *BackupEngine) saveAllMetadata(snapshots []Snapshot) error {
 	}
 
 	return os.WriteFile(metadataPath, data, 0644)
+}
+
+// computeFileChecksum — вычисляет SHA-256 хеш файла.
+func (b *BackupEngine) computeFileChecksum(filePath string) (string, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", protocol.ErrCause(protocol.CodeBackupChecksumCompute, err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", protocol.ErrCause(protocol.CodeBackupChecksumCompute, err)
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// Verify — проверяет целостность снапшота по контрольной сумме.
+// Открывает архив, вычисляет SHA-256 и сравнивает с сохранённой суммой.
+func (b *BackupEngine) Verify(snapshotID string) error {
+	b.mu.Lock()
+	snapshot, err := b.getSnapshot(snapshotID)
+	b.mu.Unlock()
+	if err != nil {
+		return protocol.ErrCause(protocol.CodeBackupSnapshotNotFound, err)
+	}
+
+	if snapshot.Checksum == "" {
+		b.logger.Warn("snapshot has no checksum, skipping verification", "snapshot_id", snapshotID)
+		return nil
+	}
+
+	backupPath := filepath.Join(b.cfg.BackupDir, snapshot.Filename)
+	currentChecksum, err := b.computeFileChecksum(backupPath)
+	if err != nil {
+		return err
+	}
+
+	if currentChecksum != snapshot.Checksum {
+		return protocol.ErrCause(protocol.CodeBackupChecksumMismatch,
+			fmt.Errorf("expected %s, got %s", snapshot.Checksum, currentChecksum))
+	}
+
+	b.logger.Info("backup checksum verified", "snapshot_id", snapshotID, "checksum", snapshot.Checksum)
+	return nil
+}
+
+// StartScheduler — запускает периодическое создание бэкапов.
+// Создаёт бэкап каждые `interval` с причиной "scheduled".
+// Уважает отмену контекста.
+func (b *BackupEngine) StartScheduler(ctx context.Context, paths []string, interval time.Duration) {
+	if interval <= 0 {
+		b.logger.Warn("invalid scheduler interval, not starting", "interval", interval)
+		return
+	}
+
+	b.scheduler = time.NewTicker(interval)
+	defer b.scheduler.Stop()
+
+	b.logger.Info("backup scheduler started",
+		"interval", interval,
+		"paths", len(paths),
+	)
+
+	// Создаём первый бэкап сразу
+	if _, err := b.CreateBefore(paths, "scheduled"); err != nil {
+		b.logger.Warn("scheduled backup failed", "err", err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			b.logger.Info("backup scheduler stopped")
+			return
+		case <-b.scheduler.C:
+			b.logger.Info("creating scheduled backup", "interval", interval)
+			if _, err := b.CreateBefore(paths, "scheduled"); err != nil {
+				b.logger.Warn("scheduled backup failed", "err", err)
+			}
+		}
+	}
 }
 
 // sanitizeDescription — очищает описание для использования в имени файла.

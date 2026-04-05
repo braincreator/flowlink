@@ -219,9 +219,14 @@ func (a *Agent) Connect(ctx context.Context) error {
 
 // Disconnect — отключается от реле.
 func (a *Agent) Disconnect() {
+	// Stop backup scheduler if running
+	if a.backup.scheduler != nil {
+		a.backup.scheduler.Stop()
+	}
 	close(a.done)
 	if a.conn != nil {
 		a.conn.Close()
+		a.conn = nil
 	}
 	a.logger.Info("disconnected from relay")
 }
@@ -229,6 +234,11 @@ func (a *Agent) Disconnect() {
 // SetOnDisconnect устанавливает callback при потере соединения.
 func (a *Agent) SetOnDisconnect(fn func()) {
 	a.onDisconnect = fn
+}
+
+// BackupEngine — возвращает backup engine для доступа к бэкапам и планировщику.
+func (a *Agent) Backup() *BackupEngine {
+	return a.backup
 }
 
 // readLoop — читает сообщения от реле и маршрутизирует их.

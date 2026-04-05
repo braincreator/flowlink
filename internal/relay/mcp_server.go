@@ -248,6 +248,28 @@ func mcpTools() []mcpTool {
 			},
 		},
 		{
+			Name:        "flowlink_backup_list",
+			Description: "List all relay-side backups. Returns JSON array of {id, description, timestamp, size, paths}.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "flowlink_backup_delete",
+			Description: "Delete a specific relay-side backup by snapshot ID.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"required": []string{"snapshot_id"},
+				"properties": map[string]any{
+					"snapshot_id": map[string]any{
+						"type":        "string",
+						"description": "Snapshot ID to delete",
+					},
+				},
+			},
+		},
+		{
 			Name:        "flowlink_kill",
 			Description: "Kill switch для процессов на удалённой машине (stop/pause/resume).",
 			InputSchema: map[string]any{
@@ -504,6 +526,10 @@ func (r *Relay) handleMCPCall(w http.ResponseWriter, rpcReq mcpRequest) {
 		r.mcpBackup(w, rpcReq.ID, args)
 	case "flowlink_restore":
 		r.mcpRestore(w, rpcReq.ID, args)
+	case "flowlink_backup_list":
+		r.mcpBackupList(w, rpcReq.ID, args)
+	case "flowlink_backup_delete":
+		r.mcpBackupDelete(w, rpcReq.ID, args)
 	case "flowlink_kill":
 		r.mcpKill(w, rpcReq.ID, args)
 	case "flowlink_approve":
@@ -977,6 +1003,76 @@ func (r *Relay) mcpRestore(w http.ResponseWriter, id any, args map[string]any) {
 		"content": []map[string]any{{
 			"type": "text",
 			"text": fmt.Sprintf("✅ Restore request sent\nRequest ID: %s\nSnapshot: %s\nAgent: %s", requestID, snapshotID, ac.ID),
+		}},
+	})
+}
+
+// mcpBackupList — list all relay-side backups.
+func (r *Relay) mcpBackupList(w http.ResponseWriter, id any, args map[string]any) {
+	if r.backupEngine == nil {
+		writeMCPError(w, id, -32603, "backup engine not initialized")
+		return
+	}
+
+	snapshots := r.backupEngine.List()
+	result := make([]map[string]any, 0, len(snapshots))
+	for _, s := range snapshots {
+		result = append(result, map[string]any{
+			"id":          s.ID,
+			"description": s.Description,
+			"timestamp":   s.Timestamp,
+			"size":        s.Size,
+			"paths":       s.Paths,
+		})
+	}
+
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		writeMCPError(w, id, -32603, "failed to marshal backups: "+err.Error())
+		return
+	}
+
+	if len(result) == 0 {
+		writeMCPResult(w, id, map[string]any{
+			"content": []map[string]any{{
+				"type": "text",
+				"text": "No relay-side backups found.",
+			}},
+		})
+		return
+	}
+
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("Relay-side backups (%d):\n%s", len(result), string(data)),
+		}},
+	})
+}
+
+// mcpBackupDelete — delete a relay-side backup by snapshot ID.
+func (r *Relay) mcpBackupDelete(w http.ResponseWriter, id any, args map[string]any) {
+	if r.backupEngine == nil {
+		writeMCPError(w, id, -32603, "backup engine not initialized")
+		return
+	}
+
+	snapshotID, ok := args["snapshot_id"].(string)
+	if !ok || snapshotID == "" {
+		writeMCPError(w, id, -32602, "snapshot_id: required")
+		return
+	}
+
+	if err := r.backupEngine.Delete(snapshotID); err != nil {
+		writeMCPError(w, id, -32603, "failed to delete backup: "+err.Error())
+		return
+	}
+
+	data, _ := json.Marshal(map[string]string{"status": "deleted", "snapshot_id": snapshotID})
+	writeMCPResult(w, id, map[string]any{
+		"content": []map[string]any{{
+			"type": "text",
+			"text": fmt.Sprintf("✅ Backup deleted\n%s", string(data)),
 		}},
 	})
 }

@@ -37,14 +37,15 @@ const (
 
 // --- Agent Lifecycle ---
 const (
-	CodeAgentConnectFailed = "AGENT_CONNECT_FAILED"
-	CodeAgentDisconnected  = "AGENT_DISCONNECTED"
-	CodeAgentReadFailed    = "AGENT_READ_FAILED"
-	CodeAgentWriteFailed   = "AGENT_WRITE_FAILED"
-	CodeAgentNotAuthorized = "AGENT_NOT_AUTHORIZED"
-	CodeAgentLimitExceeded = "AGENT_LIMIT_EXCEEDED"
-	CodeAgentPaused        = "AGENT_PAUSED"
-	CodeAgentEmergencyStop = "AGENT_EMERGENCY_STOP"
+	CodeAgentConnectFailed     = "AGENT_CONNECT_FAILED"
+	CodeAgentDisconnected      = "AGENT_DISCONNECTED"
+	CodeAgentReadFailed        = "AGENT_READ_FAILED"
+	CodeAgentWriteFailed       = "AGENT_WRITE_FAILED"
+	CodeAgentNotAuthorized     = "AGENT_NOT_AUTHORIZED"
+	CodeAgentLimitExceeded     = "AGENT_LIMIT_EXCEEDED"
+	CodeAgentPaused            = "AGENT_PAUSED"
+	CodeAgentEmergencyStop     = "AGENT_EMERGENCY_STOP"
+	CodeProtocolVersionMismatch = "PROTOCOL_VERSION_MISMATCH"
 )
 
 // --- Execution ---
@@ -134,6 +135,8 @@ const (
 	CodeBackupGlobError     = "BACKUP_GLOB_ERROR"
 	CodeBackupFileAddError  = "BACKUP_FILE_ADD_ERROR"
 	CodeBackupCleanup       = "BACKUP_CLEANUP"
+	CodeBackupChecksumCompute = "BACKUP_CHECKSUM_COMPUTE"
+	CodeBackupChecksumMismatch = "BACKUP_CHECKSUM_MISMATCH"
 )
 
 // --- Audit ---

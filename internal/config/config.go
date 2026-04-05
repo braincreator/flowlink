@@ -141,6 +141,8 @@ type BackupConfig struct {
 	BackupDir string `json:"backup_dir"`
 	// Enabled — включено ли авто-резервное копирование (default: true)
 	Enabled bool `json:"enabled"`
+	// ScheduleInterval — интервал периодических бэкапов, e.g. "6h", "12h", "24h" (default: "" — disabled)
+	ScheduleInterval string `json:"schedule_interval"`
 }
 
 // RelayConfig — конфигурация реле-сервера.
@@ -182,6 +184,12 @@ type RelayConfig struct {
 	// Integration Service — проксирование к Python интеграции (billing, S3, etc.)
 	IntegrationURL   string `json:"integration_url,omitempty"`   // e.g. "http://localhost:9082"
 	IntegrationToken string `json:"integration_token,omitempty"` // shared secret for relay→integration auth
+
+	// CORS — allowed origins for cross-origin requests
+	CORSOrigins []string `json:"cors_origins"` // default: ["*"]
+
+	// Backup — настройки резервного копирования для dashboard
+	Backup BackupConfig `json:"backup"`
 
 	// E2EE is always enabled — no toggle needed in relay config.
 }
@@ -242,11 +250,20 @@ func boolPtr(v bool) *bool { return &v }
 
 // DefaultRelayConfig — конфигурация по умолчанию для реле.
 func DefaultRelayConfig() RelayConfig {
+	home, _ := os.UserHomeDir()
 	return RelayConfig{
 		WSSAddr:          ":8443",
 		APIAddr:          ":8080",
 		HeartbeatTimeout: 90,
 		MaxAgents:        100,
+		CORSOrigins:      []string{"*"},
+		Backup: BackupConfig{
+			MaxSnapshots:  50,
+			MaxTotalSize:  5 * 1024 * 1024 * 1024, // 5GB
+			RetentionDays: 7,
+			BackupDir:     filepath.Join(home, ".flowlink", "backups"),
+			Enabled:       true,
+		},
 	}
 }
 

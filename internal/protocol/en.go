@@ -37,6 +37,7 @@ var enMessages = map[string]string{
 	CodeAgentLimitExceeded: "Agent limit exceeded (%d/%d)",
 	CodeAgentPaused:        "Agent paused: %s",
 	CodeAgentEmergencyStop: "Emergency stop: commands not executed",
+	CodeProtocolVersionMismatch: "Protocol version mismatch: client %d, server %d",
 
 	// --- Execution ---
 	CodeExecSuccess:          "Command executed successfully",
@@ -112,6 +113,8 @@ var enMessages = map[string]string{
 	CodeBackupGlobError:        "Backup glob error: %v",
 	CodeBackupFileAddError:     "Backup file add error: %v",
 	CodeBackupCleanup:          "Backup cleanup completed",
+	CodeBackupChecksumCompute:  "Backup checksum compute error: %v",
+	CodeBackupChecksumMismatch: "Backup checksum mismatch: expected %s, got %s",
 
 	// --- Audit ---
 	CodeAuditDirCreateError:    "Audit directory create error: %v",

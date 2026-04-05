@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"os/exec"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -259,6 +262,24 @@ func agentStart() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Start backup scheduler if configured
+	if cfg.Backup.ScheduleInterval != "" {
+		interval, err := time.ParseDuration(cfg.Backup.ScheduleInterval)
+		if err != nil {
+			slog.Error("invalid backup schedule_interval, disabling scheduler", "value", cfg.Backup.ScheduleInterval, "err", err)
+		} else {
+			// Backup the configured work directory; fall back to home directory
+			backupPaths := []string{cfg.WorkDir}
+			if cfg.WorkDir == "" {
+				if home, err := os.UserHomeDir(); err == nil {
+					backupPaths = []string{home}
+				}
+			}
+			go a.Backup().StartScheduler(ctx, backupPaths, interval)
+			slog.Info("backup scheduler enabled", "interval", interval, "paths", backupPaths)
+		}
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -413,7 +434,7 @@ func cmdEmergency(args []string) {
 // ====================
 
 func findFlowlinkPID() (int, error) {
-	// Read PID file if exists
+	// Try PID file first
 	pidFile := os.ExpandEnv("$HOME/.flowlink/flowlink.pid")
 	if data, err := os.ReadFile(pidFile); err == nil {
 		var pid int
@@ -424,8 +445,26 @@ func findFlowlinkPID() (int, error) {
 		}
 	}
 
-	// Fallback: check if current process is running agent
-	// In production, this would use pgrep or similar
+	// Fallback: use pgrep to find flowlink agent process
+	out, err := exec.Command("pgrep", "-f", "flowlink").Output()
+	if err != nil {
+		return 0, fmt.Errorf("not found")
+	}
+
+	// Parse first PID from output
+	lines := bytes.Split(bytes.TrimSpace(out), []byte{'\n'})
+	for _, line := range lines {
+		pid, err := strconv.Atoi(string(bytes.TrimSpace(line)))
+		if err != nil {
+			continue
+		}
+		// Skip our own PID
+		if pid == os.Getpid() {
+			continue
+		}
+		return pid, nil
+	}
+
 	return 0, fmt.Errorf("not found")
 }
 

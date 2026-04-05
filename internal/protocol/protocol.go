@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// CurrentProtocolVersion — текущая версия протокола.
+// При несовместимых изменениях увеличить.
+const CurrentProtocolVersion = 1
+
 // MessageType — тип сообщения в протоколе.
 type MessageType string
 
@@ -76,6 +80,7 @@ const (
 type Message struct {
 	ID        string          `json:"id"`
 	Type      MessageType     `json:"type"`
+	Version   int             `json:"version,omitempty"`       // protocol version (0 = backward compat)
 	AgentID   string          `json:"agent_id,omitempty"`
 	SessionID string          `json:"session_id,omitempty"`
 	Payload   jsonPayload     `json:"payload,omitempty"`
@@ -108,6 +113,7 @@ type ConnectPayload struct {
 	GoVersion  string `json:"go_version,omitempty"`
 	ClientVer  string `json:"client_version"`
 	PublicKey  string `json:"public_key,omitempty"`
+	ClientProtocolVersion int `json:"protocol_version,omitempty"` // client protocol version
 }
 
 // ConnectedPayload — ответ реле на подключение.

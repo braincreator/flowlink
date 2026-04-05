@@ -36,6 +36,7 @@ var ruMessages = map[string]string{
 	CodeAgentLimitExceeded: "Лимит агентов превышен (%d/%d)",
 	CodeAgentPaused:        "Агент на паузе: %s",
 	CodeAgentEmergencyStop: "Экстренная остановка: команды не выполняются",
+	CodeProtocolVersionMismatch: "Несовместимая версия протокола: клиент %d, сервер %d",
 
 	// --- Execution ---
 	CodeExecSuccess:          "Команда выполнена",
@@ -111,8 +112,10 @@ var ruMessages = map[string]string{
 	CodeBackupGlobError:        "Ошибка glob: %v",
 	CodeBackupFileAddError:     "Ошибка добавления в архив: %v",
 	CodeBackupCleanup:          "Очистка бэкапов завершена",
+	CodeBackupChecksumCompute:  "Ошибка вычисления контрольной суммы: %v",
+	CodeBackupChecksumMismatch: "Несовпадение контрольной суммы: ожидалось %s, получено %s",
 
-	// --- Audit ---
+// --- Audit ---
 	CodeAuditDirCreateError:    "Ошибка создания директории audit: %v",
 	CodeAuditFileOpenError:     "Ошибка открытия audit файла: %v",
 	CodeAuditSerializeError:    "Ошибка сериализации entry: %v",
