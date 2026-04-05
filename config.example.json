@@ -1,0 +1,137 @@
+{
+  "_comment_agent": "Агент загружает конфиг из ~/.flowlink/config.json",
+  "_comment_relay": "Реле загружает через --config relay.json",
+
+  "agent_config": {
+    "_comment": "Основные настройки агента",
+
+    "agent_id": "my-server-1",
+    "token": "YOUR_RELAY_TOKEN",
+    "relay_url": "wss://relay.flowmasters.ru/ws",
+    "heartbeat_sec": 30,
+    "label": "production-server",
+    "work_dir": "",
+    "read_only": true,
+    "use_relay_llm": false,
+
+    "sandbox": {
+      "_comment": "Ограничения файловой системы и команд",
+      "allowed_dirs": [],
+      "blocked_patterns": ["rm -rf /*", "mkfs*", "dd if=*", ":(){ :|:& };:"],
+      "max_file_size": 104857600,
+      "max_exec_timeout": 300,
+      "allow_sudo": false
+    },
+
+    "approval": {
+      "_comment": "auto — выполнять всё, soft_ask — уведомлять, hard_ask — ждать подтверждения",
+      "mode": "auto",
+      "soft_ask_notify": true,
+      "hard_ask_timeout_sec": 3600,
+      "max_retries": 3
+    },
+
+    "backup": {
+      "_comment": "Автоматические бэкапы перед деструктивными операциями",
+      "enabled": true,
+      "max_snapshots": 50,
+      "max_total_size": 5368709120,
+      "retention_days": 7,
+      "backup_dir": "~/.flowlink/backups",
+      "schedule_interval": ""
+    },
+
+    "kill_switch": {
+      "_comment": "Автоматическая остановка при превышении порогов",
+      "disk_threshold": 90.0,
+      "cpu_threshold": 95.0,
+      "cpu_threshold_sec": 300
+    },
+
+    "e2ee": {
+      "_comment": "Сквозное шифрование (всегда включено)",
+      "enabled": true,
+      "auto_rotate": true
+    },
+
+    "payment": {
+      "_comment": "Приём платежей через Точка Банк",
+      "provider": "",
+      "tochka_client_id": "",
+      "tochka_secret": "",
+      "tochka_account_id": "",
+      "webhook_url": "",
+      "webhook_secret": ""
+    },
+
+    "autoscale": {
+      "_comment": "Автомасштабирование через Timeweb Cloud",
+      "enabled": false,
+      "provider": "timeweb",
+      "timeweb_token": "",
+      "min_servers": 1,
+      "max_servers": 5,
+      "scale_up_at": 10.0,
+      "scale_down_at": 3.0,
+      "cooldown_minutes": 10,
+      "server_cpu": 1,
+      "server_ram": 1024,
+      "server_disk": 10,
+      "server_location": "ru-1"
+    }
+  },
+
+  "relay_config": {
+    "_comment": "Настройки центрального relay-сервера (VPS)",
+
+    "wss_addr": ":8443",
+    "api_addr": ":8080",
+    "tls_mode": "",
+    "tls_cert": "",
+    "tls_key": "",
+    "tls_domain": "",
+    "tls_cache": "",
+
+    "api_token": "CHANGE_ME_TO_RANDOM_STRING",
+    "allowed_tokens": {
+      "my-agent-1": "description or client name"
+    },
+
+    "llm_backends": [
+      {
+        "_comment": "LLM провайдеры для агентов",
+        "name": "openai",
+        "url": "https://api.openai.com/v1",
+        "api_key": "",
+        "priority": 1,
+        "provider": "openai"
+      }
+    ],
+
+    "heartbeat_timeout_sec": 90,
+    "max_agents": 100,
+
+    "telegram_bot": {
+      "_comment": "Уведомления через Telegram бот",
+      "token": "",
+      "allowed_ids": [],
+      "notify_on": ["agent_connect", "agent_disconnect", "error"]
+    },
+
+    "audit_hmac_secret": "",
+    "rate_limit_per_min": 30,
+    "rate_limit_per_hour": 200,
+    "integration_url": "",
+    "integration_token": "",
+    "cors_origins": ["*"],
+
+    "backup": {
+      "enabled": true,
+      "max_snapshots": 50,
+      "max_total_size": 5368709120,
+      "retention_days": 7,
+      "backup_dir": "~/.flowlink/backups",
+      "schedule_interval": ""
+    }
+  }
+}

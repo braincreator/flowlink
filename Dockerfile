@@ -1,7 +1,7 @@
 # ============================================================
-# Stage 1: Builder
+# Stage 1: Builder (multi-arch aware)
 # ============================================================
-FROM golang:1.22-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
@@ -14,9 +14,11 @@ RUN go mod download
 # Copy source
 COPY . .
 
-# Build for linux/amd64
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+# Resolve target platform from Docker buildx
+ARG TARGETOS
+ARG TARGETARCH
+
+# Build for the target platform
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-s -w -extldflags '-static'" \
     -o /build/flowlink-relay ./cmd/relay

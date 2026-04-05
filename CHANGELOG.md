@@ -1,3 +1,31 @@
+## [0.3.1] - 2026-04-05
+
+### 🔧 Improvements
+- Protocol versioning + version negotiation on connect
+- Backup SHA-256 checksum verification
+- Periodic backup scheduling (configurable interval)
+- MCP tools: flowlink_backup_list, flowlink_backup_delete
+- Public Delete() API for backups
+- HealthChecker uses pkg/version instead of hardcoded value
+- CORS defaults to wildcard
+- Dashboard backup engine reads from config
+- PID finder uses pgrep
+
+---
+
+## [0.3.0] - 2026-04-05
+
+### 🖥️ Dashboard
+- Backup management (create/restore/delete)
+- Approval queue (approve/reject)
+- Enhanced settings (storage, backup config, CORS)
+
+### ⚙️ Backend
+- 11 new DataProvider methods + API endpoints
+- Relay-side BackupEngine integration
+
+---
+
 ## [0.2.0] - 2026-04-03
 
 **Security & Encryption — major release.**

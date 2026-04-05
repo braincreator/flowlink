@@ -70,10 +70,12 @@ cd flowlink
 make build
 
 # Реле (на VPS)
-./bin/flowlink-relay -config relay.yaml
+# Реле (на VPS)
+./bin/flowlink-relay --config relay.json
 
 # Агент (на клиенте)
-./bin/flowlink -config agent.yaml
+# Агент (на клиенте)
+./bin/flowlink --config agent.json
 ```
 
 ---
@@ -315,79 +317,64 @@ FlowLink использует модель **доверия при первом 
 flowlink-agent setup --relay wss://your-relay.com --token YOUR_TOKEN
 ```
 
-### Agent — `~/.flowlink/config.yaml`
+### Agent — `~/.flowlink/config.json`
 
-```yaml
-# Идентификация
-agent_id: "auto-generated"
-token: "pairwise-token-from-relay"
-relay_url: "wss://relay.example.com/ws"
-
-# Настройки
-heartbeat_sec: 30
-label: "production-server-1"
-work_dir: "/home/deploy"
-
-# Sandbox — ограничения
-sandbox:
-  allowed_dirs:
-    - "/home/deploy"
-    - "/var/www"
-  blocked_patterns:
-    - "rm -rf /*"
-    - "mkfs.*"
-    - "dd if=*"
-    - ":(){ :|:& };:"
-  max_file_size: 104857600   # 100 MB
-  max_exec_timeout: 300       # 5 мин
-  allow_sudo: false
-
-# Approval — подтверждение команд
-approval:
-  mode: "soft_ask"            # auto | soft_ask | hard_ask
-  soft_ask_notify: true
-  hard_ask_timeout_sec: 3600
-  max_retries: 3
-
-# Backup — резервное копирование
-backup:
-  enabled: true
-  max_snapshots: 50
-  max_total_size: 5368709120  # 5 GB
-  retention_days: 7
-  backup_dir: "~/.flowlink/backups"
+```json
+{
+  "agent_id": "auto-generated",
+  "token": "pairwise-token-from-relay",
+  "relay_url": "wss://relay.example.com/ws",
+  "heartbeat_sec": 30,
+  "label": "production-server-1",
+  "work_dir": "/home/deploy",
+  "sandbox": {
+    "allowed_dirs": ["/home/deploy", "/var/www"],
+    "blocked_patterns": ["rm -rf /*", "mkfs.*", "dd if=*", ":(){ :|:& };:"],
+    "max_file_size": 104857600,
+    "max_exec_timeout": 300,
+    "allow_sudo": false
+  },
+  "approval": {
+    "mode": "soft_ask",
+    "soft_ask_notify": true,
+    "hard_ask_timeout_sec": 3600,
+    "max_retries": 3
+  },
+  "backup": {
+    "enabled": true,
+    "max_snapshots": 50,
+    "max_total_size": 5368709120,
+    "retention_days": 7,
+    "backup_dir": "~/.flowlink/backups"
+  }
+}
 ```
 
-### Relay — `relay.yaml`
+### Relay — `relay.json`
 
-```yaml
-# Слушатели
-wss_addr: ":8443"
-api_addr: ":8080"
-
-# TLS
-tls_mode: "letsencrypt"       # self-signed | letsencrypt | manual
-tls_domain: "relay.example.com"
-tls_cache: "/var/lib/flowlink/tls-cache"
-
-# Авторизация
-api_token: "your-secret-api-token"
-
-# Multi-tenancy
-data_dir: "/var/lib/flowlink"
-
-# Rate limiting
-rate_limit_rpm: 60            # запросов в минуту
+```json
+{
+  "wss_addr": ":8443",
+  "api_addr": ":8080",
+  "tls_mode": "letsencrypt",
+  "tls_domain": "relay.example.com",
+  "tls_cache": "/var/lib/flowlink/tls-cache",
+  "api_token": "your-secret-api-token",
+  "data_dir": "/var/lib/flowlink",
+  "rate_limit_rpm": 60
+}
 ```
 
 ### Конфигурация E2EE
 
-```yaml
-# ~/.flowlink/config.yaml — секция E2EE
-e2ee:
-  enabled: true               # Включить сквозное шифрование
-  auto_rotate: false           # Авто-ротация ключей каждые 30 дней
-  key_dir: "~/.flowlink"      # Директория для хранения ключей
+```json
+// ~/.flowlink/config.json — секция E2EE
+{
+  "e2ee": {
+    "enabled": true,
+    "auto_rotate": false
+  }
+}
 ```
 
 ---
