@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/crypto/hkdf"
 	"io"
 	"os"
 	"path/filepath"
@@ -262,13 +263,17 @@ func SharedSecret(privateKey, peerPublicKey []byte) ([]byte, error) {
 }
 
 // DeriveKey — выводит AES-256 ключ из shared secret + context.
-// HKDF-like: SHA-256(shared_secret || context || keyID)
+// HKDF (Extract + Expand) по NIST SP 800-56C.
+// salt=nil — ECDH shared secret уже криптографически случайный.
 func DeriveKey(sharedSecret []byte, context string, keyID string) []byte {
-	h := sha256.New()
-	h.Write(sharedSecret)
-	h.Write([]byte(context))
-	h.Write([]byte(keyID))
-	return h.Sum(nil) // 32 bytes = AES-256
+	info := append([]byte(context), []byte(keyID)...)
+	reader := hkdf.New(sha256.New, sharedSecret, nil, info)
+	key := make([]byte, AESKeySize) // 32 bytes = AES-256
+	if _, err := io.ReadFull(reader, key); err != nil {
+		// Не должно происходить при корректном input
+		panic(fmt.Sprintf("hkdf: %v", err))
+	}
+	return key
 }
 
 // ═══════════════════════════════════════════════════════════

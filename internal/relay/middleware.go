@@ -5,6 +5,7 @@ package relay
 import (
 	"github.com/braincreator/flowlink/internal/protocol"
 	"bufio"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -88,12 +89,9 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 				return
 			}
 
-			// Получаем токен из заголовка или query param
-		authHeader := r.Header.Get("Authorization")
+			// Получаем токен из заголовка
+			authHeader := r.Header.Get("Authorization")
 			token := authHeader
-			if token == "" {
-				token = r.URL.Query().Get("token")
-			}
 			if token == "" {
 				writeAuthError(w, protocol.CodeTokenMissing, http.StatusUnauthorized)
 				return
@@ -148,8 +146,8 @@ func AuthMiddleware(cfg AuthMiddlewareConfig) Middleware {
 				}
 			}
 
-			// Вариант 2: Проверка статического токена из конфига
-			if cfg.StaticToken != "" && accessToken == cfg.StaticToken {
+		// Вариант 2: Проверка статического токена из конфига (constant-time)
+		if cfg.StaticToken != "" && subtle.ConstantTimeCompare([]byte(accessToken), []byte(cfg.StaticToken)) == 1 {
 				r.Header.Set("X-Client-ID", "static-client")
 				next.ServeHTTP(w, r)
 				return
