@@ -1,6 +1,20 @@
-# FlowLink — Remote Agent Relay
+# FlowLink — AI Agent Relay & Management Platform
 
-⚡ Управляйте удалёнными серверами через WebSocket реле. Подключите агент — получайте доступ к консоли, файлам, системной информации.
+⚡ Управляйте AI-агентами через WebSocket реле. Relay, бэкапы, дашборд, LLM-прокси, MCP.
+
+> **Self-hosted — бесплатно навсегда.** Cloud и Enterprise — [flowlink.flow-masters.ru](https://flowlink.flow-masters.ru)
+
+## 📜 Лицензия
+
+FlowLink распространяется под **[Business Source License 1.1 (BSL)](LICENSE)**.
+
+| Использование | Разрешено? |
+|---------------|------------|
+| Self-hosted (бесплатно) | ✅ Навсегда |
+| Коммерческое использование (self-hosted) | ✅ Да |
+| Модификация | ✅ С сохранением лицензии |
+| Конкурентный SaaS/Cloud на базе FlowLink | ❌ Запрещено |
+| Конвертация в open source | 5 апреля 2029 (GPL-3.0) |
 
 ## Быстрый старт (5 минут)
 
