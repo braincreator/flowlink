@@ -1045,7 +1045,7 @@ func (r *Relay) mcpApprove(w http.ResponseWriter, id any, args map[string]any) {
 		return
 	}
 
-	resp, err := r.sendAndWait(ac, "approve", map[string]any{
+	_, err = r.sendAndWait(ac, "approve", map[string]any{
 		"request_id": requestID,
 		"approved":   approved,
 	}, 10*time.Second)

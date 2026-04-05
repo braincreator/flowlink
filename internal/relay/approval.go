@@ -2,6 +2,7 @@
 package relay
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -265,7 +266,13 @@ func (aq *ApprovalQueue) load() {
 }
 
 func generateApprovalID(agentID string) string {
-	return fmt.Sprintf("apr_%s_%d", agentID[:min(8, len(agentID))], time.Now().UnixNano())
+	return fmt.Sprintf("apr_%s_%d_%d", agentID[:min(8, len(agentID))], time.Now().UnixNano(), cryptoRandInt())
+}
+
+func cryptoRandInt() int {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return int(b[0])<<24 | int(b[1])<<16 | int(b[2])<<8 | int(b[3])
 }
 
 func sortRequests(reqs []*ApprovalRequest) {

@@ -179,8 +179,8 @@ func TestIntegrationMCPFlow(t *testing.T) {
 	}
 
 	tools := result2["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 8 {
-		t.Errorf("ожидали 8 инструментов, получили %d", len(tools))
+	if len(tools) != 15 {
+		t.Errorf("ожидали 15 инструментов, получили %d", len(tools))
 	}
 
 	// 3. tools/call flowlink_agents → 1 агент

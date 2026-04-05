@@ -1413,33 +1413,29 @@ func (r *Relay) handleBackupCreate(w http.ResponseWriter, req *http.Request) {
 
 	// Billing: проверяем лимиты перед созданием бэкапа
 	clientID := getClientID(req)
-	if clientID == "" {
-		writeError(w, http.StatusUnauthorized, protocol.CodeUnauthorized)
-		return
-	}
 
-	client, ok := r.registry.GetClient(clientID)
-	if !ok {
-		writeError(w, http.StatusNotFound, protocol.CodeClientNotFound)
-		return
-	}
+	// Billing: проверяем лимиты только если клиент зарегистрирован (Cloud SaaS).
+	// Self-hosted режим: клиент не в registry → пропускаем billing checks.
+	if clientID != "" {
+		if client, ok := r.registry.GetClient(clientID); ok {
+			// Проверяем лимит бэкапов
+			check := r.usage.CheckLimit(clientID, billing.ResourceBackups, client.Plan)
+			if !check.CanProceed {
+				upsellMsg := fmt.Sprintf("BACKUP_LIMIT_REACHED: Лимит бэкапов исчерпан (%d/%d). %s",
+					check.Used, check.Limit, getUpsellMessage(client.Plan))
+				writeError(w, http.StatusPaymentRequired, upsellMsg)
+				return
+			}
 
-	// Проверяем лимит бэкапов
-	check := r.usage.CheckLimit(clientID, billing.ResourceBackups, client.Plan)
-	if !check.CanProceed {
-		upsellMsg := fmt.Sprintf("BACKUP_LIMIT_REACHED: Лимит бэкапов исчерпан (%d/%d). %s",
-			check.Used, check.Limit, getUpsellMessage(client.Plan))
-		writeError(w, http.StatusPaymentRequired, upsellMsg)
-		return
-	}
-
-	// Проверяем лимит хранилища (если знаем размер)
-	storageCheck := r.usage.CheckLimit(clientID, billing.ResourceStorage, client.Plan)
-	if !storageCheck.CanProceed {
-		upsellMsg := fmt.Sprintf("STORAGE_LIMIT_REACHED: Лимит хранилища исчерпан (%d/%d bytes). %s",
-			storageCheck.Used, storageCheck.Limit, getUpsellMessage(client.Plan))
-		writeError(w, http.StatusPaymentRequired, upsellMsg)
-		return
+			// Проверяем лимит хранилища (если знаем размер)
+			storageCheck := r.usage.CheckLimit(clientID, billing.ResourceStorage, client.Plan)
+			if !storageCheck.CanProceed {
+				upsellMsg := fmt.Sprintf("STORAGE_LIMIT_REACHED: Лимит хранилища исчерпан (%d/%d bytes). %s",
+					storageCheck.Used, storageCheck.Limit, getUpsellMessage(client.Plan))
+				writeError(w, http.StatusPaymentRequired, upsellMsg)
+				return
+			}
+		}
 	}
 
 	agent, ok := r.pool.Get(body.AgentID)
@@ -1589,6 +1585,14 @@ func (r *Relay) handleBackupOperations(w http.ResponseWriter, req *http.Request)
 			writeErrorCustom(w, http.StatusBadGateway, protocol.CodeAgentWriteFailed, err.Error())
 			return
 		}
+
+		// Декрементируем счётчик бэкапов (Cloud SaaS)
+		if clientID := getClientID(req); clientID != "" {
+			if _, ok := r.registry.GetClient(clientID); ok {
+				r.usage.DecrementBackups(clientID)
+			}
+		}
+
 		writeJSON(w, map[string]string{
 			"status":     "sent",
 			"request_id":  requestID,
