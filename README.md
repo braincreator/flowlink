@@ -143,6 +143,8 @@ GET /api/v1/events?token=<token>
                      └─────────────┘
 ```
 
+**Полная архитектура:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — все модули, протоколы, конфигурация.
+
 ## Конфигурация
 
 `~/.flowlink/relay.json`:

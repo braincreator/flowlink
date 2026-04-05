@@ -16,6 +16,10 @@
 │  │  │ Approver │  │ Skill    │  │ Task     │  │ RemoteLLM    │  │  │
 │  │  │ V2       │  │ Store    │  │ Manager  │  │              │  │  │
 │  │  └──────────┘  └──────────┘  └──────────┘  └──────────────┘  │  │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐                   │  │
+│  │  │ Device   │  │ Crypto   │  │ Health   │                   │  │
+│  │  │ Pairing  │  │ (E2EE)   │  │ Monitor  │                   │  │
+│  │  └──────────┘  └──────────┘  └──────────┘                   │  │
 │  └──────────────────────────┬─────────────────────────────────────┘  │
 └─────────────────────────────┼────────────────────────────────────────┘
                               │ WSS (outbound)
@@ -25,16 +29,21 @@
 │                                                                      │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐│
 │  │ Agent    │  │ Auth     │  │ Rate     │  │ Audit                ││
-│  │ Pool     │  │ Manager  │  │ Limiter  │  │ Logger               ││
+│  │ Pool     │  │ Manager  │  │ Limiter  │  │ Logger (HMAC)        ││
 │  └──────────┘  └──────────┘  └──────────┘  └──────────────────────┘│
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐│
 │  │ LLM      │  │ Event    │  │ Registry │  │ Billing              ││
 │  │ Proxy    │  │ Bus      │  │ (Multi-  │  │ (Plans, Usage,       ││
 │  │          │  │ (SSE)    │  │  tenancy)│  │  Invoices)           ││
 │  └──────────┘  └──────────┘  └──────────┘  └──────────────────────┘│
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐│
+│  │ Device   │  │ Health   │  │ Integration│ │ Nginx               ││
+│  │ Trust    │  │ Monitor  │  │ (Autoscale│ │ Proxy               ││
+│  │          │  │          │  │  Webhook) │ │                     ││
+│  └──────────┘  └──────────┘  └──────────┘  └──────────────────────┘│
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │                    HTTP API + MCP Server                     │   │
-│  │                    + Web Dashboard                           │   │
+│  │                    + Web Dashboard (i18n)                    │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -44,14 +53,100 @@
 ```
 internal/
 ├── agent/          # Agent daemon: executor, sandbox, approval, backup, kill switch
-├── billing/        # Plans, usage tracking, invoices, payments
+├── audit/          # HMAC audit verification
+├── billing/        # Plans, usage tracking, invoices, payments (SBP, T-Банк, Точка)
 ├── config/         # Configuration loading (agent + relay)
-├── dashboard/      # Web Dashboard SPA (embedded)
-├── protocol/       # WebSocket message types and serialization
-├── relay/          # Relay server: WSS, HTTP API, MCP, auth, audit, registry
-├── tgbot/          # Telegram Bot (long polling)
+├── crypto/         # E2EE: X25519 key exchange, AES-256-GCM encryption
+├── dashboard/      # Web Dashboard SPA (embedded, i18n: RU/EN)
+├── devices/        # Device trust, pairing protocol, device approval flow
+├── health/         # Health monitoring, readiness/liveness checks
+├── integration/    # Autoscale, webhooks, notifier, provisioner
+├── nginx/          # Nginx reverse proxy integration
+├── protocol/       # WebSocket message types, serialization, i18n (RU/EN)
+├── relay/          # Relay server: WSS, HTTP API, MCP, auth, audit, registry, LLM proxy
+├── tgbot/          # Telegram Bot (long polling, payment handlers)
 └── transport/      # WebSocket transport layer
 ```
+
+## Core Modules
+
+### Devices Module (`internal/devices/`)
+
+Device trust and pairing system for secure agent authentication.
+
+**Components:**
+- `devices.go` — Device registry, trust management
+- `pairing.go` — Device pairing protocol (QR code, manual approval)
+
+**Flow:**
+```
+1. Agent registers → generates device key pair
+2. Dashboard shows QR code → User scans
+3. User approves device → Device marked as trusted
+4. Future connections: Device authenticated by key
+```
+
+### Health Module (`internal/health/`)
+
+Health monitoring and readiness checks.
+
+**Endpoints:**
+- `GET /health` — Liveness probe (service alive)
+- `GET /ready` — Readiness probe (service ready to accept traffic)
+
+**Metrics:**
+- Relay uptime
+- Connected agents count
+- Active sessions
+- Memory usage
+
+### Integration Module (`internal/integration/`)
+
+Autoscale, webhooks, and notification system.
+
+**Components:**
+- `manager.go` — Integration manager (webhook registration)
+- `notifier.go` — Event notifications (email, Telegram, webhook)
+- `provisioner.go` — Auto-provisioning agents
+- `billing_autoscale.go` — Auto-scale based on billing plan
+- `webhook_handler.go` — Webhook endpoint handler
+
+**Autoscale Flow:**
+```
+1. Client exceeds plan limits
+2. Billing system triggers autoscale
+3. Provisioner spins up new relay instance
+4. Load balancer adds to pool
+5. Client notified
+```
+
+### Crypto Module (`internal/crypto/`)
+
+End-to-end encryption for sensitive data.
+
+**Algorithms:**
+- **Key Exchange:** X25519 (Curve25519 ECDH)
+- **Encryption:** AES-256-GCM (AEAD)
+- **Key Derivation:** HKDF-SHA256
+
+**Use Cases:**
+- Encrypt credentials in config
+- Secure backup snapshots
+- Protect sensitive audit logs
+
+### Audit Module (`internal/audit/`)
+
+HMAC-based audit log verification.
+
+**Purpose:**
+- Detect tampering of audit logs
+- Verify log integrity
+- Compliance (SOX, PCI-DSS)
+
+**Implementation:**
+- Each log entry signed with HMAC-SHA256
+- Chain hash (previous entry hash included)
+- Verification endpoint
 
 ## WebSocket Protocol
 
@@ -131,6 +226,22 @@ All messages are JSON-encoded. Agents connect outbound (WSS) to the relay, which
 | `skill_list` | Agent → Relay | List installed skills |
 | `skill_delete` | Relay → Agent | Remove skill |
 
+#### Device Pairing
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `device_register` | Agent → Relay | Register device with public key |
+| `device_qr` | Relay → Agent | QR code for pairing |
+| `device_approve` | Agent → Relay | User approved device |
+| `device_trust` | Relay → Agent | Device marked as trusted |
+
+#### Health Checks
+
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `health_ping` | Relay → Agent | Health check request |
+| `health_pong` | Agent → Relay | Health check response |
+
 #### LLM Proxy
 
 | Type | Direction | Description |
@@ -188,6 +299,21 @@ backup:
   max_total_size: 5368709120   # 5 GB
   retention_days: 7
   backup_dir: "~/.flowlink/backups"
+
+devices:
+  pairing_timeout_sec: 300      # 5 minutes
+  max_devices: 10
+  trust_duration_days: 365      # 1 year
+
+health:
+  enabled: true
+  check_interval_sec: 30
+  unhealthy_threshold: 3
+
+crypto:
+  enabled: true
+  key_rotation_days: 90
+  backup_encryption: true
 ```
 
 ### Relay Config (`relay.yaml`)
@@ -206,6 +332,23 @@ api_token: "your-secret-token"
 
 data_dir: "/var/lib/flowlink"
 rate_limit_rpm: 60
+
+devices:
+  enabled: true
+  pairing_url: "https://relay.example.com/pair"
+
+health:
+  enabled: true
+  metrics_port: 9090
+
+integration:
+  autoscale:
+    enabled: false
+    max_instances: 5
+    scale_threshold: 80      # CPU %
+  webhooks:
+    enabled: false
+    endpoint: "https://api.example.com/webhook"
 ```
 
 ## Data Storage
@@ -220,11 +363,19 @@ FlowLink uses file-based storage (no external database required).
 ├── agents/                    # Agent registry
 │   ├── {agent_id}.json        # Agent metadata + token
 │   └── ...
+├── devices/                   # Device registry
+│   ├── {device_id}.json       # Device keys + trust status
+│   └── ...
 ├── audit/                     # Audit logs (JSONL)
 │   └── audit-2026-03-27.jsonl
 ├── billing/                   # Billing data
 │   ├── usage-{client_id}.jsonl
 │   └── invoices/
+├── health/                    # Health check history
+│   └── health-{date}.jsonl
+├── integration/               # Integration configs
+│   ├── webhooks.json
+│   └── autoscale.json
 └── tls-cache/                 # Let's Encrypt certificates
 ```
 
