@@ -46,9 +46,12 @@ type Relay struct {
 	rateLimit   *RateLimiter
 	audit       *AuditLogger
 	registry    *Registry            // реестр клиентов и агентов (multi-tenancy)
-	planStore   *billing.PlanStore   // тарифные планы
-	usage       *billing.UsageTracker
-	invoices    *billing.InvoiceStore
+	planStore      *billing.PlanStore      // тарифные планы
+	usage          *billing.UsageTracker
+	invoices       *billing.InvoiceStore
+	subscriptions  *billing.SubscriptionStore // подписки
+	webhookHandler *billing.WebhookHandler   // webhook handler for Tochka
+	webhookSecret  string                    // HMAC secret for webhook verification
 	eventBus      *EventBus        // шина событий для SSE-уведомлений
 	approvalQueue *ApprovalQueue  // очередь запросов на подтверждение
 	healthChecker  *health.HealthChecker // мониторинг здоровья компонентов
@@ -187,6 +190,12 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 	usageTracker := billing.NewUsageTracker(billingDir, planStore, logger)
 	invoiceStore := billing.NewInvoiceStore(billingDir, planStore, logger)
 
+	// Инициализируем Tochka клиент и SubscriptionStore
+	tochkaClient := billing.NewTochkaClientFromEnv(logger)
+	subStore := billing.NewSubscriptionStore(billingDir, planStore, tochkaClient, logger)
+	webhookSecret := os.Getenv("TOCHKA_WEBHOOK_SECRET")
+	webhookHandler := billing.NewWebhookHandler(webhookSecret, invoiceStore, subStore, tochkaClient, logger)
+
 	// Инициализируем health checker
 	hc := health.NewHealthChecker("0.1.0")
 	hc.SetWSSAddr(cfg.WSSAddr)
@@ -203,8 +212,11 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		eventBus:      NewEventBus(logger),
 		approvalQueue: NewApprovalQueue(NewEventBus(logger), logger, filepath.Join(os.Getenv("HOME"), ".flowlink")),
 		planStore:     planStore,
-		usage:     usageTracker,
-		invoices:  invoiceStore,
+		usage:         usageTracker,
+		invoices:      invoiceStore,
+		subscriptions: subStore,
+		webhookHandler: webhookHandler,
+		webhookSecret:  webhookSecret,
 		healthChecker:  hc,
 
 		// Integration proxy
@@ -305,6 +317,7 @@ func (r *Relay) Start() error {
 	apiMux.HandleFunc("/api/v1/billing/invoices", r.handleBillingInvoices)
 	apiMux.HandleFunc("/api/v1/billing/invoices/", r.handleBillingInvoicePay)
 	apiMux.HandleFunc("/api/v1/billing/payment-methods", r.handleBillingPaymentMethods)
+	apiMux.HandleFunc("/api/v1/billing/webhook", r.handleBillingWebhook) // POST — Tochka webhook
 
 	// Nginx config generator endpoint
 	apiMux.HandleFunc("/api/v1/nginx-config", r.handleNginxConfig)
@@ -334,13 +347,13 @@ func (r *Relay) Start() error {
 		AuthManager: r.auth,
 		StaticToken: r.cfg.APIToken,
 		Logger:      r.logger,
-		SkipPaths:   []string{"/dashboard/", "/dashboard"},
+		SkipPaths:   []string{"/dashboard/", "/dashboard", "/api/v1/billing/webhook"},
 	}
 
 	handler := Chain(
 		RecoveryMiddleware(r.logger),
 		RequestLoggerMiddleware(r.logger),
-		CORSMiddleware(nil, r.logger), // nil = разрешаем все origins
+		CORSMiddleware(nil, r.logger), // nil = deny all (configure allowed origins for production)
 		RateLimitMiddleware(r.rateLimit, r.logger),
 		AuthMiddleware(authCfg),
 	)(apiMux)
@@ -376,6 +389,9 @@ func (r *Relay) Start() error {
 	// Контекст с graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Запускаем фоновый checker продления подписок
+	go billing.StartRenewalTicker(ctx, r.subscriptions, r.logger)
 
 	// WSS сервер
 	wssServer := &http.Server{Addr: r.cfg.WSSAddr}
@@ -2149,6 +2165,16 @@ func (r *Relay) handleBillingPaymentMethods(w http.ResponseWriter, req *http.Req
 		"payment_methods": methods,
 		"count":           len(methods),
 	})
+}
+
+// handleBillingWebhook — POST /api/v1/billing/webhook — Tochka payment webhook.
+// Пропускает авторизацию (подпись HMAC-SHA256 вместо JWT).
+func (r *Relay) handleBillingWebhook(w http.ResponseWriter, req *http.Request) {
+	if r.webhookHandler == nil {
+		writeError(w, http.StatusNotImplemented, protocol.CodeUnknownError)
+		return
+	}
+	r.webhookHandler.HandleWebhook(w, req)
 }
 
 func currentBillingMonth() string {

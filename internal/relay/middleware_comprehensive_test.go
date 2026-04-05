@@ -286,10 +286,10 @@ func TestCORSMiddleware(t *testing.T) {
 		expectAllow     bool
 	}{
 		{
-			name:           "allow all",
-			allowedOrigins: nil, // nil = allow all
+			name:           "deny all (no origins configured)",
+			allowedOrigins: nil, // nil = deny all (secure default)
 			requestOrigin:  "https://example.com",
-			expectAllow:    true,
+			expectAllow:    false,
 		},
 		{
 			name:           "specific origin allowed",
@@ -339,7 +339,7 @@ func TestCORSMiddleware_Preflight(t *testing.T) {
 		t.Error("final handler should not be called for preflight")
 	})
 
-	handler := CORSMiddleware(nil, logger)(finalHandler)
+	handler := CORSMiddleware([]string{"https://example.com"}, logger)(finalHandler)
 
 	req := httptest.NewRequest(http.MethodOptions, "/", nil)
 	req.Header.Set("Origin", "https://example.com")

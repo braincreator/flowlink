@@ -19,6 +19,16 @@ const (
 	HMACField = "hmac"
 )
 
+// VerifyMode определяет режим верификации HMAC.
+type VerifyMode int
+
+const (
+	// VerifyModeStrict — отклоняет записи без HMAC.
+	VerifyModeStrict VerifyMode = iota
+	// VerifyModeLegacy — пропускает записи без HMAC (для обратной совместимости).
+	VerifyModeLegacy
+)
+
 // SignEntry — вычисляет HMAC-SHA256 подпись для entry.
 // HMAC вычисляется от JSON-представления entry без поля "hmac".
 func SignEntry(entry map[string]interface{}, secret []byte) string {
@@ -43,13 +53,14 @@ func SignEntry(entry map[string]interface{}, secret []byte) string {
 }
 
 // VerifyEntry — проверяет HMAC-SHA256 подпись entry.
-// Возвращает true если подпись валидна или отсутствует (legacy записи).
-func VerifyEntry(entry map[string]interface{}, secret []byte) bool {
+// В VerifyModeStrict отклоняет записи без HMAC.
+// В VerifyModeLegacy пропускает записи без HMAC (legacy записи).
+func VerifyEntry(entry map[string]interface{}, secret []byte, mode VerifyMode) bool {
 	// Получаем сохранённый HMAC
 	storedHMAC, ok := entry[HMACField]
 	if !ok {
-		// Legacy запись без HMAC — считаем валидной
-		return true
+		// Legacy запись без HMAC — считаем валидной только в режиме legacy
+		return mode == VerifyModeLegacy
 	}
 
 	hmacStr, ok := storedHMAC.(string)
@@ -123,7 +134,7 @@ type VerifyResult struct {
 
 // VerifyAllEntries — проверяет все записи в файле и возвращает результаты.
 // Возвращает записи с флагом tampered: true для невалидных.
-func VerifyAllEntries(entries []map[string]interface{}, secret []byte) []VerifyResult {
+func VerifyAllEntries(entries []map[string]interface{}, secret []byte, mode VerifyMode) []VerifyResult {
 	results := make([]VerifyResult, 0, len(entries))
 
 	for _, entry := range entries {
@@ -140,7 +151,7 @@ func VerifyAllEntries(entries []map[string]interface{}, secret []byte) []VerifyR
 		}
 
 		// Проверяем HMAC
-		if !VerifyEntry(entry, secret) {
+		if !VerifyEntry(entry, secret, mode) {
 			result.Tampered = true
 			result.Error = "HMAC verification failed"
 		} else {

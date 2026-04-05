@@ -636,7 +636,7 @@ func (l *AuditLogger) readFileWithValidation(filename string) ([]AuditEntry, err
 			}
 			entry := l.mapToEntry(rawEntry)
 			// Валидируем HMAC
-			if len(l.hmacSecret) > 0 && !audit.VerifyEntry(rawEntry, l.hmacSecret) {
+			if len(l.hmacSecret) > 0 && !audit.VerifyEntry(rawEntry, l.hmacSecret, audit.VerifyModeLegacy) {
 				entry.Tampered = true
 			}
 			entries = append(entries, entry)
@@ -663,7 +663,7 @@ func (l *AuditLogger) readFileWithValidation(filename string) ([]AuditEntry, err
 		}
 		entry := l.mapToEntry(rawEntry)
 		// Валидируем HMAC
-		if len(l.hmacSecret) > 0 && !audit.VerifyEntry(rawEntry, l.hmacSecret) {
+		if len(l.hmacSecret) > 0 && !audit.VerifyEntry(rawEntry, l.hmacSecret, audit.VerifyModeLegacy) {
 			entry.Tampered = true
 		}
 		entries = append(entries, entry)

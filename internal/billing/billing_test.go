@@ -188,8 +188,8 @@ func TestInvoiceGeneration(t *testing.T) {
 	if inv.Amount != 19 {
 		t.Errorf("сумма = %f, ожидали 19", inv.Amount)
 	}
-	if inv.Currency != "RUB" {
-		t.Errorf("валюта = %s, ожидали RUB", inv.Currency)
+	if inv.Currency != "USD" {
+		t.Errorf("валюта = %s, ожидали USD", inv.Currency)
 	}
 
 	// Получаем по ID

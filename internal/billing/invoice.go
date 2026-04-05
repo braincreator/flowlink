@@ -25,7 +25,7 @@ type Invoice struct {
 	ID          string     `json:"id"`
 	ClientID    string     `json:"client_id"`
 	Amount      float64    `json:"amount"`
-	Currency    string     `json:"currency"` // RUB
+	Currency    string     `json:"currency"` // USD
 	Status      string     `json:"status"`   // pending, paid, overdue, cancelled
 	CreatedAt   time.Time  `json:"created_at"`
 	PaidAt      *time.Time `json:"paid_at,omitempty"`
@@ -90,7 +90,7 @@ func (is *InvoiceStore) GenerateInvoice(clientID, planID string) (*Invoice, erro
 		ID:          clientID + ":" + now.Format("2006-01"),
 		ClientID:    clientID,
 		Amount:      plan.PriceMonthly,
-		Currency:    "RUB",
+		Currency:    "USD",
 		Status:      InvoiceStatusPending,
 		CreatedAt:   now,
 		DueDate:     now.AddDate(0, 0, 7), // 7 дней на оплату

@@ -221,8 +221,10 @@ func CORSMiddleware(allowedOrigins []string, logger *slog.Logger) Middleware {
 		logger = slog.Default()
 	}
 
-	// Если origins пустой — разрешаем все
-	allowAll := len(allowedOrigins) == 0
+	// Если origins пустой — запрещаем все (secure default)
+	if len(allowedOrigins) == 0 {
+		logger.Warn("CORS: no allowed origins configured — all cross-origin requests will be denied")
+	}
 	originMap := make(map[string]bool)
 	for _, origin := range allowedOrigins {
 		originMap[origin] = true
@@ -236,8 +238,8 @@ func CORSMiddleware(allowedOrigins []string, logger *slog.Logger) Middleware {
 				return
 			}
 
-			// Проверяем origin
-			allowed := allowAll || originMap[origin] || originMap["*"]
+			// Проверяем origin (empty origins = deny all)
+			allowed := originMap[origin] || originMap["*"]
 			if !allowed {
 				logger.Debug("CORS: origin не разрешён", "origin", origin)
 				next.ServeHTTP(w, r)

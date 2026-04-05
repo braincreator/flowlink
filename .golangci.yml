@@ -1,0 +1,38 @@
+run:
+  go: "1.22"
+  timeout: 5m
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - gosec
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+
+linters-settings:
+  govet:
+    shadow: false
+  errcheck:
+    check-type-assertions: false
+  gosec:
+    excludes:
+      - G101  # hardcoded credentials (many test files use them)
+      - G404  # weak random (acceptable for non-crypto usage)
+
+issues:
+  exclude-rules:
+    # Exclude some linters from test files
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+    # Exclude errcheck for main packages (entry points)
+    - path: cmd/
+      linters:
+        - errcheck
+  max-issues-per-linter: 50
+  max-same-issues: 10

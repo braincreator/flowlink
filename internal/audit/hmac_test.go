@@ -63,7 +63,7 @@ func TestVerifyEntry_Valid(t *testing.T) {
 	entry["hmac"] = hmac
 
 	// Проверяем
-	if !VerifyEntry(entry, secret) {
+	if !VerifyEntry(entry, secret, VerifyModeLegacy) {
 		t.Error("Valid entry should pass verification")
 	}
 }
@@ -79,8 +79,24 @@ func TestVerifyEntry_LegacyNoHMAC(t *testing.T) {
 	}
 
 	// Должен проходить как валидный (legacy support)
-	if !VerifyEntry(entry, secret) {
-		t.Error("Legacy entry without HMAC should be considered valid")
+	if !VerifyEntry(entry, secret, VerifyModeLegacy) {
+		t.Error("Legacy entry without HMAC should be considered valid in legacy mode")
+	}
+}
+
+func TestVerifyEntry_LegacyNoHMAC_StrictMode(t *testing.T) {
+	secret := []byte("test-secret-key-32-bytes-long-123456")
+
+	// Entry без поля hmac (legacy)
+	entry := map[string]interface{}{
+		"id":        "test-123",
+		"action":    "exec",
+		"timestamp": "2024-01-01T00:00:00Z",
+	}
+
+	// В strict mode — должен быть отклонён
+	if VerifyEntry(entry, secret, VerifyModeStrict) {
+		t.Error("Entry without HMAC should be rejected in strict mode")
 	}
 }
 
@@ -101,7 +117,7 @@ func TestVerifyEntry_TamperedData(t *testing.T) {
 	entry["action"] = "rm -rf /"
 
 	// Проверяем — должно FAIL
-	if VerifyEntry(entry, secret) {
+	if VerifyEntry(entry, secret, VerifyModeStrict) {
 		t.Error("Tampered entry should NOT pass verification")
 	}
 }
@@ -121,7 +137,7 @@ func TestVerifyEntry_WrongSecret(t *testing.T) {
 	entry["hmac"] = hmac
 
 	// Проверяем вторым — должно FAIL
-	if VerifyEntry(entry, secret2) {
+	if VerifyEntry(entry, secret2, VerifyModeStrict) {
 		t.Error("Entry signed with different secret should NOT pass")
 	}
 }
@@ -182,7 +198,7 @@ func TestVerifyAllEntries(t *testing.T) {
 	}
 
 	entries := []map[string]interface{}{validEntry, tamperedEntry, legacyEntry}
-	results := VerifyAllEntries(entries, secret)
+	results := VerifyAllEntries(entries, secret, VerifyModeLegacy)
 
 	if len(results) != 3 {
 		t.Fatalf("Expected 3 results, got %d", len(results))

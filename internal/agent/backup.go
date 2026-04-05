@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/braincreator/flowlink/internal/config"
@@ -52,6 +53,7 @@ type FileChange struct {
 type BackupEngine struct {
 	cfg    config.BackupConfig
 	logger *slog.Logger
+	mu     sync.Mutex // protects metadata read/write
 }
 
 // NewBackupEngine — создаёт новый backup engine.
@@ -106,9 +108,11 @@ func (b *BackupEngine) CreateBefore(paths []string, reason string) (string, erro
 		Filename:    filename,
 	}
 
+	b.mu.Lock()
 	if err := b.saveMetadata(snapshot); err != nil {
 		b.logger.Warn("backup metadata save error", "err", err)
 	}
+	b.mu.Unlock()
 
 	// Очистка старых бэкапов
 	go b.Cleanup()
@@ -209,7 +213,9 @@ func (b *BackupEngine) addToArchive(tarWriter *tar.Writer, path string) (int64, 
 
 // Restore — восстанавливает файлы из снапшота.
 func (b *BackupEngine) Restore(snapshotID string) error {
+	b.mu.Lock()
 	snapshot, err := b.getSnapshot(snapshotID)
+	b.mu.Unlock()
 	if err != nil {
 		return protocol.ErrCause(protocol.CodeBackupSnapshotNotFound, err)
 	}
@@ -280,6 +286,13 @@ func (b *BackupEngine) Restore(snapshotID string) error {
 
 // List — возвращает список всех снапшотов.
 func (b *BackupEngine) List() []Snapshot {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.list()
+}
+
+// list — unlocked version of List.
+func (b *BackupEngine) list() []Snapshot {
 	metadataPath := filepath.Join(b.cfg.BackupDir, "meta.json")
 
 	data, err := os.ReadFile(metadataPath)
@@ -297,7 +310,9 @@ func (b *BackupEngine) List() []Snapshot {
 
 // Diff — сравнивает текущее состояние со снапшотом (опционально).
 func (b *BackupEngine) Diff(snapshotID string) ([]FileChange, error) {
+	b.mu.Lock()
 	snapshot, err := b.getSnapshot(snapshotID)
+	b.mu.Unlock()
 	if err != nil {
 		return nil, protocol.ErrCause(protocol.CodeBackupSnapshotNotFound, err)
 	}
@@ -340,7 +355,14 @@ func (b *BackupEngine) Diff(snapshotID string) ([]FileChange, error) {
 
 // Cleanup — удаляет старые бэкапы согласно политике.
 func (b *BackupEngine) Cleanup() error {
-	snapshots := b.List()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.cleanup()
+}
+
+// cleanup — unlocked version of Cleanup.
+func (b *BackupEngine) cleanup() error {
+	snapshots := b.list()
 	if len(snapshots) == 0 {
 		return nil
 	}
@@ -409,9 +431,9 @@ func (b *BackupEngine) Cleanup() error {
 	return b.saveAllMetadata(keepSnapshots)
 }
 
-// getSnapshot — находит снапшот по ID.
+// getSnapshot — находит снапшот по ID (caller must hold mu or call from locked context).
 func (b *BackupEngine) getSnapshot(snapshotID string) (*Snapshot, error) {
-	snapshots := b.List()
+	snapshots := b.list()
 	for _, snapshot := range snapshots {
 		if snapshot.ID == snapshotID {
 			return &snapshot, nil
@@ -428,9 +450,9 @@ func (b *BackupEngine) deleteSnapshot(snapshot Snapshot) {
 	}
 }
 
-// saveMetadata — добавляет метаданные снапшота.
+// saveMetadata — добавляет метаданные снапшота (caller must hold mu).
 func (b *BackupEngine) saveMetadata(snapshot Snapshot) error {
-	snapshots := b.List()
+	snapshots := b.list()
 	snapshots = append(snapshots, snapshot)
 	return b.saveAllMetadata(snapshots)
 }
