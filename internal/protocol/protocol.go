@@ -66,9 +66,11 @@ const (
 	MsgBackupResponse   MessageType = "backup_response"    // Agent → Relay: backup result
 	MsgBackupList       MessageType = "backup_list"        // Relay → Agent: list snapshots
 	MsgBackupListResp   MessageType = "backup_list_resp"   // Agent → Relay: snapshot list
-	MsgBackupRestore    MessageType = "backup_restore"     // Relay → Agent: restore snapshot
-	MsgBackupDelete     MessageType = "backup_delete"      // Relay → Agent: delete snapshot
-	MsgBackupProgress   MessageType = "backup_progress"    // Agent → Relay: progress %
+	MsgBackupRestore    MessageType = "backup_restore"      // Relay → Agent: restore snapshot
+	MsgBackupRestoreOK  MessageType = "backup_restore_ok"   // Agent → Relay: restore result
+	MsgBackupDelete     MessageType = "backup_delete"       // Relay → Agent: delete snapshot
+	MsgBackupDeleteOK   MessageType = "backup_delete_ok"    // Agent → Relay: delete result
+	MsgBackupProgress   MessageType = "backup_progress"     // Agent → Relay: progress %
 
 	// === Ошибка ===
 	MsgError         MessageType = "error"           // Любой → Любой: ошибка

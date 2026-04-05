@@ -29,6 +29,7 @@ import (
 	"github.com/braincreator/flowlink/internal/config"
 	"github.com/braincreator/flowlink/internal/crypto"
 	"github.com/braincreator/flowlink/internal/dashboard"
+	"github.com/braincreator/flowlink/internal/devices"
 	"github.com/braincreator/flowlink/internal/health"
 	"github.com/braincreator/flowlink/internal/nginx"
 	"github.com/braincreator/flowlink/internal/protocol"
@@ -61,6 +62,9 @@ type Relay struct {
 	// E2EE — end-to-end encryption layer
 	keystore *crypto.KeyStore
 	e2ee     *crypto.E2EELayer
+	// Device management
+	deviceRegistry *devices.DeviceRegistry
+	pairingManager *devices.PairingManager
 
 	// Integration proxy
 	httpClient      *http.Client // HTTP client with 10s timeout
@@ -241,8 +245,18 @@ func NewRelay(cfg *config.RelayConfig) *Relay {
 		logger.Info("E2EE initialized", "key_dir", keysDir)
 	}
 
+	// Device registry and pairing manager for E2EE device management
+	devicesDir := filepath.Join(os.Getenv("HOME"), ".flowlink", "devices")
+	deviceRegistry, err := devices.NewDeviceRegistry(devicesDir)
+	if err != nil {
+		logger.Error("Device registry init failed", "err", err)
+		return nil
+	}
+	r.deviceRegistry = deviceRegistry
+	r.pairingManager = devices.NewPairingManager(deviceRegistry, keystore, r.e2ee)
+	logger.Info("Device registry initialized", "dir", devicesDir)
+
 	// Подключаем адаптеры health checker к реальным компонентам relay
-	hc.SetAgentPool(poolForHealth{pool: r.pool})
 	hc.SetAuthManager(authForHealth{auth: r.auth})
 	hc.SetAuditLogger(auditForHealth{audit: r.audit})
 	hc.SetRegistry(registryForHealth{registry: r.registry})
@@ -324,6 +338,13 @@ func (r *Relay) Start() error {
 
 	// Nginx config generator endpoint
 	apiMux.HandleFunc("/api/v1/nginx-config", r.handleNginxConfig)
+
+	// Device management endpoints (E2EE)
+	apiMux.HandleFunc("/api/v1/devices", r.handleDevicesList)          // GET — список устройств
+	apiMux.HandleFunc("/api/v1/devices/", r.handleDeviceByID)        // GET/DELETE /api/v1/devices/{id}
+	apiMux.HandleFunc("/api/v1/pairing/", r.handlePairingAction)    // POST approve/reject
+	apiMux.HandleFunc("/api/v1/keys", r.handleKeysList)               // GET — список ключей
+	apiMux.HandleFunc("/api/v1/keys/rotate", r.handleKeysRotate)     // POST — ротация ключей
 
 	// Rate Limit endpoints
 	apiMux.HandleFunc("/api/v1/rate-limits", r.handleRateLimits)           // GET — список, POST — сброс статистики
@@ -714,6 +735,34 @@ func (r *Relay) handleAgentWS(w http.ResponseWriter, req *http.Request) {
 			}
 			r.eventBus.Publish(Event{
 				Type:    EventBackupCreated,
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgBackupRestoreOK:
+			// Ответ на запрос восстановления
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    EventBackupRestored,
+				AgentID: msg.AgentID,
+				Data:    payloadData,
+			})
+
+		case protocol.MsgBackupDeleteOK:
+			// Ответ на запрос удаления бэкапа
+			var payloadData map[string]any
+			if msg.Payload != nil {
+				if m, ok := msg.Payload.(map[string]any); ok {
+					payloadData = m
+				}
+			}
+			r.eventBus.Publish(Event{
+				Type:    EventBackupDeleted,
 				AgentID: msg.AgentID,
 				Data:    payloadData,
 			})

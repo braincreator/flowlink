@@ -351,7 +351,9 @@ func TestBackupMessageTypes(t *testing.T) {
 		protocol.MsgBackupList,
 		protocol.MsgBackupListResp,
 		protocol.MsgBackupRestore,
+		protocol.MsgBackupRestoreOK,
 		protocol.MsgBackupDelete,
+		protocol.MsgBackupDeleteOK,
 		protocol.MsgBackupProgress,
 	}
 
@@ -361,7 +363,9 @@ func TestBackupMessageTypes(t *testing.T) {
 		"backup_list",
 		"backup_list_resp",
 		"backup_restore",
+		"backup_restore_ok",
 		"backup_delete",
+		"backup_delete_ok",
 		"backup_progress",
 	}
 

@@ -341,6 +341,11 @@ func (b *Bot) relayPost(path string, payload any) (json.RawMessage, error) {
 	return b.relayRequest("POST", path, payload)
 }
 
+// relayDelete — DELETE-запрос к реле.
+func (b *Bot) relayDelete(path string) (json.RawMessage, error) {
+	return b.relayRequest("DELETE", path, nil)
+}
+
 // relayStreamPost — POST-запрос с потоковым чтением ответа (для exec).
 func (b *Bot) relayStreamPost(path string, payload any, maxBytes int64) (string, error) {
 	data, _ := json.Marshal(payload)

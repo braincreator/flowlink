@@ -611,8 +611,43 @@ func (b *Bot) handlePolicy(chatID int64) {
 
 // handleDevices — список устройств с E2EE статусом.
 func (b *Bot) handleDevices(chatID int64) {
-	// TODO: интегрировать с device registry через relay API
-	b.sendMessage(chatID, "📱 *Устройства*\n\n_Функция будет доступна после подключения device registry._")
+	data, err := b.relayGet("/api/v1/devices")
+	if err != nil {
+	 b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка получения устройств: %v", err))
+    return
+  }
+  var devices []struct {
+    ID        string `json:"id"`
+    Name      string `json:"name"`
+    Status    string `json:"status"`
+    E2EE      bool   `json:"e2ee"`
+    LastSeen string `json:"last_seen_at"`
+    OS        string `json:"os"`
+}
+  if err := json.Unmarshal(data, &devices); err != nil {
+    b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка парсинга: %v", err))
+    return
+  }
+  if len(devices) == 0 {
+    b.sendMessage(chatID, "📱 *Устройства*\n\n_Нет зарегистрированных устройств.")
+    return
+  }
+  var sb strings.Builder
+  sb.WriteString("📱 *Устройства*\n\n")
+    for _, d := range devices {
+    status := "⏳"
+    if d.Status == "approved" {
+      status = "✅"
+    } else if d.Status == "revoked" {
+      status = "🔒"
+    }
+    e2ee := ""
+    if d.E2EE {
+      e2ee = " 🔐"
+    }
+    sb.WriteString(fmt.Sprintf("%s `%s`%s\n", status, d.Name, e2ee))
+    }
+    b.sendMessage(chatID, sb.String())
 }
 
 // handleApproveDevice — одобрение устройства по коду паринга.
@@ -622,8 +657,20 @@ func (b *Bot) handleApproveDevice(chatID int64, code string) {
 		b.sendMessage(chatID, "⚠ Использование: /approve_device `<код>`")
 		return
 	}
-	// TODO: интегрировать с PairingManager через relay API
-	b.sendMessage(chatID, fmt.Sprintf("✅ Устройство с кодом `%s` одобрено.", code))
+	data, err := b.relayPost("/api/v1/pairing/approve/"+code, nil)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
+	var result struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		b.sendMessage(chatID, "❌ Ошибка парсинга")
+		return
+	}
+	b.sendMessage(chatID, fmt.Sprintf("✅ Устройство `%s` одобрено.", result.Name))
 }
 
 // handleRejectDevice — отклонение устройства по коду паринга.
@@ -633,42 +680,123 @@ func (b *Bot) handleRejectDevice(chatID int64, code string) {
 		b.sendMessage(chatID, "⚠ Использование: /reject_device `<код>`")
 		return
 	}
-	// TODO: интегрировать с PairingManager через relay API
+	_, err := b.relayPost("/api/v1/pairing/reject/"+code, nil)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
 	b.sendMessage(chatID, fmt.Sprintf("❌ Устройство с кодом `%s` отклонено.", code))
 }
 
 // handleRevoke — отзыв доступа устройства.
-func (b *Bot) handleRevoke(chatID int64, deviceName string) {
-	deviceName = strings.TrimSpace(deviceName)
-	if deviceName == "" {
-		b.sendMessage(chatID, "⚠ Использование: /revoke `<имя_устройства>`")
+func (b *Bot) handleRevoke(chatID int64, deviceID string) {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		b.sendMessage(chatID, "⚠ Использование: /revoke `<id_устройства>`")
 		return
 	}
-	// TODO: интегрировать с device registry через relay API
-	b.sendMessage(chatID, fmt.Sprintf("🔒 Доступ устройства `%s` отозван.", deviceName))
+	_, err := b.relayDelete("/api/v1/devices/" + deviceID)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
+	b.sendMessage(chatID, fmt.Sprintf("🔒 Доступ устройства `%s` отозван.", deviceID))
 }
 
 // handleKeys — показывает информацию о ключах E2EE.
 func (b *Bot) handleKeys(chatID int64) {
-	// TODO: интегрировать с KeyStore через relay API
-	b.sendMessage(chatID, "🔑 *Ключи E2EE*\n\n_Функция будет доступна после подключения KeyStore._")
+	data, err := b.relayGet("/api/v1/keys")
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
+	var keys []struct {
+		KeyID     string `json:"key_id"`
+		PublicKey string `json:"public_key"`
+		CreatedAt string `json:"created_at"`
+		Active    bool   `json:"active"`
+	}
+	if err := json.Unmarshal(data, &keys); err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка парсинга: %v", err))
+		return
+	}
+	if len(keys) == 0 {
+		b.sendMessage(chatID, "🔑 *Ключи E2EE*\n\n_Нет активных ключей._")
+		return
+	}
+	var sb strings.Builder
+	sb.WriteString("🔑 *Ключи E2EE*\n\n")
+	for _, k := range keys {
+		active := "⏳"
+		if k.Active {
+			active = "✅"
+		}
+		sb.WriteString(fmt.Sprintf("%s `%s`\n   Создан: %s\n", active, k.KeyID[:12], k.CreatedAt))
+	}
+	b.sendMessage(chatID, sb.String())
 }
 
 // handleRotateKeys — ротация ключей E2EE.
 func (b *Bot) handleRotateKeys(chatID int64) {
-	// TODO: интегрировать с KeyStore через relay API
-	b.sendMessage(chatID, "🔄 Ротация ключей запущена. Новые ключи будут использованы для следующих подключений.")
+	data, err := b.relayPost("/api/v1/keys/rotate", nil)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
+	var result struct {
+		KeyID     string `json:"key_id"`
+		PublicKey string `json:"public_key"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		b.sendMessage(chatID, "❌ Ошибка парсинга")
+		return
+	}
+	b.sendMessage(chatID, fmt.Sprintf("🔄 *Ротация ключей завершена*\n\nНовый ключ: `%s`\nСоздан: %s", result.KeyID[:12], result.CreatedAt))
 }
 
 // handleDeviceInfo — подробная информация об устройстве.
-func (b *Bot) handleDeviceInfo(chatID int64, deviceName string) {
-	deviceName = strings.TrimSpace(deviceName)
-	if deviceName == "" {
-		b.sendMessage(chatID, "⚠ Использование: /device_info `<имя_устройства>`")
+func (b *Bot) handleDeviceInfo(chatID int64, deviceID string) {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		b.sendMessage(chatID, "⚠ Использование: /device_info `<id_устройства>`")
 		return
 	}
-	// TODO: интегрировать с device registry через relay API
-	b.sendMessage(chatID, fmt.Sprintf("📱 *Информация об устройстве* `%s`\n\n_Функция будет доступна после подключения device registry._", deviceName))
+	data, err := b.relayGet("/api/v1/devices/" + deviceID)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+		return
+	}
+	var d struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Status    string `json:"status"`
+		E2EE      bool   `json:"e2ee"`
+		LastSeen  string `json:"last_seen_at"`
+		OS        string `json:"os"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(data, &d); err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("❌ Ошибка парсинга: %v", err))
+		return
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📱 *Устройство* `%s`\n\n", d.Name))
+	sb.WriteString(fmt.Sprintf("🆔 ID: `%s`\n", d.ID[:12]))
+	sb.WriteString(fmt.Sprintf("📊 Статус: %s\n", d.Status))
+	if d.E2EE {
+		sb.WriteString("🔐 E2EE: включено\n")
+	}
+	if d.OS != "" {
+		sb.WriteString(fmt.Sprintf("💻 ОС: %s\n", d.OS))
+	}
+	if d.LastSeen != "" {
+		sb.WriteString(fmt.Sprintf("👀 Последняя активность: %s\n", d.LastSeen))
+	}
+	if d.CreatedAt != "" {
+		sb.WriteString(fmt.Sprintf("📅 Создано: %s", d.CreatedAt))
+	}
+	b.sendMessage(chatID, sb.String())
 }
 
 // === Утилиты ===

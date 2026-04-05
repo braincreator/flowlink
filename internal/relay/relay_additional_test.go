@@ -650,7 +650,9 @@ func TestProtocolMessageTypes(t *testing.T) {
 		protocol.MsgBackupList,
 		protocol.MsgBackupListResp,
 		protocol.MsgBackupRestore,
+		protocol.MsgBackupRestoreOK,
 		protocol.MsgBackupDelete,
+		protocol.MsgBackupDeleteOK,
 		protocol.MsgBackupProgress,
 		protocol.MsgError,
 	}

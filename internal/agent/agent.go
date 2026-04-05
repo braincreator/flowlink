@@ -331,6 +331,18 @@ func (a *Agent) handleMessage(msg protocol.Message) {
 	case protocol.MsgHeartbeatAck:
 		// Пинг получен, всё ок
 
+	case protocol.MsgBackupRequest:
+		a.handleBackupRequest(msg)
+
+	case protocol.MsgBackupList:
+		a.handleBackupList(msg)
+
+	case protocol.MsgBackupRestore:
+		a.handleBackupRestore(msg)
+
+	case protocol.MsgBackupDelete:
+		a.handleBackupDelete(msg)
+
 	case protocol.MsgConfigUpdate:
 		a.handleConfigUpdate(msg)
 
@@ -656,6 +668,206 @@ func (a *Agent) handleApprovalResponse(msg protocol.Message) {
 	default:
 		a.logger.Warn("unknown approval decision", "decision", payload.Decision, "request_id", payload.RequestID)
 	}
+}
+
+// handleBackupRequest — обрабатывает запрос на создание бэкапа от реле.
+func (a *Agent) handleBackupRequest(msg protocol.Message) {
+	var payload protocol.BackupRequestPayload
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.logger.Warn("invalid backup request payload", "err", err)
+		return
+	}
+
+	// Если пути не указаны — бэкапим рабочую директорию
+	paths := payload.Paths
+	if len(paths) == 0 {
+		paths = []string{a.cfg.WorkDir}
+	}
+
+	description := payload.Description
+	if description == "" {
+		description = "remote backup request"
+	}
+
+	// Отправляем прогресс 0%
+	progressMsg := protocol.NewMessage(protocol.MsgBackupProgress)
+	progressMsg.Payload = protocol.BackupProgressPayload{
+		RequestID: payload.RequestID,
+		Progress:  0,
+		Message:   "starting backup...",
+	}
+	a.write(progressMsg)
+
+	// Создаём бэкап
+	snapshotID, err := a.backup.CreateBefore(paths, description)
+
+	if err != nil {
+		a.logger.Error("remote backup failed", "err", err, "request_id", payload.RequestID)
+		respMsg := protocol.NewMessage(protocol.MsgBackupResponse)
+		respMsg.Payload = protocol.BackupResponsePayload{
+			RequestID: payload.RequestID,
+			Success:   false,
+			Error:     err.Error(),
+		}
+		a.write(respMsg)
+		return
+	}
+
+	// Отправляем прогресс 100%
+	progressMsg = protocol.NewMessage(protocol.MsgBackupProgress)
+	progressMsg.Payload = protocol.BackupProgressPayload{
+		RequestID: payload.RequestID,
+		Progress:  100,
+		Message:   "backup completed",
+	}
+	a.write(progressMsg)
+
+	// Отправляем результат
+	snapshots := a.backup.List()
+	var snapshot *Snapshot
+	for _, s := range snapshots {
+		if s.ID == snapshotID {
+			snapshot = &s
+			break
+		}
+	}
+
+	respMsg := protocol.NewMessage(protocol.MsgBackupResponse)
+	if snapshot != nil {
+		respMsg.Payload = protocol.BackupResponsePayload{
+			RequestID:  payload.RequestID,
+			SnapshotID: snapshot.ID,
+			Size:       snapshot.Size,
+			Timestamp:  snapshot.Timestamp,
+			Success:    true,
+		}
+	} else {
+		respMsg.Payload = protocol.BackupResponsePayload{
+			RequestID: payload.RequestID,
+			Success:   true,
+		}
+	}
+	a.write(respMsg)
+	a.logger.Info("remote backup created", "snapshot_id", snapshotID, "request_id", payload.RequestID)
+}
+
+// handleBackupList — обрабатывает запрос списка снапшотов от реле.
+func (a *Agent) handleBackupList(msg protocol.Message) {
+	var payload protocol.BackupListPayload
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.logger.Warn("invalid backup list payload", "err", err)
+		return
+	}
+
+	snapshots := a.backup.List()
+
+	// Конвертируем agent.Snapshot → protocol.Snapshot
+	protoSnapshots := make([]protocol.Snapshot, len(snapshots))
+	for i, s := range snapshots {
+		protoSnapshots[i] = protocol.Snapshot{
+			ID:          s.ID,
+			Description: s.Description,
+			Timestamp:   s.Timestamp,
+			Size:        s.Size,
+			Paths:       s.Paths,
+			Filename:    s.Filename,
+		}
+	}
+
+	respMsg := protocol.NewMessage(protocol.MsgBackupListResp)
+	respMsg.Payload = protocol.BackupListResponsePayload{
+		RequestID: payload.RequestID,
+		Snapshots: protoSnapshots,
+		Count:     len(protoSnapshots),
+	}
+	a.write(respMsg)
+	a.logger.Info("backup list sent", "count", len(protoSnapshots), "request_id", payload.RequestID)
+}
+
+// handleBackupRestore — обрабатывает запрос на восстановление из снапшота.
+func (a *Agent) handleBackupRestore(msg protocol.Message) {
+	var payload protocol.BackupRestorePayload
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.logger.Warn("invalid backup restore payload", "err", err)
+		return
+	}
+
+	if payload.SnapshotID == "" {
+		respMsg := protocol.NewMessage(protocol.MsgBackupRestoreOK)
+		respMsg.Payload = protocol.BackupRestoreResponsePayload{
+			RequestID:  payload.RequestID,
+			SnapshotID: payload.SnapshotID,
+			Success:    false,
+			Error:      "snapshot_id is required",
+		}
+		a.write(respMsg)
+		return
+	}
+
+	a.logger.Info("remote restore requested", "snapshot_id", payload.SnapshotID, "request_id", payload.RequestID)
+
+	err := a.backup.Restore(payload.SnapshotID)
+
+	respMsg := protocol.NewMessage(protocol.MsgBackupRestoreOK)
+	if err != nil {
+		a.logger.Error("remote restore failed", "err", err, "snapshot_id", payload.SnapshotID)
+		respMsg.Payload = protocol.BackupRestoreResponsePayload{
+			RequestID:  payload.RequestID,
+			SnapshotID: payload.SnapshotID,
+			Success:    false,
+			Error:      err.Error(),
+		}
+	} else {
+		a.logger.Info("remote restore completed", "snapshot_id", payload.SnapshotID)
+		respMsg.Payload = protocol.BackupRestoreResponsePayload{
+			RequestID:  payload.RequestID,
+			SnapshotID: payload.SnapshotID,
+			Success:    true,
+		}
+	}
+	a.write(respMsg)
+}
+
+// handleBackupDelete — обрабатывает запрос на удаление снапшота.
+func (a *Agent) handleBackupDelete(msg protocol.Message) {
+	var payload protocol.BackupDeletePayload
+	if err := unmarshalPayload(msg.Payload, &payload); err != nil {
+		a.logger.Warn("invalid backup delete payload", "err", err)
+		return
+	}
+
+	if payload.SnapshotID == "" {
+		respMsg := protocol.NewMessage(protocol.MsgBackupDeleteOK)
+		respMsg.Payload = protocol.BackupDeleteResponsePayload{
+			RequestID:  payload.RequestID,
+			SnapshotID: payload.SnapshotID,
+			Success:    false,
+			Error:      "snapshot_id is required",
+		}
+		a.write(respMsg)
+		return
+	}
+
+	err := a.backup.Delete(payload.SnapshotID)
+
+	respMsg := protocol.NewMessage(protocol.MsgBackupDeleteOK)
+	if err != nil {
+		a.logger.Warn("backup delete failed", "err", err, "snapshot_id", payload.SnapshotID)
+		respMsg.Payload = protocol.BackupDeleteResponsePayload{
+			RequestID:  payload.RequestID,
+			SnapshotID: payload.SnapshotID,
+			Success:    false,
+			Error:      err.Error(),
+		}
+	} else {
+		a.logger.Info("backup deleted", "snapshot_id", payload.SnapshotID, "request_id", payload.RequestID)
+		respMsg.Payload = protocol.BackupDeleteResponsePayload{
+			RequestID:  payload.RequestID,
+			SnapshotID: payload.SnapshotID,
+			Success:    true,
+		}
+	}
+	a.write(respMsg)
 }
 
 // handleConfigUpdate — обрабатывает обновление конфигурации от реле.
