@@ -71,6 +71,17 @@ type AuthManager struct {
 	stopCleanup   chan struct{}           // канал для остановки cleanup goroutine
 }
 
+// Close — останавливает фоновые горутины AuthManager (safe to call multiple times).
+func (am *AuthManager) Close() {
+	select {
+	case <-am.stopCleanup:
+		// already closed
+		return
+	default:
+		close(am.stopCleanup)
+	}
+}
+
 // NewAuthManager — создаёт новый менеджер аутентификации.
 func NewAuthManager(logger *slog.Logger) *AuthManager {
 	if logger == nil {

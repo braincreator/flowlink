@@ -185,6 +185,7 @@ func TestAuditLogger_VerifyAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log some entries
 	for i := 0; i < 3; i++ {
@@ -472,7 +473,7 @@ func TestHandleIntegrationProxy_Error(t *testing.T) {
 		IntegrationURL:   "http://127.0.0.1:1", // Invalid URL
 		IntegrationToken: "test-token",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/integration/backups", nil)
 	w := httptest.NewRecorder()

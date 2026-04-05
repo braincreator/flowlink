@@ -15,6 +15,7 @@ func TestNewAuditLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 	if al == nil {
 		t.Fatal("expected non-nil audit logger")
 	}
@@ -26,6 +27,7 @@ func TestNewAuditLogger_EmptyDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger with empty dir failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 	if al == nil {
 		t.Fatal("expected non-nil audit logger")
 	}
@@ -37,6 +39,7 @@ func TestAuditLogger_Log(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	entry := AuditEntry{
 		ID:         "test-1",
@@ -63,6 +66,7 @@ func TestAuditLogger_Query(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log some entries
 	for i := 0; i < 5; i++ {
@@ -111,6 +115,7 @@ func TestAuditLogger_QueryWithDateRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	now := time.Now()
 
@@ -142,6 +147,7 @@ func TestAuditLogger_Stats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log some entries
 	for i := 0; i < 3; i++ {
@@ -171,6 +177,7 @@ func TestAuditLogger_Recent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log some entries
 	for i := 0; i < 5; i++ {
@@ -198,6 +205,7 @@ func TestAuditLogger_Export_JSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log entry
 	entry := AuditEntry{
@@ -225,6 +233,7 @@ func TestAuditLogger_Export_CSV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log entry
 	entry := AuditEntry{
@@ -250,6 +259,7 @@ func TestAuditLogger_IsWritable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	if !al.IsWritable() {
 		t.Error("expected IsWritable to be true")
@@ -262,6 +272,7 @@ func TestAuditLogger_Prune(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Create old audit file
 	oldDate := time.Now().Add(-100 * 24 * time.Hour).Format("2006-01-02")
@@ -286,6 +297,7 @@ func TestAuditLogger_Rotate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log entry
 	entry := AuditEntry{
@@ -323,6 +335,7 @@ func TestAuditEntry_HMAC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLoggerWithHMAC failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	entry := AuditEntry{
 		ID:        "test-1",
@@ -350,6 +363,7 @@ func TestAuditLogger_Close(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log entry
 	err = al.Log(AuditEntry{ID: "test", Action: "exec"})

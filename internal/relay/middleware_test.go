@@ -30,7 +30,7 @@ func TestRateLimitEndpoints(t *testing.T) {
 		WSSAddr: ":0",
 		APIAddr: ":0",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	t.Run("GET /api/v1/rate-limits returns list", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/rate-limits", nil)

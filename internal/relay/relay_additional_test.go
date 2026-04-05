@@ -428,7 +428,7 @@ func TestHandleRateLimitByClient_POST_Reset(t *testing.T) {
 // === More auth tests ===
 
 func TestAuthManager_GenerateAgentToken(t *testing.T) {
-	auth := NewAuthManager(nil)
+	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	token, err := auth.GenerateAgentToken("agent-1", 3600)
@@ -442,7 +442,7 @@ func TestAuthManager_GenerateAgentToken(t *testing.T) {
 }
 
 func TestAuthManager_ValidateAgentToken(t *testing.T) {
-	auth := NewAuthManager(nil)
+	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	// Generate token
@@ -459,7 +459,7 @@ func TestAuthManager_ValidateAgentToken(t *testing.T) {
 }
 
 func TestAuthManager_ValidateAgentToken_WrongAgent(t *testing.T) {
-	auth := NewAuthManager(nil)
+	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	token, _ := auth.GenerateAgentToken("agent-1", 3600)
@@ -472,7 +472,7 @@ func TestAuthManager_ValidateAgentToken_WrongAgent(t *testing.T) {
 }
 
 func TestAuthManager_ValidateAgentToken_Expired(t *testing.T) {
-	auth := NewAuthManager(nil)
+	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	// Generate token that expires in 1 second
@@ -486,7 +486,7 @@ func TestAuthManager_ValidateAgentToken_Expired(t *testing.T) {
 }
 
 func TestAuthManager_RotateTokens(t *testing.T) {
-	auth := NewAuthManager(nil)
+	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	// Generate initial token
@@ -519,7 +519,7 @@ func TestAuthManager_RotateTokens(t *testing.T) {
 }
 
 func TestAuthManager_RevokeToken(t *testing.T) {
-	auth := NewAuthManager(nil)
+	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	token, _ := auth.GenerateAPIToken("client-1", 3600)
@@ -611,7 +611,7 @@ func TestHandleIntegrationProxy_Enabled(t *testing.T) {
 		IntegrationURL:   backend.URL,
 		IntegrationToken: "test-token",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/integration/backups", nil)
 	w := httptest.NewRecorder()

@@ -19,7 +19,7 @@ func newTestRelay(t *testing.T) *Relay {
 		WSSAddr: ":0",
 		APIAddr: ":0",
 	}
-	r := NewRelay(cfg)
+	r := NewRelay(cfg); t.Cleanup(func() { r.Close() })
 	return r
 }
 
@@ -31,7 +31,7 @@ func newTestRelayWithAuth(t *testing.T, token string) *Relay {
 		APIAddr: ":0",
 		APIToken: token,
 	}
-	r := NewRelay(cfg)
+	r := NewRelay(cfg); t.Cleanup(func() { r.Close() })
 	return r
 }
 

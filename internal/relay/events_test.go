@@ -163,7 +163,7 @@ func TestEventBus_NonBlocking(t *testing.T) {
 // TestSSEEndpoint — проверяет SSE endpoint: формат ответа, заголовки и доставку событий.
 func TestSSEEndpoint(t *testing.T) {
 	cfg := &config.RelayConfig{APIToken: "test-token"}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
@@ -214,7 +214,7 @@ func TestSSEEndpoint(t *testing.T) {
 // TestSSEEndpoint_LastEventID — проверяет reconnect с Last-Event-ID.
 func TestSSEEndpoint_LastEventID(t *testing.T) {
 	cfg := &config.RelayConfig{APIToken: "test-token"}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
@@ -245,7 +245,7 @@ func TestSSEEndpoint_LastEventID(t *testing.T) {
 // TestSSEEndpoint_WrongMethod — проверяет что POST отклоняется.
 func TestSSEEndpoint_WrongMethod(t *testing.T) {
 	cfg := &config.RelayConfig{APIToken: "test-token"}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/events", nil)
 	rec := httptest.NewRecorder()

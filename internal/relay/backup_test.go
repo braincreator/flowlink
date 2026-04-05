@@ -13,7 +13,8 @@ import (
 )
 
 // mockWebSocketConn создаёт mock websocket connection для тестов
-func mockWebSocketConn() *websocket.Conn {
+func mockWebSocketConn(t *testing.T) *websocket.Conn {
+	t.Helper()
 	// Создаём тестовый websocket server
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
@@ -34,6 +35,7 @@ func mockWebSocketConn() *websocket.Conn {
 			}
 		}
 	}))
+	t.Cleanup(server.Close)
 
 	// Подключаемся к серверу как клиент
 	wsURL := "ws" + server.URL[4:] // http:// -> ws://
@@ -52,12 +54,12 @@ func TestBackupCreate(t *testing.T) {
 		WSSAddr: ":0",
 		APIAddr: ":0",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	// Подключаем тестового агента с mock websocket connection
 	agent := &AgentConn{
 		ID:   "test-agent-1",
-		conn: mockWebSocketConn(),
+		conn: mockWebSocketConn(t),
 	}
 	relay.pool.Add(agent)
 
@@ -129,11 +131,11 @@ func TestBackupList(t *testing.T) {
 		WSSAddr: ":0",
 		APIAddr: ":0",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	agent := &AgentConn{
 		ID:   "test-agent-1",
-		conn: mockWebSocketConn(),
+		conn: mockWebSocketConn(t),
 	}
 	relay.pool.Add(agent)
 
@@ -195,11 +197,11 @@ func TestBackupRestore(t *testing.T) {
 		WSSAddr: ":0",
 		APIAddr: ":0",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	agent := &AgentConn{
 		ID:   "test-agent-1",
-		conn: mockWebSocketConn(),
+		conn: mockWebSocketConn(t),
 	}
 	relay.pool.Add(agent)
 
@@ -271,11 +273,11 @@ func TestBackupDelete(t *testing.T) {
 		WSSAddr: ":0",
 		APIAddr: ":0",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	agent := &AgentConn{
 		ID:   "test-agent-1",
-		conn: mockWebSocketConn(),
+		conn: mockWebSocketConn(t),
 	}
 	relay.pool.Add(agent)
 

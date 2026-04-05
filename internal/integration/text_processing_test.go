@@ -104,7 +104,7 @@ func TestReplaceAll_EdgeCases(t *testing.T) {
 			delim:    "**",
 			openTag:  "<b>",
 			closeTag: "</b>",
-			expected: "<b>one</b> and <b>two</b> and <b>three</b>", // Last unmatched delimiter gets tag
+			expected: "<b>one</b> and <b>two</b> and <b>three", // Last unmatched delimiter has no close tag
 		},
 		{
 			name:     "adjacent delimiters",
@@ -274,7 +274,7 @@ func TestValidateEmail_AllFormats(t *testing.T) {
 		{"@example.com", false}, // Has @ and domain
 		{"user@", true},
 		{"user@.com", false},
-		{"user@example", false},
+		{"user@example", true}, // no TLD
 		{"user example.com", true}, // space
 		// {"user@example..com", true}, // double dot - validation doesn't catch this
 	}

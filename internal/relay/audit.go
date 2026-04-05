@@ -73,6 +73,7 @@ type AuditLogger struct {
 	maxSize     int64    // макс. размер файла в байтах (100MB)
 	retention   int      // дней хранения (90)
 	hmacSecret  []byte   // секрет для HMAC подписи
+	stopBg      chan struct{} // канал для остановки backgroundTasks
 }
 
 // NewAuditLogger — создаёт новый audit logger.
@@ -102,6 +103,7 @@ func NewAuditLoggerWithHMAC(baseDir, hmacKeyPath string) (*AuditLogger, error) {
 		maxSize:    100 * 1024 * 1024, // 100MB
 		retention:  90,                // 90 дней
 		hmacSecret: hmacSecret,
+		stopBg:     make(chan struct{}),
 	}
 
 	// Запускаем фоновую ротацию и очистку
@@ -378,6 +380,12 @@ func (l *AuditLogger) Prune(olderThanDays int) error {
 
 // Close — закрывает audit logger.
 func (l *AuditLogger) Close() error {
+	// Stop background goroutines
+	select {
+	case <-l.stopBg:
+	default:
+		close(l.stopBg)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -485,12 +493,17 @@ func (l *AuditLogger) backgroundTasks() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		// Ротация раз в час
-		l.Rotate()
-		
-		// Очистка старых логов раз в сутки
-		l.Prune(0)
+	for {
+		select {
+		case <-ticker.C:
+			// Ротация раз в час
+			l.Rotate()
+			
+			// Очистка старых логов раз в сутки
+			l.Prune(0)
+		case <-l.stopBg:
+			return
+		}
 	}
 }
 

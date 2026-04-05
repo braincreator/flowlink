@@ -38,7 +38,9 @@ func createTestRelayWithToken(t *testing.T, token string) *Relay {
 		APIAddr:   ":0",
 		APIToken:  token,
 	}
-	return NewRelay(cfg)
+	relay := NewRelay(cfg)
+	t.Cleanup(func() { relay.Close() })
+	return relay
 }
 
 // mockAgentConn creates a mock agent connection for testing

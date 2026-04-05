@@ -157,6 +157,17 @@ func (a *AgentConn) SetCallback(requestID string, callback func(any)) {
 
 // NewRelay — создаёт новый реле-сервер.
 // E2EE: always initializes KeyStore and E2EELayer (cannot be disabled).
+// Close — останавливает фоновые горутины Relay (AuthManager, AuditLogger).
+// Safe to call multiple times.
+func (r *Relay) Close() {
+	if r.auth != nil {
+		r.auth.Close()
+	}
+	if r.audit != nil {
+		r.audit.Close()
+	}
+}
+
 func NewRelay(cfg *config.RelayConfig) *Relay {
 	logger := slog.Default()
 

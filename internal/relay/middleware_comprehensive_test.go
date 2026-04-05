@@ -189,7 +189,7 @@ func TestAuthMiddleware_DevMode(t *testing.T) {
 
 func TestAuthMiddleware_WithAuthManager(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -453,7 +453,7 @@ func TestWriteAuthError(t *testing.T) {
 
 func TestExtractClientIDFromToken(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	token, _ := auth.GenerateAPIToken("client-123", 3600)
@@ -476,7 +476,7 @@ func TestMiddleware_WithRelay(t *testing.T) {
 		APIAddr:  ":0",
 		APIToken: "test-token",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	// Test that middleware is properly integrated
 	// This tests the full middleware chain through the relay

@@ -10,7 +10,7 @@ import (
 
 func TestGenerateTokenPair(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-1"
@@ -48,7 +48,7 @@ func TestGenerateTokenPair(t *testing.T) {
 
 func TestRefreshToken(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-2"
@@ -99,7 +99,7 @@ func TestRefreshToken(t *testing.T) {
 
 func TestRefreshTokenExpired(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	// Генерируем токен напрямую с истёкшим сроком
@@ -139,7 +139,7 @@ func TestRefreshTokenExpired(t *testing.T) {
 
 func TestRefreshTokenWrongType(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-4"
@@ -159,7 +159,7 @@ func TestRefreshTokenWrongType(t *testing.T) {
 
 func TestBlacklist(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-5"
@@ -190,7 +190,7 @@ func TestBlacklist(t *testing.T) {
 
 func TestLogout(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-6"
@@ -215,7 +215,7 @@ func TestLogout(t *testing.T) {
 
 func TestRevokeByClientID(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-7"
@@ -262,7 +262,7 @@ func TestRevokeByClientID(t *testing.T) {
 
 func TestTokenExpiry(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-8"
@@ -303,7 +303,7 @@ func TestTokenExpiry(t *testing.T) {
 
 func TestBackwardCompatibility(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-9"
@@ -335,7 +335,7 @@ func TestBackwardCompatibility(t *testing.T) {
 
 func TestMultipleRefresh(t *testing.T) {
 	logger := slog.Default()
-	auth := NewAuthManager(logger)
+	auth := NewAuthManager(logger); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	clientID := "test-client-10"

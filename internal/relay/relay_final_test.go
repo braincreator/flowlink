@@ -97,6 +97,7 @@ func TestAuditLogger_CompressFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log some entries to create a file
 	for i := 0; i < 5; i++ {
@@ -419,7 +420,7 @@ func TestHandleIntegrationProxy_POST(t *testing.T) {
 		IntegrationURL:   backend.URL,
 		IntegrationToken: "test-token",
 	}
-	relay := NewRelay(cfg)
+	relay := NewRelay(cfg); t.Cleanup(func() { relay.Close() })
 
 	body := map[string]any{"name": "test"}
 	bodyJSON, _ := json.Marshal(body)
@@ -451,7 +452,7 @@ func TestSetClientIDInContext(t *testing.T) {
 // === Auth manager cleanup test ===
 
 func TestAuthManager_CleanupBlacklist(t *testing.T) {
-	auth := NewAuthManager(nil)
+	auth := NewAuthManager(nil); t.Cleanup(func() { auth.Close() })
 	defer auth.Stop()
 
 	// Add some tokens to blacklist
@@ -478,6 +479,7 @@ func TestAuditLogger_ReadFileWithValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAuditLogger failed: %v", err)
 	}
+	t.Cleanup(func() { al.Close() })
 
 	// Log entries
 	for i := 0; i < 3; i++ {
