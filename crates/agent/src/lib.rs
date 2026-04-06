@@ -5,8 +5,12 @@ pub mod executor;
 pub mod policy;
 pub mod connection;
 pub mod approval;
+pub mod dispatch;
 
 use flowlink_core::config::AgentConfig;
+
+use crate::approval::{ApprovalManager, ApprovalMode};
+use crate::policy::PolicyEngine;
 
 pub struct Agent {
     config: AgentConfig,
@@ -18,10 +22,23 @@ impl Agent {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
-        let mut conn = connection::Connection::new(
+        let policy = PolicyEngine::new(self.config.read_only, self.config.sandbox.allow_sudo)
+            .with_allowed_dirs(self.config.sandbox.allowed_dirs.clone())
+            .with_blocked_patterns(self.config.sandbox.blocked_patterns.clone());
+
+        let approval_mode = match self.config.approval.mode.as_str() {
+            "soft_ask" => ApprovalMode::SoftAsk,
+            "hard_ask" => ApprovalMode::HardAsk,
+            _ => ApprovalMode::Auto,
+        };
+        let approval = ApprovalManager::new(approval_mode);
+
+        let conn = connection::Connection::new(
             self.config.relay_url.clone(),
             self.config.agent_id.clone(),
             self.config.token.clone(),
+            policy,
+            approval,
         );
         conn.run().await
     }

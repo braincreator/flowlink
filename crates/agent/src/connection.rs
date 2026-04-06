@@ -6,19 +6,30 @@ use futures_util::{SinkExt, StreamExt};
 use log::{info, warn, error};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
+use crate::approval::ApprovalManager;
+use crate::policy::PolicyEngine;
+
 pub struct Connection {
     url: String,
     agent_id: String,
     token: String,
+    policy: PolicyEngine,
+    approval: ApprovalManager,
 }
 
 impl Connection {
-    pub fn new(url: String, agent_id: String, token: String) -> Self {
-        Self { url, agent_id, token }
+    pub fn new(
+        url: String,
+        agent_id: String,
+        token: String,
+        policy: PolicyEngine,
+        approval: ApprovalManager,
+    ) -> Self {
+        Self { url, agent_id, token, policy, approval }
     }
 
     /// Connect, authenticate, run message loop with auto-reconnect + exponential backoff.
-    pub async fn run(&mut self) -> anyhow::Result<()> {
+    pub async fn run(&self) -> anyhow::Result<()> {
         let mut backoff_secs: u64 = 1;
         const MAX_BACKOFF: u64 = 60;
 
@@ -38,7 +49,7 @@ impl Connection {
         }
     }
 
-    async fn connect_and_loop(&mut self) -> anyhow::Result<()> {
+    async fn connect_and_loop(&self) -> anyhow::Result<()> {
         let ws_url = format!("{}/ws?agent_id={}&token={}", self.url, self.agent_id, self.token);
 
         let (mut ws_stream, _resp) = tokio_tungstenite::connect_async(&ws_url).await?;
@@ -67,8 +78,12 @@ impl Connection {
         while let Some(msg) = ws_stream.next().await {
             match msg {
                 Ok(WsMessage::Text(text)) => {
-                    if let Err(e) = self.handle_message(&text).await {
-                        warn!("Failed to handle message: {e}");
+                    let response = self.handle_message(&text).await;
+                    if let Some(resp) = response {
+                        let json = serde_json::to_string(&resp)?;
+                        if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
+                            warn!("Failed to send response: {e}");
+                        }
                     }
                 }
                 Ok(WsMessage::Ping(data)) => {
@@ -86,10 +101,16 @@ impl Connection {
         Ok(())
     }
 
-    async fn handle_message(&self, text: &str) -> anyhow::Result<()> {
-        let msg: Message = serde_json::from_str(text)?;
+    async fn handle_message(&self, text: &str) -> Option<Message> {
+        let msg: Message = match serde_json::from_str(text) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("Failed to parse message: {e}");
+                return None;
+            }
+        };
         info!("Received: {:?}", msg.msg_type);
-        Ok(())
+        crate::dispatch::dispatch(&msg, &self.policy, &self.approval).await
     }
 }
 
