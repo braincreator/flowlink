@@ -9,9 +9,7 @@ flowlink-core = { path = "../core" }
 flowlink-crypto = { path = "../crypto" }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
-hyper = { version = "1", features = ["server", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
-http-body-util = "0.1"
+axum = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -20,7 +18,8 @@ log = "0.4"
 anyhow = "1"
 futures-util = "0.3"
 dashmap = "6"
+reqwest = { version = "0.12", features = ["json"] }
+tokio-stream = "0.1"
 rand = "0.8"
 hex = "0.4"
-reqwest = { version = "0.12", features = ["json"] }
 tempfile = "3"
