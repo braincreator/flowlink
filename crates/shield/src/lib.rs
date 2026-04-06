@@ -9,6 +9,8 @@ mod guard;
 mod ebpf_kernel;
 mod guard_hybrid;
 mod ebpf;
+mod es_framework;
+mod es_monitor;
 mod server;
 mod relay_client;
 
