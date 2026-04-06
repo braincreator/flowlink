@@ -284,4 +284,104 @@ mod tests {
         let et2 = AuditEventType::CommandApproved { command: "ls".into(), approved_by: "a".into() };
         assert_eq!(et2.risk_score(), None);
     }
+
+
+    #[test]
+    fn test_all_audit_event_types_roundtrip() {
+        let types = vec![
+            AuditEventType::CommandIntercepted { command: "rm".into(), args: vec!["-rf".into()], action: "blocked".into(), threat_level: "high".into(), risk_score: 90 },
+            AuditEventType::CommandApproved { command: "ls".into(), approved_by: "admin".into() },
+            AuditEventType::CommandRejected { command: "rm".into(), rejected_by: "admin".into() },
+            AuditEventType::CommandExecuted { command: "ls".into(), exit_code: 0, duration_ms: 100 },
+            AuditEventType::CanaryTriggered { path: "/etc/shadow".into(), accessor: "bob".into(), access_type: "read".into() },
+            AuditEventType::SessionStarted { user: "alice".into(), origin: "ssh".into(), terminal: Some("xterm".into()) },
+            AuditEventType::SessionEnded { user: "alice".into(), duration_ms: 60000, commands_count: 42 },
+            AuditEventType::AgentRegistered { hostname: "srv1".into(), version: "1.0".into() },
+            AuditEventType::AgentHeartbeat { status: "ok".into(), uptime_secs: 86400 },
+            AuditEventType::AgentDisconnected { reason: "timeout".into() },
+            AuditEventType::PolicyViolation { rule: "no_sudo".into(), command: "sudo rm".into(), user: "bob".into() },
+            AuditEventType::PolicyLoaded { rules_count: 15, version: "v2".into() },
+        ];
+        for et in types {
+            let json = serde_json::to_string(&et).unwrap();
+            let back: AuditEventType = serde_json::from_str(&json).unwrap();
+            assert_eq!(et.as_str(), back.as_str());
+        }
+    }
+
+    #[test]
+    fn test_forensic_summary_roundtrip() {
+        let f = ForensicSummary {
+            uid: 1000, username: "alice".into(), origin: "ssh".into(),
+            process_tree: vec!["sshd".into(), "bash".into(), "vim".into()],
+            risk_score: 75,
+        };
+        let json = serde_json::to_string(&f).unwrap();
+        let back: ForensicSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.process_tree.len(), 3);
+        assert_eq!(back.risk_score, 75);
+    }
+
+    #[test]
+    fn test_audit_event_with_metadata() {
+        let event = AuditEvent::new("a1", AuditEventType::AgentHeartbeat { status: "ok".into(), uptime_secs: 3600 })
+            .with_metadata("source", "host")
+            .with_metadata("version", "2.0");
+        let json = serde_json::to_string(&event).unwrap();
+        let back: AuditEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.metadata["source"], "host");
+        assert_eq!(back.metadata["version"], "2.0");
+    }
+
+    #[test]
+    fn test_audit_event_without_forensic() {
+        let event = AuditEvent::new("a1", AuditEventType::CommandExecuted { command: "ls".into(), exit_code: 0, duration_ms: 10 });
+        let json = serde_json::to_string(&event).unwrap();
+        let back: AuditEvent = serde_json::from_str(&json).unwrap();
+        assert!(back.forensic.is_none());
+    }
+
+    #[test]
+    fn test_canary_token_all_thresholds() {
+        for thresh in [AlertThreshold::Any, AlertThreshold::UnknownUser, AlertThreshold::NonAdmin] {
+            let token = CanaryToken {
+                path: "/f".into(), description: "d".into(),
+                expected_readers: vec!["root".into()], alert_threshold: thresh.clone(),
+            };
+            let json = serde_json::to_string(&token).unwrap();
+            let back: CanaryToken = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.alert_threshold, thresh);
+        }
+    }
+
+    #[test]
+    fn test_session_chunk_encrypted() {
+        let chunk = SessionChunk {
+            session_id: "s1".into(), agent_id: "a1".into(),
+            chunk_seq: 5, timestamp_ns: 999, data: vec![0xDE, 0xAD], is_encrypted: true,
+        };
+        let json = serde_json::to_string(&chunk).unwrap();
+        let back: SessionChunk = serde_json::from_str(&json).unwrap();
+        assert!(back.is_encrypted);
+        assert_eq!(back.data, vec![0xDE, 0xAD]);
+    }
+
+    #[test]
+    fn test_audit_event_type_username_all_variants() {
+        assert!(AuditEventType::CommandApproved { command: "x".into(), approved_by: "a".into() }.username().is_some());
+        assert!(AuditEventType::CommandRejected { command: "x".into(), rejected_by: "a".into() }.username().is_some());
+        assert!(AuditEventType::SessionStarted { user: "a".into(), origin: "x".into(), terminal: None }.username().is_some());
+        assert!(AuditEventType::SessionEnded { user: "a".into(), duration_ms: 0, commands_count: 0 }.username().is_some());
+        assert!(AuditEventType::PolicyViolation { rule: "x".into(), command: "x".into(), user: "a".into() }.username().is_some());
+        assert!(AuditEventType::CanaryTriggered { path: "x".into(), accessor: "a".into(), access_type: "r".into() }.username().is_some());
+        assert!(AuditEventType::CommandIntercepted { command: "x".into(), args: vec![], action: "x".into(), threat_level: "x".into(), risk_score: 0 }.username().is_none());
+        assert!(AuditEventType::AgentRegistered { hostname: "x".into(), version: "x".into() }.username().is_none());
+    }
+
+    #[test]
+    fn test_audit_event_new_generates_uuid() {
+        let event = AuditEvent::new("a1", AuditEventType::AgentDisconnected { reason: "test".into() });
+        assert!(uuid::Uuid::parse_str(&event.id).is_ok());
+        assert!(!event.timestamp_iso.is_empty());
+    }
 }

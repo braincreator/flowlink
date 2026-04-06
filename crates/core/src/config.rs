@@ -484,4 +484,145 @@ mod tests {
         let result: Result<AgentConfig, _> = serde_json::from_str("not json");
         assert!(result.is_err());
     }
+
+
+    #[test]
+    fn test_agent_config_defaults() {
+        let json = r#"{"agent_id":"a","token":"t","relay_url":"wss://r"}"#;
+        let cfg: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.heartbeat_sec, 30);
+        assert!(cfg.label.is_empty());
+        assert!(cfg.work_dir.is_empty());
+        assert!(!cfg.read_only);
+        assert!(!cfg.use_relay_llm);
+        assert!(!cfg.sandbox.allow_sudo);
+        assert!(cfg.sandbox.allowed_dirs.is_empty());
+        assert_eq!(cfg.approval.mode, "auto");
+        assert!(cfg.backup.enabled);
+        assert!(!cfg.shield.enabled);
+        assert!(!cfg.tls.insecure);
+    }
+
+    #[test]
+    fn test_agent_config_from_yaml() {
+        let yaml = "agent_id: a1\ntoken: t1\nrelay_url: wss://r\"";
+        let cfg: AgentConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.agent_id, "a1");
+        assert_eq!(cfg.heartbeat_sec, 30);
+    }
+
+    #[test]
+    fn test_agent_config_partial_overrides() {
+        let json = r#"{"agent_id":"a","token":"t","relay_url":"wss://r","heartbeat_sec":60,"read_only":true,"use_relay_llm":true}"#;
+        let cfg: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.heartbeat_sec, 60);
+        assert!(cfg.read_only);
+        assert!(cfg.use_relay_llm);
+        assert_eq!(cfg.approval.mode, "auto");
+    }
+
+    #[test]
+    fn test_relay_config_all_defaults() {
+        let json = r#"{"api_token":"t"}"#;
+        let cfg: RelayConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.client_name, "FlowLink Relay");
+        assert!(cfg.client_email.is_empty());
+        assert!(!cfg.llm.enabled);
+        assert!(cfg.llm.backends.is_empty());
+        assert!(!cfg.billing.enabled);
+        assert_eq!(cfg.billing.currency, "RUB");
+        assert_eq!(cfg.registry.data_path, "~/.flowlink/relay");
+        assert_eq!(cfg.registry.max_agents, 100);
+    }
+
+    #[test]
+    fn test_relay_config_from_yaml() {
+        let yaml = "api_token: secret\nclient_name: MyRelay\nllm:\n  enabled: true\n  backends:\n    - name: gpt4\n      provider: openai\n      model: gpt-4\n      api_key: k\n      base_url: null";
+        let cfg: RelayConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.client_name, "MyRelay");
+        assert!(cfg.llm.enabled);
+        assert_eq!(cfg.llm.backends.len(), 1);
+    }
+
+    #[test]
+    fn test_config_all_llm_backends() {
+        let llm = LlmConfig {
+            enabled: true,
+            backends: vec![
+                LlmBackend { name: "gpt4".into(), provider: "openai".into(), model: "gpt-4".into(), api_key: Some("k1".into()), base_url: None },
+                LlmBackend { name: "claude".into(), provider: "anthropic".into(), model: "claude-3".into(), api_key: Some("k2".into()), base_url: Some("https://api.anthropic.com".into()) },
+                LlmBackend { name: "local".into(), provider: "ollama".into(), model: "llama3".into(), api_key: None, base_url: Some("http://localhost:11434".into()) },
+            ],
+            timeout_sec: 120,
+        };
+        let json = serde_json::to_string(&llm).unwrap();
+        let back: LlmConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.backends.len(), 3);
+        assert_eq!(back.backends[2].provider, "ollama");
+    }
+
+    #[test]
+    fn test_llm_config_zero_backends_default() {
+        let json = r#"{}"#;
+        let cfg: LlmConfig = serde_json::from_str(json).unwrap();
+        assert!(!cfg.enabled);
+        assert!(cfg.backends.is_empty());
+        assert_eq!(cfg.timeout_sec, 30);
+    }
+
+    #[test]
+    fn test_invalid_relay_config_missing_token() {
+        let json = r#"{"client_name":"x"}"#;
+        let result: Result<RelayConfig, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sandbox_config_custom() {
+        let json = r#"{"allowed_dirs":["/home"],"blocked_patterns":["/etc/*"],"max_file_size":1024,"max_exec_timeout":60,"allow_sudo":true}"#;
+        let sb: SandboxConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(sb.allowed_dirs, vec!["/home"]);
+        assert_eq!(sb.max_file_size, 1024);
+        assert!(sb.allow_sudo);
+    }
+
+    #[test]
+    fn test_shield_config_full() {
+        let s = ShieldConfig {
+            enabled: true, enable_ast: false, enable_interpreter: false,
+            rules_path: Some("/rules.yaml".into()),
+            snapshot_dataset: Some("dataset".into()),
+            audit_log: "/var/log/shield.log".into(),
+            webhook_url: Some("https://hooks.example.com".into()),
+            auto_deny_timeout: 120,
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let back: ShieldConfig = serde_json::from_str(&json).unwrap();
+        assert!(back.enabled);
+        assert!(!back.enable_ast);
+        assert_eq!(back.auto_deny_timeout, 120);
+    }
+
+    #[test]
+    fn test_plan_config_features() {
+        let plan = PlanConfig {
+            id: "pro".into(), name: "Pro".into(), price: 999, period: "monthly".into(),
+            features: [("max_agents".into(), serde_json::json!(10))].into_iter().collect(),
+        };
+        let json = serde_json::to_string(&plan).unwrap();
+        let back: PlanConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.features["max_agents"], 10);
+    }
+
+    #[test]
+    fn test_backup_config_full() {
+        let b = BackupConfig {
+            enabled: true, max_snapshots: 10, max_total_size: 1024,
+            retention_days: 30, backup_dir: "/backup".into(), compression: "zstd".into(),
+        };
+        let json = serde_json::to_string(&b).unwrap();
+        let back: BackupConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.compression, "zstd");
+        assert_eq!(back.retention_days, 30);
+    }
 }

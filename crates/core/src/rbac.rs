@@ -213,4 +213,116 @@ users:
         let paths = cfg.users[1].allowed_paths.as_ref().unwrap();
         assert_eq!(paths, &["/home/app".to_string()]);
     }
+
+
+    #[test]
+    fn test_role_serialization_roundtrip() {
+        for role in [Role::Admin, Role::Operator, Role::Viewer, Role::Agent] {
+            let json = serde_json::to_string(&role).unwrap();
+            let back: Role = serde_json::from_str(&json).unwrap();
+            assert_eq!(role, back);
+        }
+    }
+
+    #[test]
+    fn test_permission_serialization_roundtrip() {
+        for perm in [Permission::CommandExecute, Permission::FileRead, Permission::ShieldApprove, Permission::UserManage] {
+            let json = serde_json::to_string(&perm).unwrap();
+            let back: Permission = serde_json::from_str(&json).unwrap();
+            assert_eq!(perm, back);
+        }
+    }
+
+    #[test]
+    fn test_rbac_token_serialization() {
+        let token = RbacToken {
+            user_id: "u1".into(),
+            roles: vec![Role::Admin],
+            issued_at: 1000,
+            expires_at: 2000,
+            issuer: "flowlink".into(),
+        };
+        let json = serde_json::to_string(&token).unwrap();
+        let back: RbacToken = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.expires_at, 2000);
+        assert_eq!(back.issuer, "flowlink");
+    }
+
+    #[test]
+    fn test_token_expiry_validation() {
+        let now = 2000u64;
+        let expired = RbacToken { user_id: "u".into(), roles: vec![], issued_at: 1000, expires_at: 1500, issuer: "x".into() };
+        let valid = RbacToken { user_id: "u".into(), roles: vec![], issued_at: 1000, expires_at: 3000, issuer: "x".into() };
+        assert!(expired.expires_at < now, "expired token");
+        assert!(valid.expires_at > now, "valid token");
+    }
+
+    #[test]
+    fn test_invalid_yaml_fails() {
+        let yaml = "not valid yaml: [";
+        #[derive(Deserialize)]
+        struct Cfg { users: Vec<RbacUser> }
+        let result: Result<Cfg, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_user_with_allowed_paths() {
+        let user = RbacUser {
+            id: "u1".into(), username: "op".into(),
+            roles: vec![Role::Operator],
+            allowed_paths: Some(vec!["/home/app".into(), "/var/log".into()]),
+            denied_commands: None,
+            metadata: HashMap::new(),
+        };
+        let json = serde_json::to_string(&user).unwrap();
+        let back: RbacUser = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.allowed_paths.unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_user_with_denied_commands() {
+        let user = RbacUser {
+            id: "u1".into(), username: "ag".into(),
+            roles: vec![Role::Agent],
+            allowed_paths: None,
+            denied_commands: Some(vec!["sudo *".into(), "rm -rf *".into()]),
+            metadata: HashMap::new(),
+        };
+        let json = serde_json::to_string(&user).unwrap();
+        let back: RbacUser = serde_json::from_str(&json).unwrap();
+        let denied = back.denied_commands.unwrap();
+        assert!(denied.contains(&"sudo *".to_string()));
+    }
+
+    #[test]
+    fn test_complex_user_all_fields() {
+        let mut meta = HashMap::new();
+        meta.insert("email".into(), "a@b.com".into());
+        meta.insert("team".into(), "infra".into());
+        let user = RbacUser {
+            id: "u1".into(), username: "admin".into(),
+            roles: vec![Role::Admin, Role::Operator],
+            allowed_paths: Some(vec!["/".into()]),
+            denied_commands: Some(vec![]),
+            metadata: meta,
+        };
+        let json = serde_json::to_string(&user).unwrap();
+        let back: RbacUser = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.metadata["team"], "infra");
+        assert_eq!(back.roles.len(), 2);
+        assert!(back.permissions().contains(&Permission::UserManage));
+    }
+
+    #[test]
+    fn test_permission_all_count() {
+        let all = Permission::all();
+        assert_eq!(all.len(), 20);
+    }
+
+    #[test]
+    fn test_viewer_has_minimal_permissions() {
+        let perms = Role::Viewer.permissions();
+        assert_eq!(perms.len(), 4);
+    }
 }

@@ -878,7 +878,6 @@ mod tests {
             MessageType::PairingRequest, MessageType::PairingConfirm, MessageType::PairingResponse,
             MessageType::ShieldAlert, MessageType::ShieldAlertResponse,
             MessageType::Error,
-            MessageType::PairingRequest, MessageType::PairingConfirm, MessageType::PairingResponse,
         ];
         assert_eq!(all.len(), 45, "expected 45 message type variants");
     }

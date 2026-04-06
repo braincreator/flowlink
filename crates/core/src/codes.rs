@@ -175,4 +175,57 @@ mod tests {
         assert_eq!(BACKUP_RESTORE_ERROR, "BACKUP_RESTORE_ERROR");
         assert_eq!(BACKUP_CHECKSUM_MISMATCH, "BACKUP_CHECKSUM_MISMATCH");
     }
+
+
+    #[test]
+    fn test_common_codes_present() {
+        assert_eq!(OK, "OK");
+        assert_eq!(UNKNOWN_ERROR, "UNKNOWN_ERROR");
+        assert_eq!(UNAUTHORIZED, "UNAUTHORIZED");
+        assert_eq!(FORBIDDEN, "FORBIDDEN");
+        assert_eq!(INTERNAL_ERROR, "INTERNAL_ERROR");
+    }
+
+    #[test]
+    fn test_shield_codes_exist() {
+        assert_eq!(SHIELD_BLOCKED, "SHIELD_BLOCKED");
+        assert_eq!(SHIELD_SNAPSHOT_CREATED, "SHIELD_SNAPSHOT_CREATED");
+        assert_eq!(SHIELD_PROCESS_STOPPED, "SHIELD_PROCESS_STOPPED");
+        assert_eq!(SHIELD_TIMEOUT, "SHIELD_TIMEOUT");
+    }
+
+    #[test]
+    fn test_code_format_uppercase_snake() {
+        for code in all_codes() {
+            assert!(code.chars().all(|c| c.is_ascii_uppercase() || c == '_'),
+                "Code '{}' should be UPPER_SNAKE_CASE", code);
+        }
+    }
+
+    #[test]
+    fn test_no_empty_codes() {
+        for code in all_codes() {
+            assert!(!code.trim().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_mcp_and_llm_codes() {
+        assert_eq!(MCP_AGENT_NOT_FOUND, "MCP_AGENT_NOT_FOUND");
+        assert_eq!(MCP_TIMEOUT, "MCP_TIMEOUT");
+        assert_eq!(LLM_ALL_BACKENDS_DOWN, "LLM_ALL_BACKENDS_DOWN");
+        assert_eq!(LLM_REQUEST_ERROR, "LLM_REQUEST_ERROR");
+    }
+
+    #[test]
+    fn test_skill_codes() {
+        assert_eq!(SKILL_ALREADY_EXISTS, "SKILL_ALREADY_EXISTS");
+        assert_eq!(SKILL_NOT_FOUND, "SKILL_NOT_FOUND");
+    }
+
+    #[test]
+    fn test_kill_switch_codes() {
+        assert_eq!(KILL_SWITCH_DISK_FULL, "KILL_SWITCH_DISK_FULL");
+        assert_eq!(KILL_SWITCH_EMERGENCY, "KILL_SWITCH_EMERGENCY");
+    }
 }
