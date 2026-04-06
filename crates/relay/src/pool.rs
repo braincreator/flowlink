@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use log::info;
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentInfo {
     pub agent_id: String,
     pub hostname: String,

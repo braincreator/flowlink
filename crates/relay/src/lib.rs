@@ -7,6 +7,7 @@ pub mod ratelimit;
 pub mod audit;
 pub mod registry;
 pub mod llm;
+pub mod server;
 
 use flowlink_core::config::RelayConfig;
 use log::info;

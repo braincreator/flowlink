@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ApprovalRequest {
     pub id: String,
     pub agent_id: String,
