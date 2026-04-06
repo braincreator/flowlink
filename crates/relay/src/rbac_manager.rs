@@ -258,7 +258,7 @@ mod tests {
         mgr.add_user(make_user("u1", "admin", vec![Role::Admin])).unwrap();
         let token = mgr.issue_token("u1", Duration::from_secs(0)).unwrap();
         // Give a tiny bit of time
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_secs(1));
         assert!(mgr.validate_token(&token).is_none());
     }
 

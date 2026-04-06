@@ -3,6 +3,10 @@ mod interceptor;
 mod snapshot;
 mod audit;
 mod notifier;
+mod policy_dsl;
+mod forensic;
+#[cfg(target_os = "macos")]
+mod forensic_macos;
 
 use engine::{AnalysisEngine, Command};
 use clap::Parser;

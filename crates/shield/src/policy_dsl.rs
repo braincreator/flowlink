@@ -167,7 +167,7 @@ impl PolicyEngine {
                 s.map(|s| e.map(|e| now >= s && now <= e).unwrap_or(false)).unwrap_or(false)
             }
             Condition::DayOfWeek { days } => {
-                let dow = ctx.now.format("%a").to_lowercase();
+                let dow = ctx.now.format("%a").to_string().to_lowercase();
                 days.iter().any(|d| d.to_lowercase() == dow)
             }
             Condition::RiskScoreGt { score } => ctx.risk_score > *score,
@@ -213,14 +213,14 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - CommandPattern:
+      - !CommandPattern
           pattern: "ls *"
   - name: "block-rm"
     action: deny
     priority: 90
     enabled: true
     conditions:
-      - CommandRegex:
+      - !CommandRegex
           regex: "rm -rf /"
 "#;
 
@@ -268,14 +268,14 @@ rules:
     priority: 10
     enabled: true
     conditions:
-      - CommandPattern:
+      - !CommandPattern
           pattern: "test *"
   - name: "high-priority-deny"
     action: deny
     priority: 100
     enabled: true
     conditions:
-      - CommandPattern:
+      - !CommandPattern
           pattern: "test *"
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -295,7 +295,7 @@ rules:
     priority: 100
     enabled: false
     conditions:
-      - CommandPattern:
+      - !CommandPattern
           pattern: "test *"
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -314,7 +314,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - UserIn:
+      - !UserIn
           users: ["admin", "root"]
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -337,7 +337,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - UserNotIn:
+      - !UserNotIn
           users: ["admin", "root"]
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -360,13 +360,13 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - UidEq: { uid: 0 }
+      - !UidEq { uid: 0 }
   - name: "high-uid-warn"
     action: ask
     priority: 50
     enabled: true
     conditions:
-      - UidGt: { uid: 1000 }
+      - !UidGt { uid: 1000 }
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
         let mut ctx = EvalContext::default();
@@ -391,7 +391,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - PathUnder:
+      - !PathUnder
           path: "/opt/prod"
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -414,8 +414,8 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - UidEq: { uid: 0 }
-      - UserIn:
+      - !UidEq { uid: 0 }
+      - !UserIn
           users: ["guest"]
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -439,7 +439,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - DayOfWeek:
+      - !DayOfWeek
           days: ["mon", "tue", "wed", "thu", "fri"]
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -464,7 +464,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - TimeBetween:
+      - !TimeBetween
           start: "09:00"
           end: "18:00"
 "#;
@@ -488,7 +488,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - RiskScoreGt: { score: 80 }
+      - !RiskScoreGt { score: 80 }
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
         let mut ctx = EvalContext::default();
@@ -510,7 +510,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - ThreatLevelMin:
+      - !ThreatLevelMin
           level: "L3"
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -533,7 +533,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - OriginIs:
+      - !OriginIs
           origin: "container"
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -574,7 +574,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - GroupIn:
+      - !GroupIn
           groups: ["ops", "wheel"]
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -597,7 +597,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - CommandPattern:
+      - !CommandPattern
           pattern: "cat *"
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
@@ -617,7 +617,7 @@ rules:
     priority: 100
     enabled: true
     conditions:
-      - UserIn:
+      - !UserIn
           users: ["admin"]
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
