@@ -19,6 +19,8 @@ use crate::approval::{ApprovalDecision, ApprovalQueue};
 use crate::devices::DeviceManager;
 use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;
+use crate::llm::{LlmProxy, LlmRequest};
+use crate::middleware::{auth_middleware_simple, rate_limit_middleware, request_id_middleware, logging_middleware, cors_layer};
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
 
@@ -34,6 +36,7 @@ pub struct AppState {
     pub handler: Arc<RelayHandler>,
     pub registry: Arc<Registry>,
     pub device_manager: Arc<DeviceManager>,
+    pub llm_proxy: Option<Arc<LlmProxy>>,
 }
 
 // ═══════════════════════════════════════════════
@@ -335,6 +338,52 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
 }
 
 // ═══════════════════════════════════════════════
+// LLM Proxy Handlers
+// ═══════════════════════════════════════════════
+
+async fn llm_chat(
+    State(state): State<AppState>,
+    Json(body): Json<LlmRequest>,
+) -> impl IntoResponse {
+    let proxy = match &state.llm_proxy {
+        Some(p) => p,
+        None => return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "LLM proxy not configured" })),
+        ).into_response(),
+    };
+
+    match proxy.complete(body).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ).into_response(),
+    }
+}
+
+async fn llm_backends(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match &state.llm_proxy {
+        Some(proxy) => {
+            let models = proxy.list_models().await;
+            Json(serde_json::json!({ "backends": models }))
+        }
+        None => Json(serde_json::json!({ "backends": [] })),
+    }
+}
+
+async fn llm_health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match &state.llm_proxy {
+        Some(proxy) => {
+            let health = proxy.check_health().await;
+            let map: std::collections::HashMap<String, String> = health.into_iter().collect();
+            Json(serde_json::json!({ "health": map }))
+        }
+        None => Json(serde_json::json!({ "health": {} })),
+    }
+}
+
+// ═══════════════════════════════════════════════
 // Router Builder
 // ═══════════════════════════════════════════════
 
@@ -354,5 +403,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/devices/confirm", axum::routing::post(crate::devices::confirm_pairing))
         .route("/api/devices", axum::routing::get(crate::devices::list_devices))
         .route("/api/devices/{id}", axum::routing::delete(crate::devices::remove_device))
+        .route("/api/llm", post(llm_chat))
+        .route("/api/llm/backends", get(llm_backends))
+        .route("/api/llm/health", get(llm_health))
         .with_state(state)
+        // Middleware layers (innermost first)
+        .layer(axum::middleware::from_fn(logging_middleware))
+        .layer(axum::middleware::from_fn(request_id_middleware))
+        .layer(axum::middleware::from_fn(rate_limit_middleware))
+        .layer(cors_layer(vec!["*".to_string()]))
+        .layer(axum::middleware::from_fn(auth_middleware_simple))
 }

@@ -49,9 +49,19 @@ impl Relay {
             pool.clone(), auth.clone(), eventbus.clone(), approvals.clone(),
         ));
 
+        let llm_proxy = if self.config.llm.enabled {
+            Some(Arc::new(LlmProxy::new(
+                self.config.llm.backends.clone(),
+                self.config.llm.timeout_sec,
+            )))
+        } else {
+            None
+        };
+
         let state = AppState {
             pool, approvals, eventbus, handler, registry,
             device_manager: Arc::new(DeviceManager::new()),
+            llm_proxy,
         };
 
         let app = server::build_router(state);
