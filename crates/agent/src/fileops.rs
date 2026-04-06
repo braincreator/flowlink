@@ -121,7 +121,8 @@ mod tests {
     use super::*;
 
     fn unrestricted_ops(dir: &str) -> FileOps {
-        FileOps::new(vec![dir.into()], 1024 * 1024)
+        let canonical = std::fs::canonicalize(dir).unwrap();
+        FileOps::new(vec![canonical.to_str().unwrap().into()], 1024 * 1024)
     }
 
     #[test]
@@ -172,7 +173,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let big_file = dir.path().join("big.txt");
         std::fs::write(&big_file, vec![0u8; 100]).unwrap();
-        let ops = FileOps::new(vec![dir.path().to_str().unwrap().into()], 50);
+        let canonical = dir.path().canonicalize().unwrap();
+        let ops = FileOps::new(vec![canonical.to_str().unwrap().into()], 50);
         let result = ops.read(big_file.to_str().unwrap());
         assert!(result.is_err());
         let err = result.unwrap_err();

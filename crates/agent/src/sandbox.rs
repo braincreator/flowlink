@@ -87,7 +87,8 @@ impl Sandbox {
         if !self.allowed_dirs.is_empty() {
             let allowed = self.allowed_dirs.iter().any(|dir| {
                 let dir_path = Path::new(dir);
-                resolved.starts_with(dir_path) || resolved == dir_path
+                let canonical_dir = dir_path.canonicalize().unwrap_or_else(|_| dir_path.to_path_buf());
+                resolved.starts_with(&canonical_dir) || resolved == canonical_dir
             });
             if !allowed {
                 bail!("path '{}' is outside allowed directories", resolved.display());
@@ -166,6 +167,7 @@ fn contains_sudo(cmd: &str) -> bool {
 
 /// Simple glob matching: supports `*` at start, end, or middle.
 fn match_glob(cmd: &str, pattern: &str) -> bool {
+    let cmd = cmd.trim();
     if pattern.is_empty() {
         return false;
     }

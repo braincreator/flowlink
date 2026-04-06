@@ -185,10 +185,11 @@ pub fn verify_entry(entry: &mut BTreeMap<String, serde_json::Value>, secret: &[u
 mod tests {
     use super::*;
 
-    fn test_log() -> AuditLog {
+    fn test_log() -> (tempfile::TempDir, AuditLog) {
         let dir = tempfile::tempdir().unwrap();
         let key = vec![0u8; 32];
-        AuditLog::new(dir.path().to_str().unwrap().into(), key).unwrap()
+        let log = AuditLog::new(dir.path().to_str().unwrap().into(), key).unwrap();
+        (dir, log)
     }
 
     fn sample_entry() -> AuditEntry {
@@ -209,14 +210,14 @@ mod tests {
 
     #[test]
     fn test_log_entry() {
-        let log = test_log();
+        let (_dir, log) = test_log();
         let entry = sample_entry();
         log.log(&entry).unwrap();
     }
 
     #[test]
     fn test_verify_chain_integrity() {
-        let log = test_log();
+        let (_dir, log) = test_log();
         for i in 0..5 {
             let mut entry = sample_entry();
             entry.id = format!("e{}", i);
@@ -228,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_verify_tampered_entry() {
-        let log = test_log();
+        let (_dir, log) = test_log();
         log.log(&sample_entry()).unwrap();
 
         // Tamper with the log file
@@ -244,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_verify_empty_log() {
-        let log = test_log();
+        let (_dir, log) = test_log();
         assert!(log.verify().unwrap());
     }
 

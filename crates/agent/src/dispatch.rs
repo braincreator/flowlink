@@ -459,6 +459,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn test_deps() -> (
+        tempfile::TempDir,
         PolicyEngine,
         ApprovalManager,
         FileOps,
@@ -468,14 +469,16 @@ mod tests {
         Sandbox,
     ) {
         let tmp = tempfile::tempdir().unwrap();
+        let tmp_canonical = tmp.path().canonicalize().unwrap();
+        let tmp_str = tmp_canonical.to_str().unwrap();
         let policy = PolicyEngine::new(false, false);
         let approval = ApprovalManager::new(crate::approval::ApprovalMode::Auto);
-        let fileops = FileOps::new(vec![tmp.path().to_str().unwrap().into()], 1024 * 1024);
+        let fileops = FileOps::new(vec![tmp_str.into()], 1024 * 1024);
         let backup = BackupManager::new(tmp.path().join("backups").to_str().unwrap().into(), 10, 30);
         let killswitch = KillSwitch::new();
         let skill_mgr = SkillManager::new(tmp.path().to_str().unwrap()).unwrap();
         let sandbox = Sandbox::new(vec![tmp.path().to_str().unwrap().into()], vec![], 0, 0, false);
-        (policy, approval, fileops, backup, killswitch, skill_mgr, sandbox)
+        (tmp, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox)
     }
 
     fn msg_with(t: MessageType, payload: serde_json::Value) -> Message {
@@ -484,7 +487,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ping_ack() {
-        let (policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         let msg = Message::new(MessageType::Heartbeat).with_agent_id("test");
         let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
         assert!(resp.is_some());
@@ -493,7 +496,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_exec_done() {
-        let (policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         let payload = serde_json::json!({
             "command": "echo hello",
             "timeout_sec": 10,
@@ -507,7 +510,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_exec_blocked() {
-        let (policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         let payload = serde_json::json!({
             "command": "rm -rf /",
             "timeout_sec": 10,
@@ -521,11 +524,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_read() {
-        let tmp = tempfile::tempdir().unwrap();
+        let (tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         let path = tmp.path().join("test.txt");
         std::fs::write(&path, "hello").unwrap();
-
-        let (policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         let payload = serde_json::json!({ "path": path.to_str().unwrap() });
         let msg = msg_with(MessageType::FileRead, payload);
         let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
@@ -535,7 +536,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_backup_list() {
-        let (policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         let msg = Message::new(MessageType::BackupList).with_agent_id("test");
         let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
         assert!(resp.is_some());
@@ -544,7 +545,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_skill_list() {
-        let (policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         let msg = Message::new(MessageType::SkillList).with_agent_id("test");
         let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
         assert!(resp.is_some());
@@ -552,7 +553,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_killswitch_blocks_exec() {
-        let (policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         ks.pause("test");
         let payload = serde_json::json!({
             "command": "echo hello",
@@ -567,7 +568,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_payload_error() {
-        let (policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
         let msg = Message::new(MessageType::ExecRequest).with_agent_id("test");
         let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
         assert!(resp.is_some());

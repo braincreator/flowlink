@@ -113,6 +113,7 @@ impl Registry {
     pub fn deactivate_client(&self, id: &str) -> bool {
         if let Some(mut c) = self.clients.get_mut(id) {
             c.active = false;
+            drop(c); // Release guard before iterating the map
             let _ = self.save_clients();
             true
         } else {
