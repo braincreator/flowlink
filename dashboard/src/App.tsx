@@ -12,6 +12,9 @@ import Devices from './pages/Devices';
 import RBAC from './pages/RBAC';
 import Metrics from './pages/Metrics';
 import Settings from './pages/Settings';
+import Billing from './pages/Billing';
+import LLM from './pages/LLM';
+import MCP from './pages/MCP';
 
 export default function App() {
   return (
@@ -30,6 +33,9 @@ export default function App() {
           <Route path="rbac" element={<RBAC />} />
           <Route path="metrics" element={<Metrics />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="billing" element={<Billing />} />
+          <Route path="llm" element={<LLM />} />
+          <Route path="mcp" element={<MCP />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

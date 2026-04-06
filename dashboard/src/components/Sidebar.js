@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, createContext, useContext } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Bot, Shield, FileText, Terminal, HardDrive, FileCode, Smartphone, Users, Activity, Settings, ChevronLeft, ChevronRight, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Bot, Shield, FileText, Terminal, HardDrive, FileCode, Smartphone, Users, Activity, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Wrench, CreditCard } from 'lucide-react';
 const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/agents', icon: Bot, label: 'Agents' },
@@ -14,6 +14,9 @@ const navItems = [
     { to: '/rbac', icon: Users, label: 'RBAC' },
     { to: '/metrics', icon: Activity, label: 'Metrics' },
     { to: '/settings', icon: Settings, label: 'Settings' },
+    { to: '/llm', icon: Brain, label: 'LLM Proxy' },
+    { to: '/mcp', icon: Wrench, label: 'MCP Tools' },
+    { to: '/billing', icon: CreditCard, label: 'Billing' },
 ];
 const pageTitles = {};
 navItems.forEach(n => { if (n.to !== '/')

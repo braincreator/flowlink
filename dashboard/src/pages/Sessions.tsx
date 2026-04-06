@@ -1,34 +1,35 @@
 import { useState } from 'react';
 import { Play } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Badge, DataTable, Modal, LoadingSkeleton } from '../components/Layout';
+import { Badge, DataTable, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
-import { mockSessions } from '../api/client';
-import type { Session } from '../types';
 
 export default function Sessions() {
-  const [replaySession, setReplaySession] = useState<Session | null>(null);
+  const [replaySession, setReplaySession] = useState<any>(null);
 
-  const { data: sessions, loading, isLive } = useApi<any[]>(
-    () => api.getAuditEvents({ event_type: 'session_started', limit: 50 }),
-    mockSessions,
+  const { data, loading, error, refresh } = useApi<any[]>(
+    () => api.getSessions(),
     { pollMs: 15000 }
   );
 
+  const sessions = data || [];
   const activeSessions = sessions.filter((s: any) => s.status === 'active');
   const durationData = sessions.map((s: any) => ({
     id: (s.id || '').slice(0, 8),
     duration: Math.round((s.duration_ms || 0) / 60000),
   }));
 
-  if (loading) return <LoadingSkeleton lines={6} />;
+  if (loading && !data) return <LoadingSkeleton lines={6} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {!isLive && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
-          ⚠️ Connected to mock data. Start relay for live data.
+      {error && !data && (
+        <div className="flex flex-col items-center py-16 text-center">
+          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
         </div>
       )}
 
@@ -49,32 +50,36 @@ export default function Sessions() {
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Session Duration (min)</h3>
-        <ResponsiveContainer width="100%" height={160}>
-          <BarChart data={durationData}>
-            <XAxis dataKey="id" tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
-            <YAxis tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
-            <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
-            <Bar dataKey="duration" fill="#6366f1" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+        {durationData.length === 0 ? (
+          <div className="flex items-center justify-center py-8 text-sm text-[var(--color-dim)] opacity-60">No session data available</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={durationData}>
+              <XAxis dataKey="id" tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
+              <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
+              <Bar dataKey="duration" fill="#6366f1" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
       <DataTable
         columns={[
-          { key: 'id', label: 'Session', render: (r: Session) => <span className="font-mono text-xs">{r.id}</span> },
+          { key: 'id', label: 'Session', render: (r: any) => <span className="font-mono text-xs">{r.id}</span> },
           { key: 'user', label: 'User', render: (r: any) => r.user || '—' },
-          { key: 'agent_id', label: 'Agent', render: (r: Session) => <span className="font-mono text-xs text-[var(--color-dim)]">{r.agent_id}</span> },
+          { key: 'agent_id', label: 'Agent', render: (r: any) => <span className="font-mono text-xs text-[var(--color-dim)]">{r.agent_id}</span> },
           { key: 'origin', label: 'Origin', render: (r: any) => r.origin ? <span className="font-mono text-xs">{r.origin}</span> : <span className="text-[var(--color-dim)]">—</span> },
           { key: 'terminal', label: 'Terminal', render: (r: any) => r.terminal ? <span className="text-xs text-[var(--color-dim)]">{r.terminal}</span> : <span className="text-[var(--color-dim)]">—</span> },
           { key: 'commands_count', label: 'Commands', render: (r: any) => r.commands_count ?? '—' },
           { key: 'duration_ms', label: 'Duration', render: (r: any) => r.duration_ms ? <span className="text-xs">{Math.round(r.duration_ms / 60000)}m</span> : <span className="text-[var(--color-dim)]">—</span> },
-          { key: 'status', label: 'Status', render: (r: Session) => (
+          { key: 'status', label: 'Status', render: (r: any) => (
             <Badge variant={r.status === 'active' ? 'green' : 'default'}>
               <span className={`inline-block h-1.5 w-1.5 rounded-full ${r.status === 'active' ? 'bg-emerald-400 pulse-dot' : ''}`} />
               {r.status}
             </Badge>
           )},
-          { key: 'replay', label: '', render: (r: Session) => r.status === 'ended' ? (
+          { key: 'replay', label: '', render: (r: any) => r.status === 'ended' ? (
             <button onClick={(e) => { e.stopPropagation(); setReplaySession(r); }} className="flex items-center gap-1 rounded-lg bg-[var(--color-accent)]/15 px-2.5 py-1 text-xs font-medium text-[var(--color-accent-light)] hover:bg-[var(--color-accent)]/25 transition-colors">
               <Play size={12} /> Replay
             </button>

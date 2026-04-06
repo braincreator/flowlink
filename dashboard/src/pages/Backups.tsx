@@ -1,43 +1,46 @@
 import { useState } from 'react';
 import { HardDrive, RotateCcw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Badge, DataTable, Modal, LoadingSkeleton } from '../components/Layout';
+import { Badge, DataTable, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
-import { mockBackups, mockStorageByAgent } from '../api/client';
-import type { Backup } from '../types';
 
 export default function Backups() {
-  const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<any>(null);
 
-  const { data: backups, loading, isLive } = useApi<any[]>(
-    () => api.getAuditEvents({ event_type: 'backup', limit: 100 }),
-    mockBackups,
+  const { data, loading, error, refresh } = useApi<any[]>(
+    () => api.getBackups(),
     { pollMs: 30000 }
   );
 
+  const backups = data || [];
+
   const formatSize = (bytes: number) => bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${(bytes / 1e6).toFixed(0)} MB`;
 
-  if (loading) return <LoadingSkeleton lines={6} />;
+  if (loading && !data) return <LoadingSkeleton lines={6} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {!isLive && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
-          ⚠️ Connected to mock data. Start relay for live data.
+      {error && !data && (
+        <div className="flex flex-col items-center py-16 text-center">
+          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
         </div>
       )}
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Storage Usage by Agent</h3>
         <ResponsiveContainer width="100%" height={180}>
-          <BarChart data={mockStorageByAgent}>
+          <BarChart data={[]}>
             <XAxis dataKey="agent" tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
             <YAxis tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} tickFormatter={(v: number) => `${v} GB`} />
             <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
             <Bar dataKey="used" fill="#6366f1" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
+        <div className="flex items-center justify-center py-4 text-sm text-[var(--color-dim)] opacity-60">No time-series data available yet</div>
       </div>
 
       <DataTable

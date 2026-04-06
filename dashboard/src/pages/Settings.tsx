@@ -1,19 +1,21 @@
 import { useState } from 'react';
-import { Save, Server, Shield, Bell, Info } from 'lucide-react';
+import { Save, Server, Shield, Bell, Info, CheckCircle, XCircle } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../api/client';
-import { mockSystemInfo } from '../api/client';
 
 export default function Settings() {
   const { logout } = useAuth();
-  const { data: systemInfo } = useApi(
-    async () => mockSystemInfo,
-    mockSystemInfo,
+  const { data: systemInfo, loading: infoLoading } = useApi(
+    () => api.getSystemInfo(),
   );
-  const { isLive: healthLive } = useApi(() => api.getHealth(), { status: 'ok' }, { pollMs: 15000 });
+  const { data: health, error: healthError } = useApi(
+    () => api.getHealth(),
+    { pollMs: 15000 }
+  );
 
-  const info = { ...mockSystemInfo, ...systemInfo };
+  const info = (systemInfo as any) || {};
+  const healthStatus = (health as any)?.status === 'ok';
   const [saved, setSaved] = useState(false);
 
   const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
@@ -27,12 +29,12 @@ export default function Settings() {
         </div>
         <div className="grid grid-cols-2 gap-4">
           {[
-            { label: 'Version', value: info.version },
-            { label: 'Uptime', value: info.uptime },
-            { label: 'Memory Usage', value: `${info.memory_usage}%` },
-            { label: 'CPU Usage', value: `${info.cpu_usage}%` },
+            { label: 'Version', value: info.version || '—' },
+            { label: 'Uptime', value: info.uptime || '—' },
+            { label: 'Memory Usage', value: info.memory_usage != null ? `${info.memory_usage}%` : '—' },
+            { label: 'CPU Usage', value: info.cpu_usage != null ? `${info.cpu_usage}%` : '—' },
             { label: 'API URL', value: api.getApiBase() },
-            { label: 'Connection', value: healthLive ? '🟢 Connected' : '🔴 Offline (mock)' },
+            { label: 'Connection', value: healthError ? '🔴 Offline' : healthStatus ? '🟢 Connected' : infoLoading ? '⏳ Connecting...' : '🟡 Unknown' },
           ].map(s => (
             <div key={s.label} className="rounded-lg bg-[var(--color-bg)] p-3">
               <div className="text-xs text-[var(--color-dim)]">{s.label}</div>

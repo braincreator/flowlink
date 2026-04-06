@@ -3,8 +3,6 @@ import { Search, Download } from 'lucide-react';
 import { Badge, DataTable, LoadingSkeleton } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
-import { mockAuditEvents } from '../api/client';
-import type { AuditEvent } from '../types';
 
 const eventTypeIcons: Record<string, string> = {
   command_executed: '✓', command_intercepted: '🛡', command_approved: '✅',
@@ -25,22 +23,22 @@ export default function Audit() {
     limit: 100,
   }), [filterType]);
 
-  const { data: events, loading, isLive, refresh } = useApi(fetchEvents, mockAuditEvents, { pollMs: 15000 });
+  const { data: events, loading, error, refresh } = useApi(fetchEvents, { pollMs: 15000 });
 
   const { data: auditStats } = useApi(
     () => api.getAuditStats(),
-    { total: 50, allowed: 40, denied: 5, intercepted: 5 },
     { pollMs: 30000 }
   );
 
-  const types = [...new Set(events.map((e: AuditEvent) => e.event_type))];
-  const filtered = events.filter((e: AuditEvent) => {
+  const eventList = events || [];
+  const types = [...new Set(eventList.map((e: any) => e.event_type))];
+  const filtered = eventList.filter((e: any) => {
     if (search && !`${e.command} ${e.user} ${e.agent_id}`.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
-  const denied = events.filter((e: AuditEvent) => e.result === 'denied').length;
-  const allowed = events.filter((e: AuditEvent) => e.result === 'allowed').length;
+  const denied = eventList.filter((e: any) => e.result === 'denied').length;
+  const allowed = eventList.filter((e: any) => e.result === 'allowed').length;
 
   const handleExport = async (format: string) => {
     try {
@@ -55,28 +53,31 @@ export default function Audit() {
     } catch {}
   };
 
-  if (loading) return <LoadingSkeleton lines={8} />;
+  if (loading && !events) return <LoadingSkeleton lines={8} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {!isLive && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
-          ⚠️ Connected to mock data. Start relay for live data.
+      {error && !events && (
+        <div className="flex flex-col items-center py-16 text-center">
+          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Total Events</div>
-          <div className="mt-1 text-2xl font-bold">{(auditStats as any).total || events.length}</div>
+          <div className="mt-1 text-2xl font-bold">{(auditStats as any)?.total || eventList.length}</div>
         </div>
         <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Allowed</div>
-          <div className="mt-1 text-2xl font-bold text-emerald-400">{(auditStats as any).allowed || allowed}</div>
+          <div className="mt-1 text-2xl font-bold text-emerald-400">{(auditStats as any)?.allowed || allowed}</div>
         </div>
         <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Denied</div>
-          <div className="mt-1 text-2xl font-bold text-rose-400">{(auditStats as any).denied || denied}</div>
+          <div className="mt-1 text-2xl font-bold text-rose-400">{(auditStats as any)?.denied || denied}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Deny Rate</div>
@@ -110,8 +111,8 @@ export default function Audit() {
 
       <DataTable
         columns={[
-          { key: 'timestamp_iso', label: 'Time', render: (r: AuditEvent) => <span className="text-xs text-[var(--color-dim)] whitespace-nowrap">{new Date(r.timestamp_iso).toLocaleString()}</span> },
-          { key: 'event_type', label: 'Event', render: (r: AuditEvent) => (
+          { key: 'timestamp_iso', label: 'Time', render: (r: any) => <span className="text-xs text-[var(--color-dim)] whitespace-nowrap">{new Date(r.timestamp_iso).toLocaleString()}</span> },
+          { key: 'event_type', label: 'Event', render: (r: any) => (
             <span className="flex items-center gap-1.5">
               <span>{eventTypeIcons[r.event_type] || '•'}</span>
               <Badge variant={r.event_type === 'command_intercepted' ? 'red' : r.event_type === 'canary_triggered' ? 'amber' : 'default'}>
@@ -119,11 +120,11 @@ export default function Audit() {
               </Badge>
             </span>
           )},
-          { key: 'agent_id', label: 'Agent', render: (r: AuditEvent) => <span className="text-xs font-mono">{r.agent_id}</span> },
+          { key: 'agent_id', label: 'Agent', render: (r: any) => <span className="text-xs font-mono">{r.agent_id}</span> },
           { key: 'user', label: 'User' },
-          { key: 'command', label: 'Command', render: (r: AuditEvent) => r.command ? <code className="rounded bg-[var(--color-surface3)] px-1.5 py-0.5 text-xs">{r.command}</code> : <span className="text-[var(--color-dim)]">—</span> },
-          { key: 'risk_score', label: 'Risk', render: (r: AuditEvent) => r.risk_score != null ? <span className={`font-mono text-xs font-bold ${r.risk_score >= 70 ? 'text-rose-400' : r.risk_score >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>{r.risk_score}</span> : <span className="text-[var(--color-dim)]">—</span> },
-          { key: 'result', label: 'Result', render: (r: AuditEvent) => <Badge variant={actionBadge[r.result || ''] || 'default'}>{r.result || '—'}</Badge> },
+          { key: 'command', label: 'Command', render: (r: any) => r.command ? <code className="rounded bg-[var(--color-surface3)] px-1.5 py-0.5 text-xs">{r.command}</code> : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'risk_score', label: 'Risk', render: (r: any) => r.risk_score != null ? <span className={`font-mono text-xs font-bold ${r.risk_score >= 70 ? 'text-rose-400' : r.risk_score >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>{r.risk_score}</span> : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'result', label: 'Result', render: (r: any) => <Badge variant={actionBadge[r.result || ''] || 'default'}>{r.result || '—'}</Badge> },
         ]}
         data={filtered} emptyText="No matching audit events"
       />

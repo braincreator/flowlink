@@ -1,37 +1,59 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Agent } from '../types';
 import AgentCard from '../components/AgentCard';
 import BottomSheet from '../components/BottomSheet';
-
-const mockAgents: Agent[] = [
-  { id: 'a1', hostname: 'prod-web-02', os: 'Ubuntu 22.04', status: 'online', lastSeen: new Date().toISOString(), ip: '10.0.1.5', version: '1.2.0' },
-  { id: 'a2', hostname: 'prod-k8s-01', os: 'Ubuntu 24.04', status: 'online', lastSeen: new Date().toISOString(), ip: '10.0.1.10', version: '1.2.0' },
-  { id: 'a3', hostname: 'prod-db-01', os: 'Debian 12', status: 'online', lastSeen: new Date(Date.now() - 60000).toISOString(), ip: '10.0.2.5', version: '1.1.9' },
-  { id: 'a4', hostname: 'staging-01', os: 'Darwin 23.4', status: 'offline', lastSeen: new Date(Date.now() - 7200000).toISOString(), ip: '10.0.3.2', version: '1.2.0' },
-  { id: 'a5', hostname: 'dev-laptop', os: 'Darwin 24.3', status: 'online', lastSeen: new Date().toISOString(), ip: '10.0.5.20', version: '1.2.0' },
-];
-
-const recentCommands = [
-  { cmd: 'kubectl get pods', status: 'ok' as const },
-  { cmd: 'docker ps', status: 'ok' as const },
-  { cmd: 'systemctl status nginx', status: 'ok' as const },
-  { cmd: 'apt update', status: 'blocked' as const },
-  { cmd: 'df -h', status: 'ok' as const },
-];
+import { api } from '../api/client';
+import { useApi } from '../hooks/useApi';
 
 export default function Agents() {
+  const { data, loading, error, refresh } = useApi(() => api.getAgents(), { pollMs: 10000 });
   const [selected, setSelected] = useState<Agent | null>(null);
 
-  const online = mockAgents.filter(a => a.status === 'online').length;
+  const agents: Agent[] = useMemo(() => (data || []).map((a: any) => ({
+    id: a.id || a.agent_id || a.hostname,
+    hostname: a.hostname || a.name || 'unknown',
+    os: a.os || a.platform || 'Unknown',
+    status: a.status === 'online' ? 'online' as const : 'offline' as const,
+    lastSeen: a.last_seen || a.lastSeen || a.last_heartbeat || new Date().toISOString(),
+    ip: a.ip || a.address || '—',
+    version: a.version || '—',
+  })), [data]);
+
+  const online = agents.filter(a => a.status === 'online').length;
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <div className="w-8 h-8 border-2 border-tg-button border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-tg-hint mt-3">Loading agents...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <span className="text-3xl block mb-3">⚠️</span>
+        <p className="text-sm text-tg-danger mb-1">{error}</p>
+        <button onClick={refresh} className="mt-2 px-4 py-2 rounded-xl bg-tg-button text-tg-button-text text-sm font-medium">
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="px-4 pt-4">
       <h1 className="font-bold text-lg mb-1">Agents</h1>
-      <p className="text-xs text-tg-hint mb-4">{online}/{mockAgents.length} online</p>
+      <p className="text-xs text-tg-hint mb-4">{online}/{agents.length} online</p>
 
-      {mockAgents.map(agent => (
-        <AgentCard key={agent.id} agent={agent} onTap={setSelected} />
-      ))}
+      {agents.length === 0 ? (
+        <p className="text-center text-tg-hint text-sm py-8">No agents connected</p>
+      ) : (
+        agents.map(agent => (
+          <AgentCard key={agent.id} agent={agent} onTap={setSelected} />
+        ))
+      )}
 
       <BottomSheet open={!!selected} onClose={() => setSelected(null)} title={selected?.hostname}>
         {selected && (
@@ -55,21 +77,6 @@ export default function Agents() {
               <div className="flex gap-2">
                 <button className="flex-1 py-3 rounded-xl bg-tg-surface text-sm min-h-[44px]">🔄 Restart</button>
                 <button className="flex-1 py-3 rounded-xl bg-tg-danger-bg text-tg-danger text-sm min-h-[44px]">🔌 Disconnect</button>
-              </div>
-            </div>
-
-            {/* Recent Commands */}
-            <div>
-              <span className="text-xs text-tg-hint font-semibold">Recent Commands</span>
-              <div className="mt-2 space-y-1">
-                {recentCommands.map((c, i) => (
-                  <div key={i} className="flex items-center justify-between py-1.5 text-sm">
-                    <code className="font-mono text-xs truncate flex-1">{c.cmd}</code>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${c.status === 'ok' ? 'bg-tg-success-bg text-tg-success' : 'bg-tg-danger-bg text-tg-danger'}`}>
-                      {c.status}
-                    </span>
-                  </div>
-                ))}
               </div>
             </div>
           </div>

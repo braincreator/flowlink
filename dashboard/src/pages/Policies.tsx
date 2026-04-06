@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Plus, Upload, Download, Play, FileCode } from 'lucide-react';
-import { Badge, Modal, YamlEditor, LoadingSkeleton } from '../components/Layout';
+import { Badge, Modal, YamlEditor, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
-import { mockPolicies } from '../api/client';
+import { api } from '../api/client';
 
 const DEFAULT_YAML = `# FlowLink Shield Policy
 # version: "1.0"
@@ -37,10 +37,11 @@ export default function Policies() {
   const [testCmd, setTestCmd] = useState('');
   const [testResult, setTestResult] = useState<string | null>(null);
 
-  const { data: policies, loading, isLive } = useApi<any[]>(
-    async () => mockPolicies,
-    mockPolicies,
+  const { data, loading, error, refresh } = useApi<any[]>(
+    () => api.getPolicies(),
   );
+
+  const policies = data || [];
 
   const runTest = () => {
     if (!testCmd) return;
@@ -53,13 +54,16 @@ export default function Policies() {
     }
   };
 
-  if (loading) return <LoadingSkeleton lines={6} />;
+  if (loading && !data) return <LoadingSkeleton lines={6} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {!isLive && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
-          ⚠️ Connected to mock data. Start relay for live data.
+      {error && !data && (
+        <div className="flex flex-col items-center py-16 text-center">
+          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
         </div>
       )}
 
@@ -85,7 +89,9 @@ export default function Policies() {
         </div>
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Active Rules ({policies.length})</h3>
-          {policies.map((p: any, i: number) => ( // eslint-disable-next-line
+          {policies.length === 0 ? (
+            <EmptyState icon={<FileCode size={48} />} title="No policies configured" description="Add rules via the editor or API" />
+          ) : policies.map((p: any, i: number) => (
             <div key={i} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 transition-all hover:border-[var(--color-accent)]/30">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">

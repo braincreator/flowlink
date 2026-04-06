@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api/client';
-// ═══ Generic async data hook with mock fallback ═══
-export function useApi(fetcher, mockData, opts = {}) {
+// ═══ Generic async data hook ═══
+export function useApi(fetcher, opts = {}) {
     const { pollMs, enabled = true } = opts;
-    const [data, setData] = useState(mockData);
+    const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [isLive, setIsLive] = useState(false);
+    const [lastUpdated, setLastUpdated] = useState(null);
     const fetcherRef = useRef(fetcher);
     fetcherRef.current = fetcher;
     const refresh = useCallback(async () => {
@@ -17,17 +17,15 @@ export function useApi(fetcher, mockData, opts = {}) {
         try {
             const result = await fetcherRef.current();
             setData(result);
-            setIsLive(true);
+            setLastUpdated(new Date());
+            setError(null);
         }
-        catch {
-            setIsLive(false);
-            if (!isLive)
-                setData(mockData); // only fall back if never connected
+        catch (e) {
+            setError(e?.message || 'Connection failed');
         }
         finally {
             setLoading(false);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [enabled]);
     useEffect(() => {
         refresh();
@@ -36,14 +34,13 @@ export function useApi(fetcher, mockData, opts = {}) {
             return () => clearInterval(id);
         }
     }, [refresh, pollMs, enabled]);
-    return { data, setData, loading, error, refresh, isLive };
+    return { data, setData, loading, error, refresh, lastUpdated };
 }
 // ═══ SSE hook for real-time events ═══
 export function useSSE() {
     const [events, setEvents] = useState([]);
     const [connected, setConnected] = useState(false);
     useEffect(() => {
-        const token = api.getToken();
         const url = api.getSSEUrl();
         const es = new EventSource(url);
         es.onopen = () => setConnected(true);
@@ -57,17 +54,4 @@ export function useSSE() {
         return () => es.close();
     }, []);
     return { events, connected };
-}
-// ═══ Polling helper ═══
-export function usePolling(callback, intervalMs, enabled = true) {
-    const savedCallback = useRef(callback);
-    savedCallback.current = callback;
-    useEffect(() => {
-        if (!enabled)
-            return;
-        const tick = () => savedCallback.current();
-        tick();
-        const id = setInterval(tick, intervalMs);
-        return () => clearInterval(id);
-    }, [intervalMs, enabled]);
 }

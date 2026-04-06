@@ -1,32 +1,33 @@
 import { useState } from 'react';
 import { Bot, Cpu, MemoryStick, HardDrive, Terminal } from 'lucide-react';
-import { DataTable, Badge, SlidePanel, Modal, LoadingSkeleton } from '../components/Layout';
+import { DataTable, Badge, SlidePanel, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
-import { mockAgents } from '../api/client';
-import type { Agent } from '../types';
 
 export default function Agents() {
-  const [selected, setSelected] = useState<Agent | null>(null);
+  const [selected, setSelected] = useState<any>(null);
   const [execOpen, setExecOpen] = useState(false);
   const [cmd, setCmd] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  const { data: agents, loading, isLive, refresh } = useApi(
+  const { data, loading, error, refresh } = useApi(
     () => api.getAgents(),
-    mockAgents,
     { pollMs: 10000 }
   );
 
-  const filtered = filterStatus === 'all' ? agents : agents.filter((a: Agent) => a.status === filterStatus);
+  const agents = data || [];
+  const filtered = filterStatus === 'all' ? agents : agents.filter((a: any) => a.status === filterStatus);
 
-  if (loading) return <LoadingSkeleton lines={8} />;
+  if (loading && !data) return <LoadingSkeleton lines={8} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {!isLive && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
-          ⚠️ Connected to mock data. Start relay for live data.
+      {error && !data && (
+        <div className="flex flex-col items-center py-16 text-center">
+          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
         </div>
       )}
 
@@ -39,27 +40,31 @@ export default function Agents() {
         ))}
       </div>
 
-      <DataTable
-        columns={[
-          { key: 'hostname', label: 'Hostname', render: (r: Agent) => (
-            <div className="flex items-center gap-2">
-              <Bot size={16} className="text-[var(--color-accent)]" />
-              <div><div className="font-medium">{r.hostname}</div><div className="text-xs text-[var(--color-dim)]">{r.id}</div></div>
-            </div>
-          )},
-          { key: 'os', label: 'OS', render: (r: Agent) => <span className="text-xs font-mono">{r.os}</span> },
-          { key: 'version', label: 'Version' },
-          { key: 'status', label: 'Status', render: (r: Agent) => (
-            <Badge variant={r.status === 'online' ? 'green' : 'red'}>
-              <span className={`inline-block h-1.5 w-1.5 rounded-full ${r.status === 'online' ? 'bg-emerald-400 pulse-dot' : 'bg-rose-400'}`} />
-              {r.status}
-            </Badge>
-          )},
-          { key: 'last_heartbeat', label: 'Last Heartbeat', render: (r: Agent) => <span className="text-xs text-[var(--color-dim)]">{new Date(r.last_heartbeat).toLocaleTimeString()}</span> },
-          { key: 'tags', label: 'Tags', render: (r: Agent) => <div className="flex gap-1">{r.tags.map(t => <span key={t} className="rounded-md bg-[var(--color-surface3)] px-1.5 py-0.5 text-[10px] text-[var(--color-dim)]">{t}</span>)}</div> },
-        ]}
-        data={filtered} onRowClick={setSelected} searchPlaceholder="Search agents..."
-      />
+      {filtered.length === 0 && !error ? (
+        <EmptyState icon={<Bot size={48} />} title="No agents found" description={filterStatus !== 'all' ? `No ${filterStatus} agents` : 'Deploy an agent to get started'} />
+      ) : (
+        <DataTable
+          columns={[
+            { key: 'hostname', label: 'Hostname', render: (r: any) => (
+              <div className="flex items-center gap-2">
+                <Bot size={16} className="text-[var(--color-accent)]" />
+                <div><div className="font-medium">{r.hostname}</div><div className="text-xs text-[var(--color-dim)]">{r.id}</div></div>
+              </div>
+            )},
+            { key: 'os', label: 'OS', render: (r: any) => <span className="text-xs font-mono">{r.os}</span> },
+            { key: 'version', label: 'Version' },
+            { key: 'status', label: 'Status', render: (r: any) => (
+              <Badge variant={r.status === 'online' ? 'green' : 'red'}>
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${r.status === 'online' ? 'bg-emerald-400 pulse-dot' : 'bg-rose-400'}`} />
+                {r.status}
+              </Badge>
+            )},
+            { key: 'last_heartbeat', label: 'Last Heartbeat', render: (r: any) => <span className="text-xs text-[var(--color-dim)]">{new Date(r.last_heartbeat).toLocaleTimeString()}</span> },
+            { key: 'tags', label: 'Tags', render: (r: any) => <div className="flex gap-1">{(r.tags || []).map((t: string) => <span key={t} className="rounded-md bg-[var(--color-surface3)] px-1.5 py-0.5 text-[10px] text-[var(--color-dim)]">{t}</span>)}</div> },
+          ]}
+          data={filtered} onRowClick={setSelected} searchPlaceholder="Search agents..."
+        />
+      )}
 
       <SlidePanel open={!!selected} onClose={() => setSelected(null)} title={selected?.hostname || ''}>
         {selected && (
@@ -90,7 +95,7 @@ export default function Agents() {
                 <div><span className="text-[var(--color-dim)]">IP:</span> {selected.ip || '—'}</div>
                 <div><span className="text-[var(--color-dim)]">Sessions:</span> {selected.sessions_count ?? '—'}</div>
                 <div><span className="text-[var(--color-dim)]">Version:</span> {selected.version}</div>
-                <div><span className="text-[var(--color-dim)]">Tags:</span> {selected.tags.join(', ')}</div>
+                <div><span className="text-[var(--color-dim)]">Tags:</span> {(selected.tags || []).join(', ')}</div>
               </div>
             </div>
             <div className="flex gap-3">

@@ -1,28 +1,31 @@
 import { useState } from 'react';
 import { UserPlus, Key, Shield, Edit } from 'lucide-react';
-import { Badge, DataTable, SlidePanel, Modal, LoadingSkeleton } from '../components/Layout';
+import { Badge, DataTable, SlidePanel, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
-import { mockUsers } from '../api/client';
-import type { User } from '../types';
+import { api } from '../api/client';
 
 export default function RBAC() {
   const [addOpen, setAddOpen] = useState(false);
-  const [editUser, setEditUser] = useState<User | null>(null);
-  const [tokenUser, setTokenUser] = useState<User | null>(null);
+  const [editUser, setEditUser] = useState<any>(null);
+  const [tokenUser, setTokenUser] = useState<any>(null);
 
-  const { data: users, loading, isLive, refresh } = useApi(
-    async () => mockUsers, // RBAC users from relay config endpoint (TODO: dedicated endpoint)
-    mockUsers,
+  const { data, loading, error, refresh } = useApi(
+    () => api.getRbacUsers(),
     { pollMs: 30000 }
   );
 
-  if (loading) return <LoadingSkeleton lines={4} />;
+  const users = data || [];
+
+  if (loading && !data) return <LoadingSkeleton lines={4} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {!isLive && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
-          ⚠️ Connected to mock data. Start relay for live data.
+      {error && !data && (
+        <div className="flex flex-col items-center py-16 text-center">
+          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
         </div>
       )}
 
@@ -33,35 +36,39 @@ export default function RBAC() {
         </button>
       </div>
 
-      <DataTable
-        columns={[
-          { key: 'username', label: 'User', render: (r: User) => (
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-xs font-bold text-white">
-                {r.username[0].toUpperCase()}
+      {users.length === 0 && !error ? (
+        <EmptyState icon={<Shield size={48} />} title="No users configured" description="Add users to manage access control" />
+      ) : (
+        <DataTable
+          columns={[
+            { key: 'username', label: 'User', render: (r: any) => (
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-xs font-bold text-white">
+                  {r.username[0].toUpperCase()}
+                </div>
+                <span className="font-medium">{r.username}</span>
               </div>
-              <span className="font-medium">{r.username}</span>
-            </div>
-          )},
-          { key: 'roles', label: 'Roles', render: (r: User) => (
-            <div className="flex gap-1">{r.roles.map(role => <Badge key={role} variant={role === 'admin' ? 'red' : role === 'operator' ? 'amber' : 'blue'}>{role}</Badge>)}</div>
-          )},
-          { key: 'allowed_paths', label: 'Paths', render: (r: User) => (
-            <div className="flex flex-wrap gap-1">{r.allowed_paths.slice(0, 2).map(p => <span key={p} className="rounded bg-[var(--color-surface3)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--color-dim)]">{p}</span>)}
-              {r.allowed_paths.length > 2 && <span className="text-[10px] text-[var(--color-dim)]">+{r.allowed_paths.length - 2}</span>}
-            </div>
-          )},
-          { key: 'status', label: 'Status', render: (r: User) => <Badge variant={r.status === 'active' ? 'green' : 'red'}>{r.status}</Badge> },
-          { key: 'created_at', label: 'Created', render: (r: User) => <span className="text-xs text-[var(--color-dim)]">{new Date(r.created_at).toLocaleDateString()}</span> },
-          { key: 'actions', label: '', render: (r: User) => (
-            <div className="flex gap-1">
-              <button onClick={(e) => { e.stopPropagation(); setEditUser(r); }} className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"><Edit size={14} /></button>
-              <button onClick={(e) => { e.stopPropagation(); setTokenUser(r); }} className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"><Key size={14} /></button>
-            </div>
-          )},
-        ]}
-        data={users} searchPlaceholder="Search users..."
-      />
+            )},
+            { key: 'roles', label: 'Roles', render: (r: any) => (
+              <div className="flex gap-1">{(r.roles || []).map((role: string) => <Badge key={role} variant={role === 'admin' ? 'red' : role === 'operator' ? 'amber' : 'blue'}>{role}</Badge>)}</div>
+            )},
+            { key: 'allowed_paths', label: 'Paths', render: (r: any) => (
+              <div className="flex flex-wrap gap-1">{(r.allowed_paths || []).slice(0, 2).map((p: string) => <span key={p} className="rounded bg-[var(--color-surface3)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--color-dim)]">{p}</span>)}
+                {(r.allowed_paths || []).length > 2 && <span className="text-[10px] text-[var(--color-dim)]">+{(r.allowed_paths || []).length - 2}</span>}
+              </div>
+            )},
+            { key: 'status', label: 'Status', render: (r: any) => <Badge variant={r.status === 'active' ? 'green' : 'red'}>{r.status}</Badge> },
+            { key: 'created_at', label: 'Created', render: (r: any) => <span className="text-xs text-[var(--color-dim)]">{new Date(r.created_at).toLocaleDateString()}</span> },
+            { key: 'actions', label: '', render: (r: any) => (
+              <div className="flex gap-1">
+                <button onClick={(e) => { e.stopPropagation(); setEditUser(r); }} className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"><Edit size={14} /></button>
+                <button onClick={(e) => { e.stopPropagation(); setTokenUser(r); }} className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"><Key size={14} /></button>
+              </div>
+            )},
+          ]}
+          data={users} searchPlaceholder="Search users..."
+        />
+      )}
 
       <SlidePanel open={!!editUser} onClose={() => setEditUser(null)} title={`Edit ${editUser?.username || ''}`}>
         {editUser && (
@@ -70,8 +77,8 @@ export default function RBAC() {
               <label className="mb-1.5 block text-sm text-[var(--color-dim)]">Roles</label>
               <div className="flex flex-wrap gap-2">
                 {['admin', 'operator', 'viewer'].map(role => (
-                  <label key={role} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${editUser.roles.includes(role) ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent-light)]' : 'border-[var(--color-border)] text-[var(--color-dim)]'}`}>
-                    <input type="checkbox" defaultChecked={editUser.roles.includes(role)} className="sr-only" />
+                  <label key={role} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${(editUser.roles || []).includes(role) ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent-light)]' : 'border-[var(--color-border)] text-[var(--color-dim)]'}`}>
+                    <input type="checkbox" defaultChecked={(editUser.roles || []).includes(role)} className="sr-only" />
                     <Shield size={14} /> {role}
                   </label>
                 ))}
@@ -79,7 +86,7 @@ export default function RBAC() {
             </div>
             <div>
               <label className="mb-1.5 block text-sm text-[var(--color-dim)]">Allowed Paths</label>
-              <textarea defaultValue={editUser.allowed_paths.join('\n')} rows={4}
+              <textarea defaultValue={(editUser.allowed_paths || []).join('\n')} rows={4}
                 className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none resize-none" />
             </div>
             <button onClick={() => { setEditUser(null); refresh(); }} className="w-full rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)]">Save Changes</button>
