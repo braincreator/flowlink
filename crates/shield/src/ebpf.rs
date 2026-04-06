@@ -119,6 +119,36 @@ impl SimulatedMonitor {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simulated_monitor_creation() {
+        let m = SimulatedMonitor::new(None);
+        assert!(!m.is_running());
+    }
+
+    #[test]
+    fn simulated_monitor_custom_interval() {
+        let m = SimulatedMonitor::new(Some(500));
+        assert!(!m.is_running());
+    }
+
+    #[test]
+    fn simulated_monitor_default_interval() {
+        let m = SimulatedMonitor::new(None);
+        assert_eq!(m.poll_interval_ms, 100);
+    }
+
+    #[test]
+    fn process_monitor_trait_object() {
+        let mut m: Box<dyn ProcessMonitor> = Box::new(SimulatedMonitor::new(None));
+        assert!(!m.is_running());
+        // Don't actually start — no /proc on macOS
+    }
+}
+
 // ═══════════════════════════════════════════
 // eBPF Monitor (Linux only, behind "ebpf" feature)
 // ═══════════════════════════════════════════

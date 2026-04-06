@@ -204,3 +204,78 @@ pub async fn remove_device(
         ).into_response(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_pairing_code() {
+        let dm = DeviceManager::new();
+        let code = dm.generate_pairing_code("user-1");
+        assert_eq!(code.len(), 6);
+        assert!(code.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_confirm_pairing_valid() {
+        let dm = DeviceManager::new();
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "iPhone", "ios", Some("push-tok".into())).unwrap();
+        assert_eq!(device.user_id, "user-1");
+        assert_eq!(device.name, "iPhone");
+        assert!(device.active);
+    }
+
+    #[test]
+    fn test_confirm_pairing_invalid_code() {
+        let dm = DeviceManager::new();
+        assert!(dm.confirm_pairing("000000", "x", "x", None).is_err());
+    }
+
+    #[test]
+    fn test_pairing_code_single_use() {
+        let dm = DeviceManager::new();
+        let code = dm.generate_pairing_code("user-1");
+        dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+        assert!(dm.confirm_pairing(&code, "Phone2", "ios", None).is_err());
+    }
+
+    #[test]
+    fn test_list_devices() {
+        let dm = DeviceManager::new();
+        let code1 = dm.generate_pairing_code("user-1");
+        dm.confirm_pairing(&code1, "Phone", "ios", None).unwrap();
+        let code2 = dm.generate_pairing_code("user-1");
+        dm.confirm_pairing(&code2, "Desktop", "desktop", None).unwrap();
+        let code3 = dm.generate_pairing_code("user-2");
+        dm.confirm_pairing(&code3, "Tablet", "android", None).unwrap();
+
+        assert_eq!(dm.list_devices("user-1").len(), 2);
+        assert_eq!(dm.list_devices("user-2").len(), 1);
+        assert_eq!(dm.list_devices("user-3").len(), 0);
+    }
+
+    #[test]
+    fn test_remove_device() {
+        let dm = DeviceManager::new();
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+        assert!(dm.remove_device(&device.id).is_ok());
+        assert!(dm.remove_device(&device.id).is_err()); // already removed
+    }
+
+    #[test]
+    fn test_send_push_device_not_found() {
+        let dm = DeviceManager::new();
+        assert!(dm.send_push("nonexistent", "hello").is_err());
+    }
+
+    #[test]
+    fn test_send_push_success() {
+        let dm = DeviceManager::new();
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+        assert!(dm.send_push(&device.id, "notification").is_ok());
+    }
+}

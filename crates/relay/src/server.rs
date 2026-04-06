@@ -16,6 +16,7 @@ use std::sync::Arc;
 // StreamExt comes from futures_util (re-exported via axum)
 
 use crate::approval::{ApprovalDecision, ApprovalQueue};
+use crate::auth::AuthManager;
 use crate::devices::DeviceManager;
 use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;
@@ -616,4 +617,132 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(cors_layer(vec!["*".to_string()]))
         .layer(axum::middleware::from_fn(auth_middleware_simple))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request as HttpRequest, StatusCode};
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn test_state() -> AppState {
+        AppState {
+            pool: Arc::new(AgentPool::new()),
+            approvals: Arc::new(ApprovalQueue::new()),
+            eventbus: Arc::new(EventBus::new()),
+            handler: Arc::new(RelayHandler::new(
+                Arc::new(AgentPool::new()),
+                Arc::new(AuthManager::new()),
+                Arc::new(EventBus::new()),
+                Arc::new(ApprovalQueue::new()),
+            )),
+            registry: Arc::new(Registry::new(tempfile::tempdir().unwrap().path()).unwrap()),
+            device_manager: Arc::new(DeviceManager::new()),
+            llm_proxy: None,
+            shield_alerts: Arc::new(ShieldAlertManager::new()),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_health_endpoint() {
+        let app = build_router(test_state());
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["agents"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_agents_empty() {
+        let app = build_router(test_state());
+        let resp = app.oneshot(HttpRequest::builder().uri("/api/agents").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_agents_with_registered() {
+        let state = test_state();
+        state.pool.register(AgentInfo {
+            agent_id: "a1".into(), hostname: "h1".into(), os: "linux".into(),
+            arch: "x86_64".into(), connected_at: 1000, last_heartbeat: 1000,
+            labels: vec![], capabilities: vec![],
+        });
+        let app = build_router(state);
+        let resp = app.oneshot(HttpRequest::builder().uri("/api/agents").body(Body::empty()).unwrap()).await.unwrap();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_build_router_does_not_panic() {
+        let _ = build_router(test_state());
+    }
+
+    #[tokio::test]
+    async fn test_shield_alerts_flow() {
+        let state = test_state();
+        state.shield_alerts.add(ShieldAlertEntry {
+            alert_id: "al-1".into(), pid: 1234, uid: 1000, username: "root".into(),
+            command: "rm -rf /".into(), rule_name: "danger".into(), action: "block".into(),
+            snapshot: None, timestamp: 1000, agent_id: None, resolved: false, approved: None,
+        });
+        let (total, pending, resolved) = state.shield_alerts.stats();
+        assert_eq!(total, 1);
+        assert_eq!(pending, 1);
+        assert_eq!(resolved, 0);
+        assert!(state.shield_alerts.resolve_by_pid(1234, true));
+        assert!(state.shield_alerts.list_active().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_llm_not_configured() {
+        let app = build_router(test_state());
+        let req_body = r#"{"messages":[{"role":"user","content":"hi"}]}"#;
+        let resp = app.oneshot(HttpRequest::builder().method("POST").uri("/api/llm")
+            .header("content-type", "application/json")
+            .body(Body::new(req_body.to_string())).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_mcp_initialize() {
+        let app = build_router(test_state());
+        let body = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize"});
+        let resp = app.oneshot(HttpRequest::builder().method("POST").uri("/mcp")
+            .header("content-type", "application/json")
+            .body(Body::new(serde_json::to_string(&body).unwrap())).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        assert_eq!(json["result"]["serverInfo"]["name"], "flowlink-relay");
+    }
+
+    #[tokio::test]
+    async fn test_device_pair() {
+        let app = build_router(test_state());
+        let pair_body = serde_json::json!({"user_id": "u1"});
+        let resp = app.oneshot(HttpRequest::builder().method("POST").uri("/api/devices/pair")
+            .header("content-type", "application/json")
+            .body(Body::new(serde_json::to_string(&pair_body).unwrap())).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        let code = json["code"].as_str().unwrap();
+        assert_eq!(code.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn test_404() {
+        let app = build_router(test_state());
+        let resp = app.oneshot(HttpRequest::builder().uri("/nonexistent").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }

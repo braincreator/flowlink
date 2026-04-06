@@ -122,3 +122,108 @@ pub fn sigcont(pid: u32) -> Result<()> {
 pub fn sigkill(pid: u32) -> Result<()> {
     send_signal(pid, libc::SIGKILL)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ppid_from_stat() {
+        // Typical format: 1234 (bash) S 5678 1234 ...
+        let stat = "1234 (bash) S 5678 1234 5678 0 -1 4194304 1234 0 0 0 0";
+        assert_eq!(parse_ppid_from_stat(stat), 5678);
+    }
+
+    #[test]
+    fn test_parse_ppid_short_stat() {
+        let stat = "1 (init) S 0 1 0";
+        assert_eq!(parse_ppid_from_stat(stat), 0); // init ppid is 0
+    }
+
+    #[test]
+    fn test_parse_ppid_empty() {
+        assert_eq!(parse_ppid_from_stat(""), 0);
+    }
+
+    #[test]
+    fn test_parse_ppid_no_close_paren() {
+        assert_eq!(parse_ppid_from_stat("1234 bash S 5678"), 0);
+    }
+
+    #[test]
+    fn test_parse_uid_from_status() {
+        let status = "Name:\tbash\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000";
+        assert_eq!(parse_uid_from_status(status), 1000);
+    }
+
+    #[test]
+    fn test_parse_uid_root() {
+        let status = "Uid:\t0\t0\t0\t0";
+        assert_eq!(parse_uid_from_status(status), 0);
+    }
+
+    #[test]
+    fn test_parse_uid_no_uid_line() {
+        assert_eq!(parse_uid_from_status("Name:\tbash\nGid:\t1000"), 0);
+    }
+
+    #[test]
+    fn test_process_info_from_pid_self() {
+        let result = ProcessInfo::from_pid(std::process::id());
+        // On macOS there's no /proc — this will return empty fields but not panic
+        // On Linux it should work fully
+        assert!(result.is_ok());
+        let info = result.unwrap();
+        assert_eq!(info.pid, std::process::id());
+    }
+
+    #[test]
+    fn test_full_command_prefer_cmdline() {
+        let info = ProcessInfo {
+            pid: 1, ppid: 0, uid: 0,
+            comm: "test".into(),
+            cmdline: "test --arg1 --arg2".into(),
+            exe: "/usr/bin/test".into(),
+        };
+        assert_eq!(info.full_command(), "test --arg1 --arg2");
+    }
+
+    #[test]
+    fn test_full_command_fallback_comm() {
+        let info = ProcessInfo {
+            pid: 1, ppid: 0, uid: 0,
+            comm: "test".into(),
+            cmdline: String::new(),
+            exe: "/usr/bin/test".into(),
+        };
+        assert_eq!(info.full_command(), "test");
+    }
+
+    #[test]
+    fn test_username_resolves() {
+        let info = ProcessInfo {
+            pid: 1, ppid: 0, uid: 0,
+            comm: "root".into(),
+            cmdline: String::new(),
+            exe: "/usr/bin/test".into(),
+        };
+        let username = info.username();
+        assert!(!username.is_empty());
+        // UID 0 should be "root" on most systems
+        if info.uid == 0 {
+            assert_eq!(username, "root");
+        }
+    }
+
+    #[test]
+    fn test_username_unknown_uid() {
+        let info = ProcessInfo {
+            pid: 1, ppid: 0, uid: 99999,
+            comm: "test".into(),
+            cmdline: String::new(),
+            exe: "/usr/bin/test".into(),
+        };
+        let username = info.username();
+        assert!(username.starts_with("uid="));
+    }
+}

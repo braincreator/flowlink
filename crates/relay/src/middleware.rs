@@ -182,6 +182,85 @@ pub async fn logging_middleware(req: Request, next: Next) -> Response {
 
 // ── Helper ──
 
+#[cfg(test)]
+
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request as HttpRequest, header};
+    use tower::ServiceExt;
+
+    fn test_app() -> axum::Router {
+        axum::Router::new()
+            .route("/health", axum::routing::get(|| async { axum::Json(serde_json::json!({"status": "ok"})) }))
+            .route("/protected", axum::routing::get(|| async { "secret" }))
+            .layer(axum::middleware::from_fn(request_id_middleware))
+    }
+
+    #[tokio::test]
+    async fn test_request_id_added_to_response() {
+        let app = test_app();
+        let req = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert!(resp.headers().contains_key("x-request-id"));
+    }
+
+    #[tokio::test]
+    async fn test_request_id_is_uuid() {
+        let app = test_app();
+        let req = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        let id = resp.headers().get("x-request-id").unwrap().to_str().unwrap();
+        assert!(uuid::Uuid::parse_str(id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_request_id_different_per_request() {
+        let app = test_app();
+        let req1 = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
+        let req2 = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
+        let id1 = app.clone().oneshot(req1).await.unwrap().headers().get("x-request-id").unwrap().to_str().unwrap().to_string();
+        let id2 = app.oneshot(req2).await.unwrap().headers().get("x-request-id").unwrap().to_str().unwrap().to_string();
+        assert_ne!(id1, id2);
+    }
+
+    #[tokio::test]
+    async fn test_auth_passthrough_when_no_clients() {
+        let auth = Arc::new(AuthManager::new());
+        let layer_fn = auth_layer(auth, None, vec![]);
+        let app = axum::Router::new()
+            .route("/health", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(move |req, next| {
+                let f = layer_fn.clone();
+                async move { f(req, next).await }
+            }));
+        let req = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_auth_skip_paths() {
+        let auth = Arc::new(AuthManager::new());
+        let layer_fn = auth_layer(auth, Some("static-token".into()), vec!["/health".into()]);
+        let app = axum::Router::new()
+            .route("/health", axum::routing::get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn(move |req, next| {
+                let f = layer_fn.clone();
+                async move { f(req, next).await }
+            }));
+        let req = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn test_auth_rejects_missing_token() {
+        let mut auth = AuthManager::new();
+        auth.register_client(crate::auth::Client { client_id: "c1".into(), api_token: "tok".into(), name: "c1".into(), active: true });
+
+}
+
 fn json_error(status: StatusCode, code: &str, message: &str) -> Response {
     (
         status,

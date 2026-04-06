@@ -60,3 +60,94 @@ impl ApprovalQueue {
         self.pending.iter().map(|r| r.value().clone()).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_req(id: &str) -> ApprovalRequest {
+        ApprovalRequest {
+            id: id.into(),
+            agent_id: "agent-1".into(),
+            command: "rm -rf /".into(),
+            risk_level: "high".into(),
+            created_at: 1000,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_enqueue_and_list() {
+        let q = ApprovalQueue::new();
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        q.enqueue(test_req("req-1"), tx);
+        assert_eq!(q.list_pending().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_approve_responds() {
+        let q = ApprovalQueue::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        q.enqueue(test_req("req-1"), tx);
+        assert!(q.resolve("req-1", ApprovalDecision::Approved));
+        assert_eq!(rx.await.unwrap(), ApprovalDecision::Approved);
+        assert_eq!(q.list_pending().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_reject_responds() {
+        let q = ApprovalQueue::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        q.enqueue(test_req("req-1"), tx);
+        q.resolve("req-1", ApprovalDecision::Rejected);
+        assert_eq!(rx.await.unwrap(), ApprovalDecision::Rejected);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_nonexistent() {
+        let q = ApprovalQueue::new();
+        assert!(!q.resolve("ghost", ApprovalDecision::Approved));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_pending() {
+        let q = ApprovalQueue::new();
+        for i in 0..5 {
+            let (tx, _) = tokio::sync::oneshot::channel();
+            q.enqueue(test_req(&format!("req-{i}")), tx);
+        }
+        assert_eq!(q.list_pending().len(), 5);
+        q.resolve("req-2", ApprovalDecision::Approved);
+        assert_eq!(q.list_pending().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_idempotent() {
+        let q = ApprovalQueue::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        q.enqueue(test_req("req-1"), tx);
+        assert!(q.resolve("req-1", ApprovalDecision::Approved));
+        assert!(!q.resolve("req-1", ApprovalDecision::Rejected)); // already resolved
+        assert_eq!(rx.await.unwrap(), ApprovalDecision::Approved);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_approve_reject() {
+        use std::sync::Arc;
+        let q = Arc::new(ApprovalQueue::new());
+        let mut handles = vec![];
+        for i in 0..10 {
+            let q = q.clone();
+            handles.push(tokio::spawn(async move {
+                let (tx, _) = tokio::sync::oneshot::channel();
+                q.enqueue(test_req(&format!("req-{i}")), tx);
+            }));
+        }
+        for h in handles { h.await.unwrap(); }
+        assert_eq!(q.list_pending().len(), 10);
+        // Resolve all
+        for i in 0..10 {
+            q.resolve(&format!("req-{i}"), ApprovalDecision::Approved);
+        }
+        assert_eq!(q.list_pending().len(), 0);
+    }
+}

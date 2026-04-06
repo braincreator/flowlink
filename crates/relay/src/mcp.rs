@@ -34,7 +34,7 @@ pub struct McpResponse {
     error: Option<McpError>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct McpError {
     code: i32,
     message: String,
@@ -382,4 +382,74 @@ fn mcp_err(id: Option<Value>, code: i32, message: impl Into<String>) -> Json<Mcp
         result: None,
         error: Some(McpError { code, message }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mcp_req(method: &str, id: Option<Value>, params: Option<Value>) -> McpRequest {
+        McpRequest { jsonrpc: "2.0".into(), id, method: method.into(), params }
+    }
+
+    #[test]
+    fn test_mcp_request_deserialize() {
+        let json = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize"});
+        let req: McpRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.method, "initialize");
+        assert_eq!(req.id, Some(Value::Number(1.into())));
+    }
+
+    #[test]
+    fn test_mcp_request_missing_params_defaults() {
+        let json = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list"});
+        let req: McpRequest = serde_json::from_value(json).unwrap();
+        assert!(req.params.is_none());
+    }
+
+    #[test]
+    fn test_mcp_tools_list_content() {
+        let tools = mcp_tools();
+        assert!(!tools.is_empty());
+        let names: Vec<_> = tools.iter().filter_map(|t| t.get("name").and_then(|n| n.as_str())).collect();
+        assert!(names.contains(&"flowlink_agents"));
+        assert!(names.contains(&"flowlink_exec"));
+    }
+
+    #[test]
+    fn test_mcp_ok_response() {
+        let resp = mcp_ok(Some(Value::Number(1.into())), json!({"test": true}));
+        assert_eq!(resp.jsonrpc, "2.0");
+        assert!(resp.error.is_none());
+        assert!(resp.result.is_some());
+    }
+
+    #[test]
+    fn test_mcp_err_response() {
+        let resp = mcp_err(Some(Value::Number(1.into())), -32601, "method not found");
+        assert!(resp.result.is_none());
+        let err = resp.error.as_ref().unwrap();
+        assert_eq!(err.code, -32601);
+        assert_eq!(err.message, "method not found");
+    }
+
+    #[test]
+    fn test_get_arg() {
+        let args = json!({"agent": "a1", "command": "ls"});
+        assert_eq!(get_arg(&args, "agent"), Some("a1".into()));
+        assert_eq!(get_arg(&args, "missing"), None);
+    }
+
+    #[test]
+    fn test_mcp_request_with_params() {
+        let json = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "flowlink_agents", "arguments": {}}
+        });
+        let req: McpRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(req.method, "tools/call");
+        assert!(req.params.is_some());
+    }
 }

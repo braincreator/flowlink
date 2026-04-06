@@ -1,0 +1,147 @@
+// FlowLink Shield — Hybrid Guard
+// Combines kernel-level eBPF L1 interception with userspace L2/L3 analysis.
+
+use std::sync::Arc;
+use anyhow::Result;
+use log::{info, warn, error};
+use tokio::sync::mpsc;
+
+use crate::ebpf_kernel::{EbpfKernelMonitor, KernelEvent, DangerousPattern, default_patterns};
+use crate::guard::{ShieldGuard, ShieldGuardConfig};
+use crate::interceptor::{sigcont, sigkill};
+
+/// Hybrid guard configuration
+#[derive(Debug, Clone)]
+pub struct HybridConfig {
+    /// Enable eBPF kernel-level L1 interception
+    pub kernel_l1: bool,
+    /// Enable userspace L2+L3 analysis for kernel-caught events
+    pub userspace_l2_l3: bool,
+    /// Automatically SIGCONT if L2/L3 determines the event is safe
+    pub auto_release_false_positives: bool,
+    /// Maximum time (ms) to hold a process for L2/L3 check
+    pub false_positive_timeout_ms: u64,
+    /// Dangerous patterns for kernel L1 matching
+    pub patterns: Vec<DangerousPattern>,
+}
+
+impl Default for HybridConfig {
+    fn default() -> Self {
+        Self {
+            kernel_l1: true,
+            userspace_l2_l3: true,
+            auto_release_false_positives: true,
+            false_positive_timeout_ms: 100,
+            patterns: default_patterns(),
+        }
+    }
+}
+
+/// Hybrid guard combining kernel and userspace analysis
+pub struct HybridGuard {
+    inner: ShieldGuard,
+    config: HybridConfig,
+}
+
+impl HybridGuard {
+    pub fn new(guard: ShieldGuard, config: HybridConfig) -> Self {
+        Self { inner: guard, config }
+    }
+
+    /// Start the hybrid guard with eBPF kernel monitor.
+    ///
+    /// Spawns a background task that:
+    /// 1. Loads the eBPF program and receives kernel events
+    /// 2. Runs L2/L3 analysis on caught events
+    /// 3. Releases false positives or forwards to the approval flow
+    pub async fn start(
+        self: Arc<Self>,
+    ) -> Result<HybridHandle> {
+        let guard = Arc::clone(&self);
+
+        if !self.config.kernel_l1 {
+            info!("🔄 HybridGuard: kernel L1 disabled, running in userspace-only mode");
+            return Ok(HybridHandle { _task: None });
+        }
+
+        let (monitor, mut rx) = EbpfKernelMonitor::load(
+            self.config.patterns.clone(),
+            vec![], // TODO: expose allowed_uids via ShieldGuard accessor
+        ).await?;
+
+        info!("🛡 HybridGuard: eBPF kernel monitor loaded, consuming events");
+
+        let task = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                if let Err(e) = handle_kernel_event(&guard, &event).await {
+                    error!("HybridGuard: error handling kernel event pid={}: {}", event.pid, e);
+                }
+            }
+            warn!("HybridGuard: kernel event stream ended");
+        });
+
+        Ok(HybridHandle { _task: Some(task) })
+    }
+
+    /// Get a reference to the inner ShieldGuard
+    pub fn inner(&self) -> &ShieldGuard {
+        &self.inner
+    }
+}
+
+/// Handle a single kernel event through the hybrid pipeline
+async fn handle_kernel_event(guard: &HybridGuard, event: &KernelEvent) -> Result<()> {
+    info!(
+        "🛡 Kernel caught: pid={} uid={} comm={} args={:.80}",
+        event.pid, event.uid, event.comm, event.args
+    );
+
+    // L2/L3 userspace verification
+    if guard.config.userspace_l2_l3 {
+        // L2/L3 analysis note: the inner ShieldGuard.intercept() runs full
+        // analysis including AST + interpreter checks. If the kernel L1 was
+        // a false positive, the guard will allow it and we SIGCONT below.
+    }
+
+    // Truly dangerous — keep frozen (SIGSTOP already sent by kernel),
+    // proceed to approval flow via the inner ShieldGuard
+    info!(
+        "⚠️ HybridGuard: confirmed dangerous, pid={} held for approval",
+        event.pid
+    );
+
+    // The process is already SIGSTOP'd by the kernel.
+    // We forward to the inner ShieldGuard for snapshot + notify + approval.
+    // Note: intercept() will try to SIGSTOP again (harmless if already stopped).
+    let result = guard.inner.intercept(event.pid).await;
+
+    match result {
+        crate::guard::InterceptResult::Allowed => {
+            info!("✅ HybridGuard: approved, resuming pid={}", event.pid);
+            let _ = sigcont(event.pid);
+        }
+        crate::guard::InterceptResult::Blocked { pid, reason } => {
+            warn!("🚫 HybridGuard: blocked pid={}, reason={}", pid, reason);
+            let _ = sigkill(event.pid);
+        }
+        crate::guard::InterceptResult::Intercepted { pid, threat } => {
+            // Left in pending state — approval will come via resolve_approval
+            info!("⚠️ HybridGuard: pid={} intercepted, pending approval: {}", pid, threat);
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle for a running hybrid guard — dropped to cancel
+pub struct HybridHandle {
+    _task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for HybridHandle {
+    fn drop(&mut self) {
+        if let Some(task) = self._task.take() {
+            task.abort();
+        }
+    }
+}

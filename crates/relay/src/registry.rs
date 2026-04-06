@@ -224,3 +224,96 @@ fn generate_token() -> String {
     let bytes: [u8; 32] = rng.gen();
     hex::encode(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_register_client() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path()).unwrap();
+        let c = reg.register_client("Test".into(), "t@t.com".into()).unwrap();
+        assert_eq!(c.name, "Test");
+        assert!(c.active);
+        assert!(!c.api_token.is_empty());
+    }
+
+    #[test]
+    fn test_get_client_by_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path()).unwrap();
+        let c = reg.register_client("Test".into(), String::new()).unwrap();
+        let found = reg.get_client_by_token(&c.api_token).unwrap();
+        assert_eq!(found.id, c.id);
+        assert!(reg.get_client_by_token("wrong").is_none());
+    }
+
+    #[test]
+    fn test_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let id;
+        {
+            let reg = Registry::new(dir.path()).unwrap();
+            let c = reg.register_client("Persist".into(), String::new()).unwrap();
+            id = c.id;
+        }
+        let reg2 = Registry::new(dir.path()).unwrap();
+        assert!(reg2.get_client(&id).is_some());
+    }
+
+    #[test]
+    fn test_list_clients() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path()).unwrap();
+        reg.register_client("A".into(), String::new()).unwrap();
+        reg.register_client("B".into(), String::new()).unwrap();
+        assert_eq!(reg.list_clients().len(), 2);
+    }
+
+    #[test]
+    fn test_register_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path()).unwrap();
+        let c = reg.register_client("C".into(), String::new()).unwrap();
+        let a = reg.register_agent(&c.id, "srv".into(), "tok".into()).unwrap();
+        assert_eq!(a.name, "srv");
+        assert_eq!(a.client_id, c.id);
+    }
+
+    #[test]
+    fn test_register_agent_invalid_client() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path()).unwrap();
+        assert!(reg.register_agent("ghost", "srv".into(), "tok".into()).is_err());
+    }
+
+    #[test]
+    fn test_deactivate_client() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path()).unwrap();
+        let c = reg.register_client("C".into(), String::new()).unwrap();
+        assert!(reg.deactivate_client(&c.id));
+        assert!(!reg.get_client(&c.id).unwrap().active);
+        assert!(!reg.deactivate_client("ghost")); // nonexistent
+    }
+
+    #[test]
+    fn test_list_agents_for_client() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path()).unwrap();
+        let c = reg.register_client("C".into(), String::new()).unwrap();
+        reg.register_agent(&c.id, "a1".into(), "t1".into()).unwrap();
+        reg.register_agent(&c.id, "a2".into(), "t2".into()).unwrap();
+        assert_eq!(reg.list_agents_for_client(&c.id).len(), 2);
+    }
+
+    #[test]
+    fn test_get_agent_by_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path()).unwrap();
+        let c = reg.register_client("C".into(), String::new()).unwrap();
+        reg.register_agent(&c.id, "a1".into(), "secret-tok".into()).unwrap();
+        assert_eq!(reg.get_agent_by_token("secret-tok").unwrap().name, "a1");
+    }
+}

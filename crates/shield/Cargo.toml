@@ -21,6 +21,16 @@ tree-sitter-bash = "0.23"
 axum = "0.8"
 dashmap = "6"
 
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros", "test-util"] }
+tower = "0.5"
+
+[[bench]]
+name = "bench_shield"
+harness = false
+
 [features]
 ebpf = ["aya"]
 

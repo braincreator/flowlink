@@ -4,7 +4,7 @@
 use serde::Serialize;
 use std::fmt;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ThreatLevel { Critical, High, Medium, Low }
 
 #[derive(Debug, Clone, Serialize)]
@@ -326,5 +326,570 @@ impl AnalysisEngine {
             return Some(Threat::warn("k8s_force", "kubectl Force Delete", "Force deleting K8s resource".into()));
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cmd(binary: &str, args: &[&str]) -> Command {
+        let all_args: Vec<String> = std::iter::once(binary.to_string())
+            .chain(args.iter().map(|s| s.to_string()))
+            .collect();
+        Command {
+            binary: binary.into(),
+            args: all_args,
+            raw: format!("{} {}", binary, args.join(" ")),
+        }
+    }
+
+    fn full_engine() -> AnalysisEngine {
+        AnalysisEngine { enable_ast: true, enable_interpreter: true }
+    }
+
+    fn l1_only() -> AnalysisEngine {
+        AnalysisEngine { enable_ast: false, enable_interpreter: false }
+    }
+
+    // ── Helper ──
+    fn level(result: &AnalysisResult) -> Option<&ThreatLevel> {
+        result.threat.as_ref().map(|t| &t.level)
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — rm
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn rm_rf_root() {
+        let e = l1_only();
+        let r = e.analyze(&cmd("rm", &["-rf", "/"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn rm_no_preserve_root() {
+        let r = l1_only().analyze(&cmd("rm", &["--no-preserve-root", "/"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn rm_rf_var() {
+        let r = l1_only().analyze(&cmd("rm", &["-rf", "/var"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn rm_rf_user_dir_safe() {
+        let r = l1_only().analyze(&cmd("rm", &["-rf", "/home/user/ok"]));
+        assert!(r.safe, "user subdirectory should be safe");
+    }
+
+    #[test]
+    fn rm_single_file_safe() {
+        let r = l1_only().analyze(&cmd("rm", &["file.txt"]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — mkfs
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn mkfs_ext4() {
+        let r = l1_only().analyze(&cmd("mkfs.ext4", &["/dev/sda1"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — dd
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn dd_to_block_device() {
+        let r = l1_only().analyze(&cmd("dd", &["if=/dev/zero", "of=/dev/sda"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn dd_safe_file() {
+        let r = l1_only().analyze(&cmd("dd", &["if=input.txt", "of=output.txt"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn dd_to_nvme() {
+        let r = l1_only().analyze(&cmd("dd", &["of=/dev/nvme0n1"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn dd_to_vd() {
+        let r = l1_only().analyze(&cmd("dd", &["of=/dev/vda"]));
+        assert!(!r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — shred
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn shred_etc() {
+        let r = l1_only().analyze(&cmd("shred", &["/etc/passwd"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — docker
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn docker_rm_force() {
+        let r = l1_only().analyze(&cmd("docker", &["rm", "-f", "container"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn docker_prune_all() {
+        let r = l1_only().analyze(&cmd("docker", &["system", "prune", "-a"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn docker_rm_no_force_safe() {
+        let r = l1_only().analyze(&cmd("docker", &["rm", "container"]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — shutdown / reboot
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn shutdown_now() {
+        let r = l1_only().analyze(&cmd("shutdown", &["now"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn reboot() {
+        let r = l1_only().analyze(&cmd("reboot", &[]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn poweroff() {
+        let r = l1_only().analyze(&cmd("poweroff", &[]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn halt() {
+        let r = l1_only().analyze(&cmd("halt", &[]));
+        assert!(!r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — systemctl
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn systemctl_stop_sshd() {
+        let r = l1_only().analyze(&cmd("systemctl", &["stop", "sshd"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn systemctl_stop_nginx() {
+        let r = l1_only().analyze(&cmd("systemctl", &["stop", "nginx"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn systemctl_stop_myapp_safe() {
+        let r = l1_only().analyze(&cmd("systemctl", &["stop", "myapp"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn systemctl_start_safe() {
+        let r = l1_only().analyze(&cmd("systemctl", &["start", "nginx"]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — killall / pkill
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn killall_sshd() {
+        let r = l1_only().analyze(&cmd("killall", &["sshd"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn killall_myapp_safe() {
+        let r = l1_only().analyze(&cmd("killall", &["myapp"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn pkill_docker() {
+        let r = l1_only().analyze(&cmd("pkill", &["docker"]));
+        assert!(!r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — chmod
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn chmod_777_recursive() {
+        let r = l1_only().analyze(&cmd("chmod", &["777", "-R", "/var"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn chmod_normal_safe() {
+        let r = l1_only().analyze(&cmd("chmod", &["755", "script.sh"]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — firewall
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn iptables_flush() {
+        let r = l1_only().analyze(&cmd("iptables", &["-F"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn nft_flush_ruleset() {
+        let r = l1_only().analyze(&cmd("nft", &["flush", "ruleset"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — database
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn mysql_drop_database() {
+        let r = l1_only().analyze(&cmd("mysql", &["-e", "DROP DATABASE prod"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn psql_truncate() {
+        let r = l1_only().analyze(&cmd("psql", &["-c", "TRUNCATE TABLE users"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn mysql_select_safe() {
+        let r = l1_only().analyze(&cmd("mysql", &["-e", "SELECT 1"]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — safe commands
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn ls_safe() {
+        let r = l1_only().analyze(&cmd("ls", &["-la"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn cat_safe() {
+        let r = l1_only().analyze(&cmd("cat", &["/etc/passwd"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn unknown_binary_safe() {
+        let r = l1_only().analyze(&cmd("mycustomtool", &["arg1"]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — edge cases
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn empty_command_safe() {
+        let r = l1_only().analyze(&cmd("", &[]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn whitespace_command_safe() {
+        let r = l1_only().analyze(&cmd("   ", &[]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // L2 — AST (bash -c)
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn l2_bash_rm_rf() {
+        let e = full_engine();
+        let r = e.analyze(&cmd("bash", &["-c", "rm -rf /"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 2);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn l2_bash_echo_safe() {
+        let r = full_engine().analyze(&cmd("bash", &["-c", "echo hello"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn l2_eval_rm() {
+        let r = full_engine().analyze(&cmd("eval", &["\"rm -rf /\""]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 2);
+    }
+
+    #[test]
+    fn l2_pipe_bash() {
+        let mut c = cmd("echo", &["\"rm -rf /\"", "|", "bash"]);
+        c.raw = "echo \"rm -rf /\" | bash".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 2);
+    }
+
+    #[test]
+    fn l2_base64_pipe_bash() {
+        let mut c = cmd("base64", &["-d", "|", "bash"]);
+        c.raw = "base64 -d | bash".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 2);
+    }
+
+    #[test]
+    fn l2_bash_loop_rm() {
+        let r = full_engine().analyze(&cmd("bash", &["-c", "for f in /var/*; do rm -rf $f; done"]));
+        // The AST parser should detect rm -rf in the loop body
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn l2_disabled_no_ast() {
+        let e = AnalysisEngine { enable_ast: false, enable_interpreter: false };
+        let r = e.analyze(&cmd("bash", &["-c", "rm -rf /"]));
+        assert!(r.safe, "L2 should be skipped when disabled");
+    }
+
+    // ═══════════════════════════════════════════
+    // L3 — Interpreter heuristics
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn l3_python_rmtree() {
+        let r = full_engine().analyze(&cmd("python3", &["-c", "shutil.rmtree('/var')"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 3);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn l3_python_os_system() {
+        let r = full_engine().analyze(&cmd("python3", &["-c", "os.system('rm -rf /')"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn l3_python_safe() {
+        let r = full_engine().analyze(&cmd("python3", &["-c", "print('hello')"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn l3_node_exec() {
+        let r = full_engine().analyze(&cmd("node", &["-e", "require('child_process').exec('rm -rf /')"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 3);
+    }
+
+    #[test]
+    fn l3_perl_system() {
+        let r = full_engine().analyze(&cmd("perl", &["-e", "system('rm -rf /')"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 3);
+    }
+
+    #[test]
+    fn l3_ruby_system() {
+        let r = full_engine().analyze(&cmd("ruby", &["-e", "system('rm -rf /')"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 3);
+    }
+
+    #[test]
+    fn l3_php_system() {
+        let r = full_engine().analyze(&cmd("php", &["-r", "system('rm -rf /');"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 3);
+    }
+
+    #[test]
+    fn l3_ansible_shell() {
+        let r = full_engine().analyze(&cmd("ansible", &["-m", "shell", "-a", "rm -rf /"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn l3_kubectl_exec() {
+        let r = full_engine().analyze(&cmd("kubectl", &["exec", "pod", "--", "rm -rf /"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn l3_kubectl_force_delete() {
+        let r = full_engine().analyze(&cmd("kubectl", &["delete", "--force", "pod"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn l3_disabled() {
+        let e = AnalysisEngine { enable_ast: false, enable_interpreter: false };
+        let r = e.analyze(&cmd("python3", &["-c", "os.system('rm -rf /')"]));
+        assert!(r.safe, "L3 should be skipped when disabled");
+    }
+
+    // ═══════════════════════════════════════════
+    // ThreatLevel Display
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn threat_level_display() {
+        assert_eq!(format!("{}", ThreatLevel::Critical), "🚫 BLOCK");
+        assert_eq!(format!("{}", ThreatLevel::High), "⛔ BLOCK");
+        assert_eq!(format!("{}", ThreatLevel::Medium), "⚠️ WARN");
+        assert_eq!(format!("{}", ThreatLevel::Low), "📝 LOG");
+    }
+
+    #[test]
+    fn threat_serialization() {
+        let t = Threat::critical("test", "Test", "desc".into());
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(json.contains("\"Critical\""));
+    }
+
+    // ═══════════════════════════════════════════
+    // AnalysisResult
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn safe_result() {
+        let r = l1_only().analyze(&cmd("ls", &[]));
+        assert!(r.safe);
+        assert!(r.threat.is_none());
+        assert_eq!(r.level_used, 0);
+    }
+
+    #[test]
+    fn l1_priority_over_l2() {
+        // rm -rf / should be caught at L1, not L2
+        let r = full_engine().analyze(&cmd("rm", &["-rf", "/"]));
+        assert_eq!(r.level_used, 1);
+    }
+
+    // ═══════════════════════════════════════════
+    // init runlevel
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn init_runlevel_0() {
+        let r = l1_only().analyze(&cmd("init", &["0"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn init_runlevel_6() {
+        let r = l1_only().analyze(&cmd("init", &["6"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn init_safe_runlevel() {
+        let r = l1_only().analyze(&cmd("init", &["3"]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // crontab
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn crontab_remove() {
+        let r = full_engine().analyze(&cmd("crontab", &["-r"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn crontab_list_safe() {
+        let r = full_engine().analyze(&cmd("crontab", &["-l"]));
+        assert!(r.safe);
+    }
+
+    // ═══════════════════════════════════════════
+    // rm edge cases
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn rm_rf_etc() {
+        let r = l1_only().analyze(&cmd("rm", &["-rf", "/etc"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn rm_rf_usr() {
+        let r = l1_only().analyze(&cmd("rm", &["-rf", "/usr"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn rm_r_no_f_warn() {
+        // rm -r /var (recursive but no force) → Warn
+        let r = l1_only().analyze(&cmd("rm", &["-r", "/var"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn rm_rf_dot_safe() {
+        let r = l1_only().analyze(&cmd("rm", &["-rf", "."]));
+        assert!(r.safe, "rm -rf . should be safe (relative)");
     }
 }

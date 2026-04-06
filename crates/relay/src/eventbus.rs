@@ -38,3 +38,59 @@ impl EventBus {
         self.channels.get(channel).unwrap().subscribe()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_publish_subscribe() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe("ch1");
+        bus.publish("ch1", "hello");
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_subscribers() {
+        let bus = EventBus::new();
+        let mut rx1 = bus.subscribe("ch1");
+        let mut rx2 = bus.subscribe("ch1");
+        bus.publish("ch1", "hi");
+        assert_eq!(rx1.recv().await.unwrap(), "hi");
+        assert_eq!(rx2.recv().await.unwrap(), "hi");
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_creates_channel() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe("new-ch");
+        bus.publish("new-ch", "data");
+        assert_eq!(rx.recv().await.unwrap(), "data");
+    }
+
+    #[tokio::test]
+    async fn test_publish_to_nonexistent_is_noop() {
+        let bus = EventBus::new();
+        bus.publish("ghost", "data"); // no panic, no error
+    }
+
+    #[tokio::test]
+    async fn test_large_throughput() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe("ch");
+        for i in 0..1000 {
+            bus.publish("ch", &i.to_string());
+        }
+        // At least some should arrive (broadcast may lag)
+        let mut count = 0;
+        while rx.try_recv().is_ok() { count += 1; }
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_default() {
+        let _bus = EventBus::default();
+    }
+}

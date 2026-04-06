@@ -48,3 +48,50 @@ fn load_key(path: &str) -> Result<PrivateKeyDer<'static>> {
         .with_context(|| format!("failed to parse private key from {path}"))?
         .context("no private key found")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tls_config_deserialize() {
+        let json = serde_json::json!({
+            "cert_path": "/tmp/cert.pem",
+            "key_path": "/tmp/key.pem",
+        });
+        let config: TlsConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(config.cert_path, "/tmp/cert.pem");
+        assert!(config.ca_path.is_none());
+    }
+
+    #[test]
+    fn test_tls_config_with_ca() {
+        let json = serde_json::json!({
+            "cert_path": "/tmp/cert.pem",
+            "key_path": "/tmp/key.pem",
+            "ca_path": "/tmp/ca.pem",
+        });
+        let config: TlsConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(config.ca_path.as_deref(), Some("/tmp/ca.pem"));
+    }
+
+    #[test]
+    fn test_load_certs_missing_file() {
+        assert!(load_certs("/nonexistent/path.pem").is_err());
+    }
+
+    #[test]
+    fn test_load_key_missing_file() {
+        assert!(load_key("/nonexistent/path.pem").is_err());
+    }
+
+    #[test]
+    fn test_build_tls_missing_files() {
+        let config = TlsConfig {
+            cert_path: "/nonexistent/cert.pem".into(),
+            key_path: "/nonexistent/key.pem".into(),
+            ca_path: None,
+        };
+        assert!(build_tls_server_config(&config).is_err());
+    }
+}

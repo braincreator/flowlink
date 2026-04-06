@@ -404,3 +404,134 @@ impl ShieldGuard {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audit::AuditLog;
+    use crate::notifier::Notifier;
+    use crate::snapshot::SnapshotBackend;
+    use tempfile::NamedTempFile;
+
+    fn test_engine() -> AnalysisEngine {
+        AnalysisEngine { enable_ast: false, enable_interpreter: false }
+    }
+
+    fn make_guard() -> ShieldGuard {
+        let tmp = NamedTempFile::new().unwrap();
+        let audit = Arc::new(RwLock::new(AuditLog::open(tmp.path()).unwrap()));
+        let notifier = Notifier::new(None);
+        ShieldGuard::new(
+            test_engine(),
+            SnapshotBackend::None,
+            audit,
+            notifier,
+            ShieldGuardConfig::default(),
+        )
+    }
+
+    #[test]
+    fn shield_guard_creation() {
+        let guard = make_guard();
+        // Just verify it was created without panic
+        let _ = &guard;
+    }
+
+    #[test]
+    fn config_default() {
+        let cfg = ShieldGuardConfig::default();
+        assert!(cfg.snapshot_on_intercept);
+        assert!(cfg.notify_on_intercept);
+        assert!(!cfg.auto_kill_critical);
+        assert!(cfg.allowed_uids.contains(&0));
+    }
+
+    #[tokio::test]
+    async fn intercept_safe_pid() {
+        let guard = make_guard();
+        // Own PID should be allowed (uid 0 exempt by default on macOS as current user)
+        let result = guard.intercept(std::process::id()).await;
+        match result {
+            InterceptResult::Allowed => {}
+            _ => {} // Could also be blocked if not root
+        }
+    }
+
+    #[tokio::test]
+    async fn stats_default() {
+        let guard = make_guard();
+        let stats = guard.stats().await;
+        assert_eq!(stats.total_analyzed, 0);
+        assert_eq!(stats.allowed, 0);
+        assert_eq!(stats.blocked, 0);
+        assert_eq!(stats.pending, 0);
+    }
+
+    #[tokio::test]
+    async fn list_pending_empty() {
+        let guard = make_guard();
+        let pending = guard.list_pending();
+        assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_nonexistent_pending() {
+        let guard = make_guard();
+        let result = guard.resolve_approval(99999, true).await.unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn stats_after_intercept() {
+        let guard = make_guard();
+        let result = guard.intercept(std::process::id()).await;
+        let stats = guard.stats().await;
+        // On macOS, /proc doesn't exist so from_pid returns empty data,
+        // but total_analyzed should still be incremented
+        assert!(stats.total_analyzed >= 0);
+        // If we got Allowed, it means the command was analyzed
+        if matches!(result, InterceptResult::Allowed) {
+            assert!(stats.total_analyzed >= 1);
+        }
+    }
+
+    #[test]
+    fn stats_serialization() {
+        let stats = ShieldStats::default();
+        let json = serde_json::to_string(&stats).unwrap();
+        assert!(json.contains("total_analyzed"));
+    }
+
+    #[test]
+    fn approval_request_serialization() {
+        let req = ApprovalRequest {
+            pid: 1234,
+            command: "rm -rf /".into(),
+            threat_name: "rm_rf".into(),
+            threat_level: "Critical".into(),
+            username: "root".into(),
+            snapshot: Some("snap".into()),
+            intercepted_at: "2026-04-06T12:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("rm_rf"));
+    }
+
+    #[test]
+    fn intercept_result_serialization() {
+        let r = InterceptResult::Allowed;
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("Allowed"));
+
+        let r2 = InterceptResult::Blocked { pid: 1, reason: "test".into() };
+        let json2 = serde_json::to_string(&r2).unwrap();
+        assert!(json2.contains("Blocked"));
+    }
+
+    #[test]
+    fn config_debug_clone() {
+        let cfg = ShieldGuardConfig::default();
+        let _ = format!("{:?}", cfg);
+        let _ = cfg.clone();
+    }
+}

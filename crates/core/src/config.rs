@@ -309,3 +309,179 @@ impl RelayConfig {
         Ok(config)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_agent_config() -> AgentConfig {
+        AgentConfig {
+            agent_id: "test-agent".into(),
+            token: "tok123".into(),
+            relay_url: "wss://relay.example.com".into(),
+            heartbeat_sec: 30,
+            label: "".into(),
+            work_dir: "/tmp".into(),
+            read_only: false,
+            use_relay_llm: false,
+            sandbox: SandboxConfig::default(),
+            approval: ApprovalConfig::default(),
+            backup: BackupConfig::default(),
+            shield: ShieldConfig::default(),
+            tls: TlsConfig::default(),
+        }
+    }
+
+    #[test]
+    fn test_sandbox_defaults() {
+        let sb = SandboxConfig::default();
+        assert_eq!(sb.max_file_size, 100 * 1024 * 1024);
+        assert_eq!(sb.max_exec_timeout, 300);
+        assert!(!sb.allow_sudo);
+        assert!(sb.allowed_dirs.is_empty());
+    }
+
+    #[test]
+    fn test_approval_defaults() {
+        let ap = ApprovalConfig::default();
+        assert_eq!(ap.mode, "auto");
+        assert!(ap.soft_ask_notify);
+        assert_eq!(ap.hard_ask_timeout_sec, 3600);
+        assert_eq!(ap.max_retries, 3);
+    }
+
+    #[test]
+    fn test_tls_defaults() {
+        let tls = TlsConfig::default();
+        assert!(!tls.insecure);
+        assert!(!tls.cert_pinning);
+        assert!(tls.ca_cert.is_none());
+    }
+
+    #[test]
+    fn test_agent_config_serialize_deserialize_roundtrip() {
+        let cfg = sample_agent_config();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.agent_id, "test-agent");
+        assert_eq!(back.token, "tok123");
+        assert_eq!(back.heartbeat_sec, 30);
+    }
+
+    #[test]
+    fn test_agent_config_load_from_json() {
+        let json = r#"{"agent_id":"a1","token":"t1","relay_url":"wss://r.com"}"#;
+        let cfg: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.agent_id, "a1");
+        assert_eq!(cfg.heartbeat_sec, 30); // default
+    }
+
+    #[test]
+    fn test_agent_config_save_load_roundtrip() {
+        let cfg = sample_agent_config();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        cfg.save(path.to_str().unwrap()).unwrap();
+        let loaded = AgentConfig::load(path.to_str().unwrap()).unwrap();
+        assert_eq!(loaded.agent_id, cfg.agent_id);
+        assert_eq!(loaded.token, cfg.token);
+    }
+
+    #[test]
+    fn test_relay_config_defaults() {
+        let json = r#"{"api_token":"tok"}"#;
+        let cfg: RelayConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.http_addr.to_string(), "0.0.0.0:8080");
+        assert_eq!(cfg.wss_addr.to_string(), "0.0.0.0:8443");
+        assert_eq!(cfg.client_name, "FlowLink Relay");
+    }
+
+    #[test]
+    fn test_relay_config_serialize_deserialize() {
+        let cfg = RelayConfig {
+            client_name: "Test".into(),
+            client_email: "".into(),
+            api_token: "tok".into(),
+            wss_addr: "0.0.0.0:9443".parse().unwrap(),
+            http_addr: "0.0.0.0:9080".parse().unwrap(),
+            tls: TlsConfig::default(),
+            llm: LlmConfig::default(),
+            billing: BillingConfig::default(),
+            registry: RegistryConfig::default(),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: RelayConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.api_token, "tok");
+        assert_eq!(back.wss_addr.to_string(), "0.0.0.0:9443");
+    }
+
+    #[test]
+    fn test_tls_serialization() {
+        let tls = TlsConfig { insecure: true, cert_pinning: true, ca_cert: Some("/path".into()) };
+        let json = serde_json::to_string(&tls).unwrap();
+        let back: TlsConfig = serde_json::from_str(&json).unwrap();
+        assert!(back.insecure);
+        assert!(back.cert_pinning);
+        assert_eq!(back.ca_cert.as_deref(), Some("/path"));
+    }
+
+    #[test]
+    fn test_llm_config_with_backends() {
+        let llm = LlmConfig {
+            enabled: true,
+            backends: vec![
+                LlmBackend { name: "gpt4".into(), provider: "openai".into(), model: "gpt-4".into(), api_key: Some("k".into()), base_url: None },
+            ],
+            timeout_sec: 60,
+        };
+        let json = serde_json::to_string(&llm).unwrap();
+        let back: LlmConfig = serde_json::from_str(&json).unwrap();
+        assert!(back.enabled);
+        assert_eq!(back.backends.len(), 1);
+        assert_eq!(back.backends[0].provider, "openai");
+    }
+
+    #[test]
+    fn test_billing_config_with_plans() {
+        let billing = BillingConfig {
+            enabled: true,
+            currency: "USD".into(),
+            plans: vec![PlanConfig {
+                id: "pro".into(), name: "Pro".into(), price: 999,
+                period: "monthly".into(), features: Default::default(),
+            }],
+        };
+        let json = serde_json::to_string(&billing).unwrap();
+        let back: BillingConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.plans[0].price, 999);
+    }
+
+    #[test]
+    fn test_registry_defaults() {
+        let reg = RegistryConfig::default();
+        assert_eq!(reg.data_path, "~/.flowlink/relay");
+        assert_eq!(reg.max_agents, 100);
+    }
+
+    #[test]
+    fn test_backup_defaults() {
+        let b = BackupConfig::default();
+        assert!(b.enabled);
+        assert_eq!(b.compression, "gzip");
+        assert_eq!(b.max_snapshots, 50);
+    }
+
+    #[test]
+    fn test_shield_defaults() {
+        let s = ShieldConfig::default();
+        assert!(!s.enabled);
+        assert!(s.enable_ast);
+        assert_eq!(s.auto_deny_timeout, 60);
+    }
+
+    #[test]
+    fn test_invalid_json_errors() {
+        let result: Result<AgentConfig, _> = serde_json::from_str("not json");
+        assert!(result.is_err());
+    }
+}

@@ -365,3 +365,134 @@ fn parse_response(provider: &str, body: &str) -> ParsedResponse {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_backends() -> Vec<LlmBackend> {
+        vec![LlmBackend {
+            name: "test-backend".into(),
+            provider: "openai".into(),
+            model: "gpt-4".into(),
+            api_key: None,
+            base_url: None,
+        }]
+    }
+
+    #[test]
+    fn test_proxy_creation() {
+        let proxy = LlmProxy::new(test_backends(), 30);
+        // No panic = success
+        assert!(true);
+    }
+
+    #[tokio::test]
+    async fn test_list_models() {
+        let proxy = LlmProxy::new(test_backends(), 30);
+        let models = proxy.list_models().await;
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "test-backend");
+        assert!(models[0].healthy);
+    }
+
+    #[tokio::test]
+    async fn test_set_backends() {
+        let proxy = LlmProxy::new(test_backends(), 30);
+        proxy.set_backends(vec![]).await;
+        assert_eq!(proxy.list_models().await.len(), 0);
+        proxy.set_backends(test_backends()).await;
+        assert_eq!(proxy.list_models().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_complete_no_backends() {
+        let proxy = LlmProxy::new(vec![], 30);
+        let req = LlmRequest {
+            model: String::new(),
+            messages: vec![ChatMessage { role: "user".into(), content: "hi".into() }],
+            temperature: 0.0,
+            max_tokens: 10,
+            stream: false,
+        };
+        assert!(proxy.complete(req).await.is_err());
+    }
+
+    #[test]
+    fn test_llm_request_defaults() {
+        let req: LlmRequest = serde_json::from_value(serde_json::json!({
+            "messages": [{"role": "user", "content": "hi"}]
+        })).unwrap();
+        assert_eq!(req.max_tokens, 4096);
+        assert!(!req.stream);
+        assert_eq!(req.temperature, 0.0);
+    }
+
+    #[test]
+    fn test_build_openai_body() {
+        let req = LlmRequest {
+            model: String::new(),
+            messages: vec![ChatMessage { role: "user".into(), content: "hi".into() }],
+            temperature: 0.0,
+            max_tokens: 100,
+            stream: false,
+        };
+        let body = build_openai_body(&req, "gpt-4");
+        assert_eq!(body["model"], "gpt-4");
+        assert_eq!(body["temperature"], 0.3); // 0.0 defaults to 0.3
+    }
+
+    #[test]
+    fn test_build_anthropic_body_extracts_system() {
+        let req = LlmRequest {
+            model: String::new(),
+            messages: vec![
+                ChatMessage { role: "system".into(), content: "You are helpful".into() },
+                ChatMessage { role: "user".into(), content: "hi".into() },
+            ],
+            temperature: 0.5,
+            max_tokens: 100,
+            stream: false,
+        };
+        let body = build_anthropic_body(&req, "claude-3");
+        assert_eq!(body["system"], "You are helpful");
+        assert_eq!(body["messages"].as_array().unwrap().len(), 1); // system removed from messages
+    }
+
+    #[test]
+    fn test_build_url_with_base_url() {
+        assert!(build_url("openai", &Some("https://my.api.com".into())).contains("/chat/completions"));
+        assert!(build_url("anthropic", &Some("https://my.api.com".into())).contains("/messages"));
+    }
+
+    #[test]
+    fn test_parse_response_openai() {
+        let json = serde_json::json!({
+            "id": "chat-1", "model": "gpt-4",
+            "choices": [{"message": {"content": "Hello"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        }).to_string();
+        let parsed = parse_response("openai", &json);
+        assert_eq!(parsed.content, "Hello");
+        assert_eq!(parsed.usage.total_tokens, 15);
+    }
+
+    #[test]
+    fn test_parse_response_anthropic() {
+        let json = serde_json::json!({
+            "id": "msg-1", "model": "claude-3",
+            "content": [{"type": "text", "text": "Hi there"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 8, "output_tokens": 3}
+        }).to_string();
+        let parsed = parse_response("anthropic", &json);
+        assert_eq!(parsed.content, "Hi there");
+        assert_eq!(parsed.usage.completion_tokens, 3);
+    }
+
+    #[test]
+    fn test_parse_response_invalid_json() {
+        let parsed = parse_response("openai", "not json");
+        assert_eq!(parsed.content, "not json");
+    }
+}

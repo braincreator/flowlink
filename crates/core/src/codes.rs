@@ -98,3 +98,81 @@ pub mod codes {
     pub const SHIELD_TIMEOUT: &str = "SHIELD_TIMEOUT";
     pub const SHIELD_ALERT_SENT: &str = "SHIELD_ALERT_SENT";
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn all_codes() -> Vec<&'static str> {
+        vec![
+            OK, UNKNOWN_ERROR, INVALID_JSON, INVALID_PAYLOAD, AGENT_NOT_FOUND,
+            AGENT_NOT_CONNECTED, UNAUTHORIZED, FORBIDDEN, INTERNAL_ERROR, UNKNOWN_MESSAGE_TYPE,
+            TOKEN_MISSING, TOKEN_INVALID, TOKEN_EXPIRED, TOKEN_REVOKED, TOKEN_BLACKLISTED,
+            SIGNATURE_INVALID, SECRET_NOT_FOUND,
+            AGENT_CONNECT_FAILED, AGENT_DISCONNECTED, AGENT_NOT_AUTHORIZED,
+            AGENT_LIMIT_EXCEEDED, AGENT_PAUSED, AGENT_EMERGENCY_STOP, PROTOCOL_VERSION_MISMATCH,
+            EXEC_SUCCESS, EXEC_TIMEOUT, EXEC_BLOCKED, EXEC_BLOCKED_READONLY, EXEC_BLOCKED_SANDBOX,
+            EXEC_BLOCKED_SUDO, EXEC_FAILED, EXEC_NEEDS_APPROVAL, EXEC_AWAITING_APPROVAL,
+            EXEC_REJECTED, EXEC_APPROVED,
+            FILE_EMPTY_PATH, FILE_INVALID_PATH, FILE_NOT_FOUND, FILE_TOO_LARGE,
+            FILE_READ_ERROR, FILE_WRITE_ERROR,
+            CONFIG_APPLIED, CONFIG_FAILED, CONFIG_LOAD_ERROR,
+            SKILL_ALREADY_EXISTS, SKILL_NOT_FOUND,
+            TASK_ACCEPTED, TASK_ERROR, TASK_DONE,
+            KILL_SWITCH_DISK_FULL, KILL_SWITCH_CPU_HIGH, KILL_SWITCH_PAUSED,
+            KILL_SWITCH_RESUMED, KILL_SWITCH_EMERGENCY,
+            BACKUP_CREATE_ERROR, BACKUP_SNAPSHOT_NOT_FOUND, BACKUP_RESTORE_ERROR,
+            BACKUP_DELETE_ERROR, BACKUP_CHECKSUM_MISMATCH,
+            MCP_AGENT_NOT_FOUND, MCP_TIMEOUT,
+            LLM_ALL_BACKENDS_DOWN, LLM_REQUEST_ERROR,
+            SHIELD_BLOCKED, SHIELD_SNAPSHOT_CREATED, SHIELD_PROCESS_STOPPED,
+            SHIELD_PROCESS_KILLED, SHIELD_TIMEOUT, SHIELD_ALERT_SENT,
+        ]
+    }
+
+    #[test]
+    fn test_all_codes_are_non_empty() {
+        for code in all_codes() {
+            assert!(!code.is_empty(), "Code should not be empty");
+        }
+    }
+
+    #[test]
+    fn test_no_duplicate_codes() {
+        let codes = all_codes();
+        let mut seen = std::collections::HashSet::new();
+        for code in &codes {
+            assert!(seen.insert(*code), "Duplicate code: {}", code);
+        }
+    }
+
+    #[test]
+    fn test_auth_codes_exist() {
+        assert_eq!(TOKEN_MISSING, "TOKEN_MISSING");
+        assert_eq!(TOKEN_INVALID, "TOKEN_INVALID");
+        assert_eq!(TOKEN_EXPIRED, "TOKEN_EXPIRED");
+        assert_eq!(TOKEN_REVOKED, "TOKEN_REVOKED");
+    }
+
+    #[test]
+    fn test_exec_codes_exist() {
+        assert_eq!(EXEC_SUCCESS, "EXEC_SUCCESS");
+        assert_eq!(EXEC_TIMEOUT, "EXEC_TIMEOUT");
+        assert_eq!(EXEC_BLOCKED, "EXEC_BLOCKED");
+        assert_eq!(EXEC_FAILED, "EXEC_FAILED");
+    }
+
+    #[test]
+    fn test_file_codes_exist() {
+        assert_eq!(FILE_NOT_FOUND, "FILE_NOT_FOUND");
+        assert_eq!(FILE_TOO_LARGE, "FILE_TOO_LARGE");
+        assert_eq!(FILE_EMPTY_PATH, "FILE_EMPTY_PATH");
+    }
+
+    #[test]
+    fn test_backup_codes_exist() {
+        assert_eq!(BACKUP_CREATE_ERROR, "BACKUP_CREATE_ERROR");
+        assert_eq!(BACKUP_RESTORE_ERROR, "BACKUP_RESTORE_ERROR");
+        assert_eq!(BACKUP_CHECKSUM_MISMATCH, "BACKUP_CHECKSUM_MISMATCH");
+    }
+}

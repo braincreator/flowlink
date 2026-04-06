@@ -73,3 +73,45 @@ pub fn create_snapshot(dataset: &str, tag: &str, backend: SnapshotBackend) -> Re
 
     Ok(snapshot_name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use regex::Regex;
+
+    #[test]
+    fn detect_backend_returns_enum() {
+        let backend = SnapshotBackend::detect();
+        match backend {
+            SnapshotBackend::Zfs | SnapshotBackend::Lvm | SnapshotBackend::None => {}
+        }
+    }
+
+    #[test]
+    fn snapshot_backend_none_create() {
+        let result = create_snapshot("tank/data", "test", SnapshotBackend::None);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "(no snapshot backend)");
+    }
+
+    #[test]
+    fn zfs_snapshot_name_format() {
+        let name = format!("{}@shield-{}-{}", "tank/data", "rm_rf", "20260406-165300");
+        let re = Regex::new(r"^[^@]+@shield-[a-z_]+-\d{8}-\d{6}$").unwrap();
+        assert!(re.is_match(&name), "snapshot name format invalid: {}", name);
+    }
+
+    #[test]
+    fn lvm_snapshot_name_format() {
+        let snap = format!("{}-shield-snap", "vg0/lv_data");
+        assert!(snap.ends_with("-shield-snap"));
+        assert!(snap.contains("/"));
+    }
+
+    #[test]
+    fn snapshot_backend_debug_clone() {
+        let b = SnapshotBackend::None;
+        let _ = format!("{:?}", b);
+        let _ = b.clone();
+    }
+}

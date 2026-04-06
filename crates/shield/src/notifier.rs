@@ -90,3 +90,87 @@ impl Notifier {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_telegram_alert_with_snapshot() {
+        let msg = Notifier::format_telegram_alert(
+            "alice", "rm -rf /", "rm_rf", Some("tank/data@shield-rm_rf-20260406"),
+        );
+        assert!(msg.contains("alice"));
+        assert!(msg.contains("rm -rf /"));
+        assert!(msg.contains("rm_rf"));
+        assert!(msg.contains("tank/data@shield-rm_rf-20260406"));
+        assert!(msg.contains("FlowLink Shield Alert"));
+        assert!(msg.contains("SIGSTOP"));
+    }
+
+    #[test]
+    fn format_telegram_alert_no_snapshot() {
+        let msg = Notifier::format_telegram_alert("root", "mkfs /dev/sda", "format_disk", None);
+        assert!(msg.contains("недоступен"));
+        assert!(msg.contains("root"));
+    }
+
+    #[test]
+    fn format_telegram_alert_html_formatting() {
+        let msg = Notifier::format_telegram_alert("bob", "echo hi", "test", None);
+        assert!(msg.contains("<b>"));
+        assert!(msg.contains("<code>"));
+    }
+
+    #[test]
+    fn notifier_new_with_url() {
+        let n = Notifier::new(Some("https://example.com/webhook".into()));
+        assert!(n.webhook_url.is_some());
+    }
+
+    #[test]
+    fn notifier_new_no_url() {
+        let n = Notifier::new(None);
+        assert!(n.webhook_url.is_none());
+    }
+
+    #[tokio::test]
+    async fn alert_no_url_does_not_panic() {
+        let n = Notifier::new(None);
+        n.alert(1234, 1000, "root", "ls", "safe", "allowed", None).await;
+    }
+
+    #[test]
+    fn alert_payload_serialization() {
+        let payload = AlertPayload {
+            event: "shield_alert".into(),
+            pid: 1234, uid: 1000,
+            username: "alice".into(),
+            command: "rm -rf /".into(),
+            rule_name: "rm_rf".into(),
+            action: "intercepted".into(),
+            snapshot: Some("snap1".into()),
+            timestamp: "2026-04-06T12:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("alice"));
+        assert!(json.contains("rm -rf /"));
+        assert!(json.contains("snap1"));
+    }
+
+    #[test]
+    fn alert_payload_without_snapshot() {
+        let payload = AlertPayload {
+            event: "shield_alert".into(),
+            pid: 1, uid: 0,
+            username: "root".into(),
+            command: "shutdown".into(),
+            rule_name: "shutdown".into(),
+            action: "blocked".into(),
+            snapshot: None,
+            timestamp: "2026-04-06T12:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("null")); // snapshot is null
+    }
+}

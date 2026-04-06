@@ -213,3 +213,89 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+    #[test]
+    fn test_different_keypairs_produced() {
+        let a = KeyPair::generate();
+        let b = KeyPair::generate();
+        assert_ne!(a.public_key, b.public_key);
+        assert_ne!(a.key_id, b.key_id);
+    }
+
+    #[test]
+    fn test_encrypt_empty_message() {
+        let alice = KeyPair::generate();
+        let bob = KeyPair::generate();
+        let envelope = encrypt(&alice, &bob.public_key, b"").unwrap();
+        let decrypted = decrypt(&bob, &envelope).unwrap();
+        assert_eq!(decrypted, b"");
+    }
+
+    #[test]
+    fn test_encrypt_large_message_1mb() {
+        let alice = KeyPair::generate();
+        let bob = KeyPair::generate();
+        let data = vec![0xAB_u8; 1024 * 1024];
+        let envelope = encrypt(&alice, &bob.public_key, &data).unwrap();
+        let decrypted = decrypt(&bob, &envelope).unwrap();
+        assert_eq!(decrypted.len(), 1024 * 1024);
+    }
+
+    #[test]
+    fn test_tampered_ciphertext_fails() {
+        let alice = KeyPair::generate();
+        let bob = KeyPair::generate();
+        let mut envelope = encrypt(&alice, &bob.public_key, b"secret").unwrap();
+        // tamper ciphertext
+        envelope.ciphertext = "AAAA".into();
+        assert!(decrypt(&bob, &envelope).is_err());
+    }
+
+    #[test]
+    fn test_tampered_nonce_fails() {
+        let alice = KeyPair::generate();
+        let bob = KeyPair::generate();
+        let mut envelope = encrypt(&alice, &bob.public_key, b"secret").unwrap();
+        envelope.nonce = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 12]);
+        assert!(decrypt(&bob, &envelope).is_err());
+    }
+
+    #[test]
+    fn test_multiple_messages_same_key() {
+        let alice = KeyPair::generate();
+        let bob = KeyPair::generate();
+        for i in 0..10 {
+            let msg = format!("message {}", i);
+            let envelope = encrypt(&alice, &bob.public_key, msg.as_bytes()).unwrap();
+            let decrypted = decrypt(&bob, &envelope).unwrap();
+            assert_eq!(String::from_utf8(decrypted).unwrap(), msg);
+        }
+    }
+
+    #[test]
+    fn test_public_key_extraction() {
+        let kp = KeyPair::generate();
+        let pub_bytes = kp.public_bytes().unwrap();
+        assert_eq!(pub_bytes.len(), 32);
+        // key_id is SHA-256 of public key bytes
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(pub_bytes);
+        let expected = format!("{:x}", hasher.finalize());
+        assert_eq!(kp.key_id, expected);
+    }
+
+    #[test]
+    fn test_bidirectional_encryption() {
+        let alice = KeyPair::generate();
+        let bob = KeyPair::generate();
+
+        // Alice → Bob
+        let env1 = encrypt(&alice, &bob.public_key, b"hello bob").unwrap();
+        let dec1 = decrypt(&bob, &env1).unwrap();
+        assert_eq!(dec1, b"hello bob");
+
+        // Bob → Alice
+        let env2 = encrypt(&bob, &alice.public_key, b"hello alice").unwrap();
+        let dec2 = decrypt(&alice, &env2).unwrap();
+        assert_eq!(dec2, b"hello alice");
+    }

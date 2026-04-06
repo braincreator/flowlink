@@ -58,3 +58,50 @@ impl RelayHandler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_handler() -> RelayHandler {
+        RelayHandler::new(
+            Arc::new(AgentPool::new()),
+            Arc::new(AuthManager::new()),
+            Arc::new(EventBus::new()),
+            Arc::new(ApprovalQueue::new()),
+        )
+    }
+
+    #[test]
+    fn test_handler_creation() {
+        let _h = test_handler();
+    }
+
+    #[tokio::test]
+    async fn test_send_to_nonexistent_agent() {
+        let h = test_handler();
+        let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);
+        assert!(h.send_to_agent("ghost", msg).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_register_and_remove_sender() {
+        let h = test_handler();
+        let (tx, _rx) = mpsc::channel(10);
+        h.register_sender("a1".into(), tx);
+        h.remove_sender("a1");
+        let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);
+        assert!(h.send_to_agent("a1", msg).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_send_to_connected_agent() {
+        let h = test_handler();
+        let (tx, mut rx) = mpsc::channel(10);
+        h.register_sender("a1".into(), tx);
+        let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);
+        assert!(h.send_to_agent("a1", msg).await.is_ok());
+        let received = rx.recv().await.unwrap();
+        matches!(received, AxumMsg::Text(_));
+    }
+}
