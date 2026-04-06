@@ -246,7 +246,8 @@ mod tests {
         // If we get here without panic, observation works.
         let mf = m.http_request_duration_ms.collect();
         assert_eq!(mf[0].get_metric().len(), 1);
-        assert!(mf[0].get_metric()[0].get_sample_count() >= 3);
+        let hist = mf[0].get_metric()[0].get_histogram();
+        assert!(hist.get_sample_count() >= 3);
     }
 
     #[test]

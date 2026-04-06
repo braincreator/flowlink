@@ -138,7 +138,8 @@ mod tests {
 
         for hist in [&m.l1_analysis_duration, &m.l2_analysis_duration, &m.l3_analysis_duration] {
             let mf = hist.collect();
-            assert_eq!(mf[0].get_metric()[0].get_sample_count(), 1);
+            let hist = mf[0].get_metric()[0].get_histogram();
+            assert_eq!(hist.get_sample_count(), 1);
         }
     }
 
