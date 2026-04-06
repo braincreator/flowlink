@@ -1,11 +1,10 @@
-// FlowLink Relay — WebSocket hub for agents, HTTP API for clients
-// Port of internal/relay/relay.go
-
 pub mod pool;
 pub mod auth;
 pub mod handler;
 pub mod eventbus;
 pub mod approval;
+pub mod ratelimit;
+pub mod audit;
 
 use flowlink_core::config::RelayConfig;
 use log::info;
@@ -20,13 +19,12 @@ impl Relay {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
-        let pool = pool::AgentPool::new();
-        let auth = auth::AuthManager::new();
-        let eventbus = eventbus::EventBus::new();
-        let approval = approval::ApprovalQueue::new();
-
-        // TODO: start HTTP server + WS upgrade handler
-        info!("Relay starting on {}", self.config.http_addr);
+        info!("relay listening on {}", self.config.http_addr);
+        // TODO: hyper HTTP server + tungstenite WS upgrade
+        // TODO: route messages between agents and clients
+        // TODO: mount SSE endpoint for event streaming
+        tokio::signal::ctrl_c().await?;
+        info!("relay shutting down");
         Ok(())
     }
 }

@@ -1,38 +1,12 @@
-# Binaries
-/bin/
-/dist/
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# Test
-*.test
-*.out
-coverage.txt
-
-# Vendor (optional)
-/vendor/
-
-# IDE
-.idea/
-.vscode/
+target/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
-Thumbs.db
-
-# Config (local)
-*.local.json
-.flowlink/
-
-# Logs
-*.log
-flowlink-relay
-target/
-target/
-website/
+.env
+*.pem
+*.key
+flowlink.json
+relay.json
+!examples/flowlink.json
+!examples/relay.json
