@@ -3,7 +3,7 @@
 
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
 use aes_gcm::{Aes256Gcm, AeadCore, Nonce};
-use anyhow::{bail, Result};
+use anyhow::Result;
 use rand::rngs::OsRng as RandRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

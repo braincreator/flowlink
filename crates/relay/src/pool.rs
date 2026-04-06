@@ -2,9 +2,7 @@
 // Port of internal/relay/relay.go AgentPool
 
 use dashmap::DashMap;
-use flowlink_core::MessageType;
-use log::{info, warn};
-use serde_json;
+use log::info;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -21,6 +19,12 @@ pub struct AgentInfo {
 
 pub struct AgentPool {
     agents: Arc<DashMap<String, AgentInfo>>,
+}
+
+impl Default for AgentPool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AgentPool {

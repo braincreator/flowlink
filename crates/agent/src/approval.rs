@@ -1,7 +1,6 @@
 // Approval flow — soft_ask / hard_ask modes
 // Port of internal/agent/approval.go
 
-use flowlink_core::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};

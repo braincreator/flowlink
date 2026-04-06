@@ -4,7 +4,7 @@ mod snapshot;
 mod audit;
 mod notifier;
 
-use engine::{AnalysisEngine, Command, ThreatLevel};
+use engine::{AnalysisEngine, Command};
 use clap::Parser;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,9 +30,9 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let engine = AnalysisEngine { enable_ast: !args.no_ast, enable_interpreter: !args.no_interpreter };
-    let snapshot_backend = SnapshotBackend::detect();
-    let audit = Arc::new(RwLock::new(AuditLog::open(&args.audit_log)?));
-    let notifier = Notifier::new(args.webhook.clone());
+    let _snapshot_backend = SnapshotBackend::detect();
+    let _audit = Arc::new(RwLock::new(AuditLog::open(&args.audit_log)?));
+    let _notifier = Notifier::new(args.webhook.clone());
 
     if !args.simulate {
         println!("⚡ Production requires Linux kernel ≥ 5.4 + eBPF");

@@ -9,6 +9,12 @@ pub struct EventBus {
     channels: Arc<DashMap<String, broadcast::Sender<String>>>,
 }
 
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventBus {
     pub fn new() -> Self {
         Self {

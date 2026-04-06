@@ -83,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
             }
             Ok(())
         }
-        Commands::Encrypt { peer_key, input } => {
+        Commands::Encrypt { peer_key: _, input: _ } => {
             // TODO: read input, encrypt with peer key
             info!("Encrypt not yet implemented");
             Ok(())

@@ -175,6 +175,7 @@ fn default_audit_log() -> String { "/var/log/flowlink-shield.jsonl".into() }
 fn default_shield_timeout() -> u32 { 60 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct TlsConfig {
     #[serde(default)]
     pub insecure: bool,
@@ -184,15 +185,6 @@ pub struct TlsConfig {
     pub ca_cert: Option<String>,
 }
 
-impl Default for TlsConfig {
-    fn default() -> Self {
-        Self {
-            insecure: false,
-            cert_pinning: false,
-            ca_cert: None,
-        }
-    }
-}
 
 // ═══════════════════════════════════════════════
 // Relay Configuration

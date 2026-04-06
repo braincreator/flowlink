@@ -17,6 +17,12 @@ pub struct AuthManager {
     token_to_client: Arc<DashMap<String, String>>, // token -> client_id
 }
 
+impl Default for AuthManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthManager {
     pub fn new() -> Self {
         Self {

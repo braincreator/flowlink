@@ -26,6 +26,12 @@ pub struct ApprovalQueue {
     responders: Arc<DashMap<String, oneshot::Sender<ApprovalDecision>>>,
 }
 
+impl Default for ApprovalQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ApprovalQueue {
     pub fn new() -> Self {
         Self {
@@ -40,7 +46,7 @@ impl ApprovalQueue {
     }
 
     pub fn resolve(&self, id: &str, decision: ApprovalDecision) -> bool {
-        if let Some((_, req)) = self.pending.remove(id) {
+        if let Some((_, _req)) = self.pending.remove(id) {
             if let Some((_, tx)) = self.responders.remove(id) {
                 let _ = tx.send(decision);
             }
