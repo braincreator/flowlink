@@ -101,7 +101,7 @@ pub mod codes {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::codes::*;
 
     fn all_codes() -> Vec<&'static str> {
         vec![

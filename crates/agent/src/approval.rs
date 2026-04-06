@@ -91,3 +91,92 @@ impl ApprovalManager {
         &self.mode
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_auto_mode_never_needs_approval() {
+        let mgr = ApprovalManager::new(ApprovalMode::Auto);
+        assert!(!mgr.needs_approval("none"));
+        assert!(!mgr.needs_approval("high"));
+    }
+
+    #[test]
+    fn test_soft_ask_high_medium() {
+        let mgr = ApprovalManager::new(ApprovalMode::SoftAsk);
+        assert!(mgr.needs_approval("high"));
+        assert!(mgr.needs_approval("medium"));
+        assert!(!mgr.needs_approval("low"));
+        assert!(!mgr.needs_approval("none"));
+    }
+
+    #[test]
+    fn test_hard_ask_always() {
+        let mgr = ApprovalManager::new(ApprovalMode::HardAsk);
+        assert!(mgr.needs_approval("none"));
+        assert!(mgr.needs_approval("low"));
+        assert!(mgr.needs_approval("high"));
+    }
+
+    #[tokio::test]
+    async fn test_approve_flow() {
+        let mgr = ApprovalManager::new(ApprovalMode::Auto);
+        let handle = tokio::spawn({
+            let mgr = ApprovalManager {
+                mode: mgr.mode.clone(),
+                pending: mgr.pending.clone(),
+            };
+            async move { mgr.request_approval("r1".into(), "ls".into(), "none".into()).await }
+        });
+
+        // Give it a moment to register
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        let responded = mgr.respond("r1", ApprovalDecision::Approved).await;
+        assert!(responded);
+        let decision = handle.await.unwrap();
+        assert_eq!(decision, ApprovalDecision::Approved);
+    }
+
+    #[tokio::test]
+    async fn test_reject_flow() {
+        let mgr = ApprovalManager::new(ApprovalMode::HardAsk);
+        let handle = tokio::spawn({
+            let mgr = ApprovalManager {
+                mode: mgr.mode.clone(),
+                pending: mgr.pending.clone(),
+            };
+            async move { mgr.request_approval("r2".into(), "rm -rf".into(), "high".into()).await }
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        mgr.respond("r2", ApprovalDecision::Rejected).await;
+        let decision = handle.await.unwrap();
+        assert_eq!(decision, ApprovalDecision::Rejected);
+    }
+
+    #[tokio::test]
+    async fn test_respond_unknown_id() {
+        let mgr = ApprovalManager::new(ApprovalMode::Auto);
+        let responded = mgr.respond("nonexistent", ApprovalDecision::Approved).await;
+        assert!(!responded);
+    }
+
+    #[tokio::test]
+    async fn test_timeout_on_drop() {
+        let mgr = ApprovalManager::new(ApprovalMode::Auto);
+        let handle = tokio::spawn({
+            let mgr = ApprovalManager {
+                mode: mgr.mode.clone(),
+                pending: mgr.pending.clone(),
+            };
+            async move { mgr.request_approval("r3".into(), "cmd".into(), "none".into()).await }
+        });
+
+        // Drop the manager — the sender drops, causing TimedOut
+        drop(mgr);
+        let decision = handle.await.unwrap();
+        assert_eq!(decision, ApprovalDecision::TimedOut);
+    }
+}

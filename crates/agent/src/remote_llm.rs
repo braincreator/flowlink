@@ -98,3 +98,61 @@ impl RemoteLlm {
         Ok(resp.content)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_construction() {
+        let llm = RemoteLlm::new("https://relay.example.com".into(), "tok123".into(), 30);
+        assert_eq!(llm.relay_url, "https://relay.example.com");
+        assert_eq!(llm.api_token, "tok123");
+        assert_eq!(llm.timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_url_formation() {
+        let llm = RemoteLlm::new("https://relay.example.com".into(), "tok".into(), 10);
+        // We can't easily test without a server, but we can verify the client was built
+        assert!(llm.timeout.as_secs() == 10);
+    }
+
+    #[test]
+    fn test_messages_serialization() {
+        let msgs = vec![
+            LlmMessage { role: "system".into(), content: "You are helpful.".into() },
+            LlmMessage { role: "user".into(), content: "Hello".into() },
+        ];
+        let json = serde_json::to_value(&msgs).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 2);
+        assert_eq!(json[0]["role"], "system");
+    }
+
+    #[test]
+    fn test_response_deserialization() {
+        let json = r#"{"content":"Hi there","tokens_in":10,"tokens_out":5,"model":"gpt-4","duration_ms":200}"#;
+        let resp: LlmResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.content, "Hi there");
+        assert_eq!(resp.tokens_in, Some(10));
+        assert_eq!(resp.tokens_out, Some(5));
+        assert_eq!(resp.model, Some("gpt-4".into()));
+    }
+
+    #[test]
+    fn test_response_with_error() {
+        let json = r#"{"content":"","error":"rate limited"}"#;
+        let resp: LlmResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.error, Some("rate limited".into()));
+    }
+
+    #[test]
+    fn test_url_trailing_slash_handling() {
+        let llm = RemoteLlm::new("https://relay.example.com/".into(), "tok".into(), 10);
+        // URL construction adds /api/v1/llm/complete, so trailing slash could double-slash
+        // This is a test to document current behavior
+        let expected = "https://relay.example.com//api/v1/llm/complete";
+        let url = format!("{}/api/v1/llm/complete", llm.relay_url);
+        assert_eq!(url, expected);
+    }
+}

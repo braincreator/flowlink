@@ -74,3 +74,63 @@ pub fn cert_fingerprint(der_bytes: &[u8]) -> String {
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_fingerprint_with_prefix() {
+        let result = parse_fingerprint("SHA256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789").unwrap();
+        assert_eq!(result, "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+    }
+
+    #[test]
+    fn test_parse_fingerprint_without_prefix() {
+        let result = parse_fingerprint("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789").unwrap();
+        assert_eq!(result, "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+    }
+
+    #[test]
+    fn test_parse_fingerprint_lowercase() {
+        let result = parse_fingerprint("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789").unwrap();
+        assert_eq!(result, "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+    }
+
+    #[test]
+    fn test_parse_fingerprint_invalid_chars() {
+        let result = parse_fingerprint("sha256:ZZZZ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_fingerprint_trimming() {
+        let result = parse_fingerprint("  sha256:ABCDEF  ").unwrap();
+        assert_eq!(result, "sha256:abcdef");
+    }
+
+    #[test]
+    fn test_cert_fingerprint() {
+        let data = b"some certificate data";
+        let fp = cert_fingerprint(data);
+        assert!(fp.starts_with("sha256:"));
+        assert_eq!(fp.len(), 7 + 64); // "sha256:" + 64 hex chars
+    }
+
+    #[test]
+    fn test_cert_fingerprint_deterministic() {
+        let data = b"test cert";
+        assert_eq!(cert_fingerprint(data), cert_fingerprint(data));
+    }
+
+    #[test]
+    fn test_cert_fingerprint_different_data() {
+        assert_ne!(cert_fingerprint(b"a"), cert_fingerprint(b"b"));
+    }
+
+    #[test]
+    fn test_insecure_tls_connector() {
+        let connector = insecure_tls_connector();
+        assert!(connector.is_ok());
+    }
+}

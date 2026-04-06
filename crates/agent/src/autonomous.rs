@@ -108,3 +108,102 @@ impl TaskQueue {
         self.active_count.load(Ordering::Relaxed)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_task(id: &str) -> Task {
+        Task {
+            id: id.into(),
+            description: format!("task {id}"),
+            steps: vec![TaskStep { command: "echo hi".into(), status: TaskStatus::Queued, output: None }],
+            status: TaskStatus::Queued,
+            created_at: 1,
+            progress: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_enqueue_and_list() {
+        let q = TaskQueue::new(4);
+        q.enqueue(make_task("t1")).unwrap();
+        q.enqueue(make_task("t2")).unwrap();
+        assert_eq!(q.list().len(), 2);
+    }
+
+    #[test]
+    fn test_duplicate_enqueue_fails() {
+        let q = TaskQueue::new(4);
+        q.enqueue(make_task("t1")).unwrap();
+        assert!(q.enqueue(make_task("t1")).is_err());
+    }
+
+    #[test]
+    fn test_cancel_queued() {
+        let q = TaskQueue::new(4);
+        q.enqueue(make_task("t1")).unwrap();
+        assert!(q.cancel("t1"));
+        assert_eq!(q.get("t1").unwrap().status, TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_cancel_running() {
+        let q = TaskQueue::new(4);
+        q.enqueue(make_task("t1")).unwrap();
+        q.run_next().unwrap();
+        assert!(q.cancel("t1"));
+        assert_eq!(q.get("t1").unwrap().status, TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_cancel_completed_fails() {
+        let q = TaskQueue::new(4);
+        q.enqueue(make_task("t1")).unwrap();
+        q.run_next().unwrap();
+        q.complete("t1", TaskStatus::Completed);
+        assert!(!q.cancel("t1"));
+    }
+
+    #[test]
+    fn test_run_next_respects_limit() {
+        let q = TaskQueue::new(2);
+        q.enqueue(make_task("t1")).unwrap();
+        q.enqueue(make_task("t2")).unwrap();
+        q.enqueue(make_task("t3")).unwrap();
+        assert_eq!(q.run_next(), Some("t1".into()));
+        assert_eq!(q.run_next(), Some("t2".into()));
+        assert_eq!(q.run_next(), None); // limit reached
+        assert_eq!(q.active_count(), 2);
+    }
+
+    #[test]
+    fn test_complete_decrements_active() {
+        let q = TaskQueue::new(4);
+        q.enqueue(make_task("t1")).unwrap();
+        q.run_next().unwrap();
+        assert_eq!(q.active_count(), 1);
+        q.complete("t1", TaskStatus::Completed);
+        assert_eq!(q.active_count(), 0);
+        assert_eq!(q.get("t1").unwrap().status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn test_status_transitions() {
+        let q = TaskQueue::new(4);
+        q.enqueue(make_task("t1")).unwrap();
+        assert_eq!(q.get("t1").unwrap().status, TaskStatus::Queued);
+
+        q.run_next().unwrap();
+        assert_eq!(q.get("t1").unwrap().status, TaskStatus::Running);
+
+        q.complete("t1", TaskStatus::Failed);
+        assert_eq!(q.get("t1").unwrap().status, TaskStatus::Failed);
+    }
+
+    #[test]
+    fn test_get_nonexistent() {
+        let q = TaskQueue::new(4);
+        assert!(q.get("nope").is_none());
+    }
+}

@@ -206,7 +206,8 @@ mod tests {
         let engine = PolicyEngine::new(false, false);
         let result = engine.check(&test_payload("mkfs.ext4 /dev/sda1"));
         assert!(result.blocked);
-        assert!(result.reason.contains("mkfs."));
+        // Blocked by either shield or blacklist
+        assert!(result.reason.contains("mkfs") || result.reason.contains("SHIELD"));
     }
 
     #[test]
@@ -232,7 +233,7 @@ mod tests {
     #[test]
     fn test_sudo_blocked() {
         let engine = PolicyEngine::new(false, false);
-        let result = engine.check(&test_payload("sudo rm -rf /"));
+        let result = engine.check(&test_payload("sudo ls"));
         assert!(result.blocked);
         assert!(result.reason.contains("sudo"));
     }

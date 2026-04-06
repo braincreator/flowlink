@@ -212,7 +212,6 @@ mod tests {
         let result = decrypt(&eve, &envelope);
         assert!(result.is_err());
     }
-}
 
     #[test]
     fn test_different_keypairs_produced() {
@@ -299,3 +298,4 @@ mod tests {
         let dec2 = decrypt(&alice, &env2).unwrap();
         assert_eq!(dec2, b"hello alice");
     }
+}

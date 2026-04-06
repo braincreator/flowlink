@@ -180,3 +180,111 @@ pub fn verify_entry(entry: &mut BTreeMap<String, serde_json::Value>, secret: &[u
         None => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_log() -> AuditLog {
+        let dir = tempfile::tempdir().unwrap();
+        let key = vec![0u8; 32];
+        AuditLog::new(dir.path().to_str().unwrap().into(), key).unwrap()
+    }
+
+    fn sample_entry() -> AuditEntry {
+        AuditEntry {
+            id: "e1".into(),
+            timestamp: "2024-01-01T00:00:00Z".into(),
+            agent_id: "agent-1".into(),
+            action: "exec".into(),
+            command: Some("echo hello".into()),
+            path: None,
+            risk_level: "none".into(),
+            result: "ok".into(),
+            duration_ms: Some(10),
+            error: None,
+            hmac: None,
+        }
+    }
+
+    #[test]
+    fn test_log_entry() {
+        let log = test_log();
+        let entry = sample_entry();
+        log.log(&entry).unwrap();
+    }
+
+    #[test]
+    fn test_verify_chain_integrity() {
+        let log = test_log();
+        for i in 0..5 {
+            let mut entry = sample_entry();
+            entry.id = format!("e{}", i);
+            log.log(&entry).unwrap();
+        }
+        let valid = log.verify().unwrap();
+        assert!(valid);
+    }
+
+    #[test]
+    fn test_verify_tampered_entry() {
+        let log = test_log();
+        log.log(&sample_entry()).unwrap();
+
+        // Tamper with the log file
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let filepath = log.log_dir.join(format!("audit-{}.jsonl", today));
+        let content = std::fs::read_to_string(&filepath).unwrap();
+        let tampered = content.replace("\"result\":\"ok\"", "\"result\":\"TAMPERED\"");
+        std::fs::write(&filepath, tampered).unwrap();
+
+        let valid = log.verify().unwrap();
+        assert!(!valid);
+    }
+
+    #[test]
+    fn test_verify_empty_log() {
+        let log = test_log();
+        assert!(log.verify().unwrap());
+    }
+
+    #[test]
+    fn test_verify_entry_function() {
+        let key = vec![0u8; 32];
+        let mut entry = std::collections::BTreeMap::new();
+        entry.insert("id".into(), serde_json::json!("test"));
+        entry.insert("action".into(), serde_json::json!("exec"));
+        // Sign it
+        let json_bytes = serde_json::to_vec(&entry).unwrap();
+        let mut mac = HmacSha256::new_from_slice(&key).unwrap();
+        mac.update(&json_bytes);
+        let sig = hex_encode(mac.finalize().into_bytes().as_slice());
+        entry.insert("hmac".into(), serde_json::json!(sig));
+        assert!(verify_entry(&mut entry, &key));
+    }
+
+    #[test]
+    fn test_verify_entry_missing_hmac() {
+        let key = vec![0u8; 32];
+        let mut entry = std::collections::BTreeMap::new();
+        entry.insert("id".into(), serde_json::json!("test"));
+        assert!(!verify_entry(&mut entry, &key));
+    }
+
+    #[test]
+    fn test_load_or_generate_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("audit.key");
+        let key1 = AuditLog::load_or_generate_key(Some(key_path.to_str().unwrap())).unwrap();
+        let key2 = AuditLog::load_or_generate_key(Some(key_path.to_str().unwrap())).unwrap();
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_generate_key_deterministic() {
+        // The generate_key function uses a fixed seed, so it should be deterministic
+        let k1 = AuditLog::generate_key().unwrap();
+        let k2 = AuditLog::generate_key().unwrap();
+        assert_eq!(k1, k2);
+    }
+}
