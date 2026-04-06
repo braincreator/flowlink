@@ -1,18 +1,33 @@
 import { useState } from 'react';
-import { HardDrive, RotateCcw, Clock, Trash2 } from 'lucide-react';
+import { HardDrive, RotateCcw } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Badge, DataTable, Modal } from '../components/Layout';
+import { Badge, DataTable, Modal, LoadingSkeleton } from '../components/Layout';
+import { useApi } from '../hooks/useApi';
+import { api } from '../api/client';
 import { mockBackups, mockStorageByAgent } from '../api/client';
 import type { Backup } from '../types';
 
 export default function Backups() {
   const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
 
+  const { data: backups, loading, isLive } = useApi<any[]>(
+    () => api.getAuditEvents({ event_type: 'backup', limit: 100 }),
+    mockBackups,
+    { pollMs: 30000 }
+  );
+
   const formatSize = (bytes: number) => bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${(bytes / 1e6).toFixed(0)} MB`;
+
+  if (loading) return <LoadingSkeleton lines={6} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {/* Storage chart */}
+      {!isLive && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          ⚠️ Connected to mock data. Start relay for live data.
+        </div>
+      )}
+
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Storage Usage by Agent</h3>
         <ResponsiveContainer width="100%" height={180}>
@@ -27,49 +42,30 @@ export default function Backups() {
 
       <DataTable
         columns={[
-          { key: 'id', label: 'ID', render: (r: Backup) => <span className="font-mono text-xs">{r.id}</span> },
-          { key: 'hostname', label: 'Agent', render: (r: Backup) => (
-            <div className="flex items-center gap-2"><HardDrive size={14} className="text-[var(--color-accent)]" />{r.hostname}</div>
+          { key: 'id', label: 'ID', render: (r: any) => <span className="font-mono text-xs">{r.id}</span> },
+          { key: 'hostname', label: 'Agent', render: (r: any) => (
+            <div className="flex items-center gap-2"><HardDrive size={14} className="text-[var(--color-accent)]" />{r.hostname || r.agent_id || '—'}</div>
           )},
-          { key: 'files', label: 'Files', render: (r: Backup) => (
-            <div className="flex flex-wrap gap-1">{r.files.map(f => <span key={f} className="rounded bg-[var(--color-surface3)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--color-dim)]">{f.split('/').pop()}</span>)}</div>
-          )},
-          { key: 'size_bytes', label: 'Size', render: (r: Backup) => <span className="font-mono text-xs">{formatSize(r.size_bytes)}</span> },
-          { key: 'timestamp', label: 'Time', render: (r: Backup) => <span className="text-xs text-[var(--color-dim)]">{new Date(r.timestamp).toLocaleString()}</span> },
-          { key: 'status', label: 'Status', render: (r: Backup) => {
-            const v = r.status === 'completed' ? 'green' : r.status === 'failed' ? 'red' : 'amber';
-            return <Badge variant={v}>{r.status}</Badge>;
+          { key: 'files', label: 'Files', render: (r: any) => r.files ? (
+            <div className="flex flex-wrap gap-1">{(r.files as string[]).map((f: string) => <span key={f} className="rounded bg-[var(--color-surface3)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--color-dim)]">{f.split('/').pop()}</span>)}</div>
+          ) : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'size_bytes', label: 'Size', render: (r: any) => r.size_bytes ? <span className="font-mono text-xs">{formatSize(r.size_bytes)}</span> : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'timestamp', label: 'Time', render: (r: any) => <span className="text-xs text-[var(--color-dim)]">{new Date(r.timestamp || r.timestamp_iso).toLocaleString()}</span> },
+          { key: 'status', label: 'Status', render: (r: any) => {
+            const status = r.status || 'completed';
+            const v = status === 'completed' ? 'green' : status === 'failed' ? 'red' : 'amber';
+            return <Badge variant={v}>{status}</Badge>;
           }},
-          { key: 'restore', label: '', render: (r: Backup) => r.status === 'completed' ? (
+          { key: 'restore', label: '', render: (r: any) => (r.status || 'completed') === 'completed' ? (
             <button onClick={(e) => { e.stopPropagation(); setRestoreTarget(r); }}
               className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-2.5 py-1 text-xs hover:bg-[var(--color-surface2)] transition-colors">
               <RotateCcw size={12} /> Restore
             </button>
           ) : null },
         ]}
-        data={mockBackups} searchPlaceholder="Search backups..."
+        data={backups} searchPlaceholder="Search backups..."
       />
 
-      {/* Retention */}
-      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-        <h3 className="mb-3 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Retention Policy</h3>
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label className="mb-1 block text-xs text-[var(--color-dim)]">Keep daily backups</label>
-            <input type="number" defaultValue={7} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm focus:border-[var(--color-accent)] focus:outline-none" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-[var(--color-dim)]">Keep weekly backups</label>
-            <input type="number" defaultValue={4} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm focus:border-[var(--color-accent)] focus:outline-none" />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-[var(--color-dim)]">Max storage per agent</label>
-            <input type="text" defaultValue="10 GB" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm focus:border-[var(--color-accent)] focus:outline-none" />
-          </div>
-        </div>
-      </div>
-
-      {/* Restore modal */}
       <Modal open={!!restoreTarget} onClose={() => setRestoreTarget(null)} title="Restore Backup" actions={
         <>
           <button onClick={() => setRestoreTarget(null)} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">Cancel</button>
@@ -78,11 +74,13 @@ export default function Backups() {
       }>
         {restoreTarget && (
           <div className="text-sm">
-            <p className="text-[var(--color-dim)]">This will restore files from <span className="font-mono text-[var(--color-text)]">{restoreTarget.hostname}</span> backup created on <span className="text-[var(--color-text)]">{new Date(restoreTarget.timestamp).toLocaleString()}</span>.</p>
-            <div className="mt-3 rounded-lg bg-[var(--color-bg)] p-3">
-              <div className="text-xs text-[var(--color-dim)] mb-1">Files to restore:</div>
-              {restoreTarget.files.map(f => <div key={f} className="font-mono text-xs">{f}</div>)}
-            </div>
+            <p className="text-[var(--color-dim)]">Restore from backup created on <span className="text-[var(--color-text)]">{new Date(restoreTarget.timestamp).toLocaleString()}</span>.</p>
+            {restoreTarget.files && (
+              <div className="mt-3 rounded-lg bg-[var(--color-bg)] p-3">
+                <div className="text-xs text-[var(--color-dim)] mb-1">Files:</div>
+                {restoreTarget.files.map((f: string) => <div key={f} className="font-mono text-xs">{f}</div>)}
+              </div>
+            )}
             <p className="mt-3 text-amber-400 text-xs">⚠ This will overwrite current files on the agent.</p>
           </div>
         )}

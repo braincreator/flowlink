@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Bot, Cpu, MemoryStick, HardDrive, Terminal, X } from 'lucide-react';
-import { DataTable, Badge, SlidePanel, Modal, RiskGauge } from '../components/Layout';
+import { Bot, Cpu, MemoryStick, HardDrive, Terminal } from 'lucide-react';
+import { DataTable, Badge, SlidePanel, Modal, LoadingSkeleton } from '../components/Layout';
+import { useApi } from '../hooks/useApi';
+import { api } from '../api/client';
 import { mockAgents } from '../api/client';
 import type { Agent } from '../types';
 
@@ -10,11 +12,24 @@ export default function Agents() {
   const [cmd, setCmd] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  const filtered = filterStatus === 'all' ? mockAgents : mockAgents.filter(a => a.status === filterStatus);
+  const { data: agents, loading, isLive, refresh } = useApi(
+    () => api.getAgents(),
+    mockAgents,
+    { pollMs: 10000 }
+  );
+
+  const filtered = filterStatus === 'all' ? agents : agents.filter((a: Agent) => a.status === filterStatus);
+
+  if (loading) return <LoadingSkeleton lines={8} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {/* Filters */}
+      {!isLive && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          ⚠️ Connected to mock data. Start relay for live data.
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         {['all', 'online', 'offline'].map(s => (
           <button key={s} onClick={() => setFilterStatus(s)}
@@ -46,7 +61,6 @@ export default function Agents() {
         data={filtered} onRowClick={setSelected} searchPlaceholder="Search agents..."
       />
 
-      {/* Detail Panel */}
       <SlidePanel open={!!selected} onClose={() => setSelected(null)} title={selected?.hostname || ''}>
         {selected && (
           <div className="space-y-6">
@@ -57,12 +71,11 @@ export default function Agents() {
                 <div className="text-sm text-[var(--color-dim)]">{selected.id} · {selected.os}</div>
               </div>
             </div>
-
             <div className="grid grid-cols-3 gap-3">
               {[
-                { label: 'CPU', value: `${selected.cpu}%`, icon: <Cpu size={16} />, color: selected.cpu! > 80 ? 'text-rose-400' : 'text-emerald-400' },
-                { label: 'RAM', value: `${selected.ram}%`, icon: <MemoryStick size={16} />, color: selected.ram! > 80 ? 'text-rose-400' : 'text-emerald-400' },
-                { label: 'Disk', value: `${selected.disk}%`, icon: <HardDrive size={16} />, color: selected.disk! > 80 ? 'text-amber-400' : 'text-emerald-400' },
+                { label: 'CPU', value: `${selected.cpu ?? '—'}%`, icon: <Cpu size={16} />, color: (selected.cpu ?? 0) > 80 ? 'text-rose-400' : 'text-emerald-400' },
+                { label: 'RAM', value: `${selected.ram ?? '—'}%`, icon: <MemoryStick size={16} />, color: (selected.ram ?? 0) > 80 ? 'text-rose-400' : 'text-emerald-400' },
+                { label: 'Disk', value: `${selected.disk ?? '—'}%`, icon: <HardDrive size={16} />, color: (selected.disk ?? 0) > 80 ? 'text-amber-400' : 'text-emerald-400' },
               ].map(s => (
                 <div key={s.label} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-4 text-center">
                   <div className={`mb-1 flex justify-center ${s.color}`}>{s.icon}</div>
@@ -71,33 +84,21 @@ export default function Agents() {
                 </div>
               ))}
             </div>
-
             <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
               <div className="text-xs text-[var(--color-dim)] uppercase tracking-wider mb-2">System Info</div>
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-[var(--color-dim)]">IP:</span> {selected.ip}</div>
-                <div><span className="text-[var(--color-dim)]">Sessions:</span> {selected.sessions_count}</div>
+                <div><span className="text-[var(--color-dim)]">IP:</span> {selected.ip || '—'}</div>
+                <div><span className="text-[var(--color-dim)]">Sessions:</span> {selected.sessions_count ?? '—'}</div>
                 <div><span className="text-[var(--color-dim)]">Version:</span> {selected.version}</div>
                 <div><span className="text-[var(--color-dim)]">Tags:</span> {selected.tags.join(', ')}</div>
               </div>
             </div>
-
-            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
-              <div className="text-xs text-[var(--color-dim)] uppercase tracking-wider mb-3">Recent Commands</div>
-              <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                {['systemctl status nginx', 'docker ps -a', 'tail -f /var/log/app.log', 'df -h', 'free -m'].map((c, i) => (
-                  <div key={i} className="rounded-lg bg-[var(--color-surface)] px-3 py-2 font-mono text-xs text-[var(--color-dim)]">
-                    <span className="text-[var(--color-accent-light)]">$</span> {c}
-                  </div>
-                ))}
-              </div>
-            </div>
-
             <div className="flex gap-3">
               <button onClick={() => setExecOpen(true)} className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)]">
                 <Terminal size={16} /> Execute Command
               </button>
-              <button className="flex-1 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2.5 text-sm font-medium text-rose-400 transition-colors hover:bg-rose-500/20">
+              <button onClick={async () => { if (selected && confirm(`Disconnect ${selected.hostname}?`)) { try { await api.removeAgent(selected.id); refresh(); setSelected(null); } catch {} } }}
+                className="flex-1 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2.5 text-sm font-medium text-rose-400 transition-colors hover:bg-rose-500/20">
                 Disconnect
               </button>
             </div>
@@ -105,7 +106,6 @@ export default function Agents() {
         )}
       </SlidePanel>
 
-      {/* Exec Modal */}
       <Modal open={execOpen} onClose={() => setExecOpen(false)} title="Execute Command" actions={
         <>
           <button onClick={() => setExecOpen(false)} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">Cancel</button>

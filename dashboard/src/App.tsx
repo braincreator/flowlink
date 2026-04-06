@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Sidebar';
+import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Agents from './pages/Agents';
 import Shield from './pages/Shield';
@@ -16,6 +17,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/login" element={<Login />} />
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="agents" element={<Agents />} />
@@ -28,6 +30,7 @@ export default function App() {
           <Route path="rbac" element={<RBAC />} />
           <Route path="metrics" element={<Metrics />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>

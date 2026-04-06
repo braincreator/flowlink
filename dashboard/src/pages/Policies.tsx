@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Upload, Download, Play, FileCode } from 'lucide-react';
-import { Badge, Modal, YamlEditor } from '../components/Layout';
+import { Badge, Modal, YamlEditor, LoadingSkeleton } from '../components/Layout';
+import { useApi } from '../hooks/useApi';
 import { mockPolicies } from '../api/client';
 
 const DEFAULT_YAML = `# FlowLink Shield Policy
@@ -27,20 +28,6 @@ rules:
     conditions:
       command_match: "/etc/(shadow|passwd|ssh)"
       user: "*"
-
-  - name: Block firewall modifications
-    action: deny
-    priority: 95
-    conditions:
-      command_match: "(iptables|ufw|nft)\\s+-F"
-      user: "*"
-
-  - name: Allow apt for root
-    action: allow
-    priority: 10
-    conditions:
-      command_match: "^apt\\s+(update|upgrade)"
-      user: "root"
 `;
 
 export default function Policies() {
@@ -50,22 +37,32 @@ export default function Policies() {
   const [testCmd, setTestCmd] = useState('');
   const [testResult, setTestResult] = useState<string | null>(null);
 
+  const { data: policies, loading, isLive } = useApi<any[]>(
+    async () => mockPolicies,
+    mockPolicies,
+  );
+
   const runTest = () => {
     if (!testCmd) return;
     if (testCmd.includes('rm') || testCmd.includes('chmod 777') || testCmd.includes('iptables')) {
       setTestResult('⛔ DENIED — matches "Block dangerous rm" (priority 100)');
     } else if (testCmd.includes('sudo')) {
       setTestResult('🛡 INTERCEPT — matches "Intercept sudo commands" (priority 90)');
-    } else if (testCmd.includes('apt') || testCmd.includes('docker')) {
-      setTestResult('✅ ALLOW — matches allow rule');
     } else {
       setTestResult('✅ ALLOW — no matching deny/intercept rule');
     }
   };
 
+  if (loading) return <LoadingSkeleton lines={6} />;
+
   return (
     <div className="space-y-6 fade-in">
-      {/* Actions */}
+      {!isLive && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          ⚠️ Connected to mock data. Start relay for live data.
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-3">
         <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)]">
           <Plus size={16} /> Add Rule
@@ -82,16 +79,13 @@ export default function Policies() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {/* Editor */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <h3 className="mb-3 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Policy Editor</h3>
           <YamlEditor value={yaml} onChange={setYaml} />
         </div>
-
-        {/* Rules list */}
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Active Rules ({mockPolicies.length})</h3>
-          {mockPolicies.map((p, i) => (
+          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Active Rules ({policies.length})</h3>
+          {policies.map((p: any, i: number) => ( // eslint-disable-next-line
             <div key={i} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 transition-all hover:border-[var(--color-accent)]/30">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
@@ -102,14 +96,13 @@ export default function Policies() {
               </div>
               <div className="text-xs text-[var(--color-dim)] mb-1">Priority: {p.priority} · {p.enabled ? '✅ Enabled' : '❌ Disabled'}</div>
               <div className="rounded-lg bg-[var(--color-bg)] p-2 font-mono text-[10px] text-[var(--color-dim)]">
-                {Object.entries(p.conditions).map(([k, v]) => <div key={k}><span className="text-[var(--color-accent-light)]">{k}</span>: {v}</div>)}
+                {Object.entries(p.conditions || {}).map(([k, v]) => <div key={k}><span className="text-[var(--color-accent-light)]">{k}</span>: {String(v)}</div>)}
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Add Rule Modal */}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Policy Rule" actions={
         <>
           <button onClick={() => setAddOpen(false)} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">Cancel</button>
@@ -130,7 +123,6 @@ export default function Policies() {
         </div>
       </Modal>
 
-      {/* Test Rule Modal */}
       <Modal open={testOpen} onClose={() => { setTestOpen(false); setTestResult(null); }} title="Test Rule Match" actions={
         <>
           <button onClick={() => { setTestOpen(false); setTestResult(null); }} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">Close</button>

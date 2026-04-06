@@ -1,7 +1,9 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Search, Download } from 'lucide-react';
-import { Badge, DataTable } from '../components/Layout';
+import { Badge, DataTable, LoadingSkeleton } from '../components/Layout';
+import { useApi } from '../hooks/useApi';
+import { api } from '../api/client';
 import { mockAuditEvents } from '../api/client';
 const eventTypeIcons = {
     command_executed: '✓', command_intercepted: '🛡', command_approved: '✅',
@@ -14,17 +16,36 @@ const actionBadge = {
 export default function Audit() {
     const [search, setSearch] = useState('');
     const [filterType, setFilterType] = useState('all');
-    const types = [...new Set(mockAuditEvents.map(e => e.event_type))];
-    const filtered = mockAuditEvents.filter(e => {
-        if (filterType !== 'all' && e.event_type !== filterType)
-            return false;
+    const fetchEvents = useCallback(() => api.getAuditEvents({
+        event_type: filterType !== 'all' ? filterType : undefined,
+        limit: 100,
+    }), [filterType]);
+    const { data: events, loading, isLive, refresh } = useApi(fetchEvents, mockAuditEvents, { pollMs: 15000 });
+    const { data: auditStats } = useApi(() => api.getAuditStats(), { total: 50, allowed: 40, denied: 5, intercepted: 5 }, { pollMs: 30000 });
+    const types = [...new Set(events.map((e) => e.event_type))];
+    const filtered = events.filter((e) => {
         if (search && !`${e.command} ${e.user} ${e.agent_id}`.toLowerCase().includes(search.toLowerCase()))
             return false;
         return true;
     });
-    const denied = mockAuditEvents.filter(e => e.result === 'denied').length;
-    const allowed = mockAuditEvents.filter(e => e.result === 'allowed').length;
-    return (_jsxs("div", { className: "space-y-6 fade-in", children: [_jsxs("div", { className: "grid grid-cols-2 gap-4 xl:grid-cols-4", children: [_jsxs("div", { className: "rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4", children: [_jsx("div", { className: "text-xs uppercase tracking-wider text-[var(--color-dim)]", children: "Total Events" }), _jsx("div", { className: "mt-1 text-2xl font-bold", children: mockAuditEvents.length })] }), _jsxs("div", { className: "rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4", children: [_jsx("div", { className: "text-xs uppercase tracking-wider text-[var(--color-dim)]", children: "Allowed" }), _jsx("div", { className: "mt-1 text-2xl font-bold text-emerald-400", children: allowed })] }), _jsxs("div", { className: "rounded-xl border border-rose-500/20 bg-rose-500/5 p-4", children: [_jsx("div", { className: "text-xs uppercase tracking-wider text-[var(--color-dim)]", children: "Denied" }), _jsx("div", { className: "mt-1 text-2xl font-bold text-rose-400", children: denied })] }), _jsxs("div", { className: "rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4", children: [_jsx("div", { className: "text-xs uppercase tracking-wider text-[var(--color-dim)]", children: "Deny Rate" }), _jsxs("div", { className: "mt-1 text-2xl font-bold", children: [((denied / (allowed + denied)) * 100).toFixed(1), "%"] })] })] }), _jsxs("div", { className: "flex flex-wrap items-center gap-3", children: [_jsxs("div", { className: "relative flex-1 max-w-sm", children: [_jsx(Search, { size: 16, className: "absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-dim)]" }), _jsx("input", { type: "text", placeholder: "Search commands, users...", value: search, onChange: e => setSearch(e.target.value), className: "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] py-2.5 pl-9 pr-3 text-sm placeholder-[var(--color-dim)] focus:border-[var(--color-accent)] focus:outline-none" })] }), _jsxs("select", { value: filterType, onChange: e => setFilterType(e.target.value), className: "rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none", children: [_jsx("option", { value: "all", children: "All Events" }), types.map(t => _jsx("option", { value: t, children: t.replace(/_/g, ' ') }, t))] }), _jsxs("div", { className: "flex gap-2", children: [_jsxs("button", { className: "flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Download, { size: 14 }), " JSON"] }), _jsxs("button", { className: "flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Download, { size: 14 }), " CEF"] }), _jsxs("button", { className: "flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Download, { size: 14 }), " LEEF"] })] })] }), _jsx(DataTable, { columns: [
+    const denied = events.filter((e) => e.result === 'denied').length;
+    const allowed = events.filter((e) => e.result === 'allowed').length;
+    const handleExport = async (format) => {
+        try {
+            const text = await api.exportAudit(format);
+            const blob = new Blob([text], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `flowlink-audit.${format === 'json' ? 'json' : format === 'cef' ? 'cef' : 'leef'}`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        catch { }
+    };
+    if (loading)
+        return _jsx(LoadingSkeleton, { lines: 8 });
+    return (_jsxs("div", { className: "space-y-6 fade-in", children: [!isLive && (_jsx("div", { className: "rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400", children: "\u26A0\uFE0F Connected to mock data. Start relay for live data." })), _jsxs("div", { className: "grid grid-cols-2 gap-4 xl:grid-cols-4", children: [_jsxs("div", { className: "rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4", children: [_jsx("div", { className: "text-xs uppercase tracking-wider text-[var(--color-dim)]", children: "Total Events" }), _jsx("div", { className: "mt-1 text-2xl font-bold", children: auditStats.total || events.length })] }), _jsxs("div", { className: "rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4", children: [_jsx("div", { className: "text-xs uppercase tracking-wider text-[var(--color-dim)]", children: "Allowed" }), _jsx("div", { className: "mt-1 text-2xl font-bold text-emerald-400", children: auditStats.allowed || allowed })] }), _jsxs("div", { className: "rounded-xl border border-rose-500/20 bg-rose-500/5 p-4", children: [_jsx("div", { className: "text-xs uppercase tracking-wider text-[var(--color-dim)]", children: "Denied" }), _jsx("div", { className: "mt-1 text-2xl font-bold text-rose-400", children: auditStats.denied || denied })] }), _jsxs("div", { className: "rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4", children: [_jsx("div", { className: "text-xs uppercase tracking-wider text-[var(--color-dim)]", children: "Deny Rate" }), _jsxs("div", { className: "mt-1 text-2xl font-bold", children: [allowed + denied > 0 ? ((denied / (allowed + denied)) * 100).toFixed(1) : '0', "%"] })] })] }), _jsxs("div", { className: "flex flex-wrap items-center gap-3", children: [_jsxs("div", { className: "relative flex-1 max-w-sm", children: [_jsx(Search, { size: 16, className: "absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-dim)]" }), _jsx("input", { type: "text", placeholder: "Search commands, users...", value: search, onChange: e => setSearch(e.target.value), className: "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] py-2.5 pl-9 pr-3 text-sm placeholder-[var(--color-dim)] focus:border-[var(--color-accent)] focus:outline-none" })] }), _jsxs("select", { value: filterType, onChange: e => { setFilterType(e.target.value); setTimeout(refresh, 0); }, className: "rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none", children: [_jsx("option", { value: "all", children: "All Events" }), types.map(t => _jsx("option", { value: t, children: t.replace(/_/g, ' ') }, t))] }), _jsxs("div", { className: "flex gap-2", children: [_jsxs("button", { onClick: () => handleExport('json'), className: "flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Download, { size: 14 }), " JSON"] }), _jsxs("button", { onClick: () => handleExport('cef'), className: "flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Download, { size: 14 }), " CEF"] }), _jsxs("button", { onClick: () => handleExport('leef'), className: "flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Download, { size: 14 }), " LEEF"] })] })] }), _jsx(DataTable, { columns: [
                     { key: 'timestamp_iso', label: 'Time', render: (r) => _jsx("span", { className: "text-xs text-[var(--color-dim)] whitespace-nowrap", children: new Date(r.timestamp_iso).toLocaleString() }) },
                     { key: 'event_type', label: 'Event', render: (r) => (_jsxs("span", { className: "flex items-center gap-1.5", children: [_jsx("span", { children: eventTypeIcons[r.event_type] || '•' }), _jsx(Badge, { variant: r.event_type === 'command_intercepted' ? 'red' : r.event_type === 'canary_triggered' ? 'amber' : 'default', children: r.event_type.replace(/_/g, ' ') })] })) },
                     { key: 'agent_id', label: 'Agent', render: (r) => _jsx("span", { className: "text-xs font-mono", children: r.agent_id }) },

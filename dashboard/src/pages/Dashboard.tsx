@@ -1,34 +1,75 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Shield, Bot, AlertTriangle, Activity, Clock, Zap } from 'lucide-react';
-import { StatCard, Badge } from '../components/Layout';
-import { mockDashboardStats, mockCommandsOver24h, mockAlerts, mockAuditEvents, mockInterceptionsOverTime } from '../api/client';
+import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { Shield, Bot, AlertTriangle, Activity, Clock } from 'lucide-react';
+import { StatCard, Badge, LoadingSkeleton } from '../components/Layout';
+import { useApi, useSSE } from '../hooks/useApi';
+import { api } from '../api/client';
+import {
+  mockDashboardStats, mockCommandsOver24h, mockAlerts,
+  mockAuditEvents, mockInterceptionsOverTime
+} from '../api/client';
 
 const PIE_COLORS = ['#f43f5e', '#f59e0b', '#6366f1'];
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const s = mockDashboardStats;
-  const pendingAlerts = mockAlerts.filter(a => !a.resolved);
-  const recentEvents = mockAuditEvents.slice(0, 20);
+  const { data: agents, loading: agentsLoading, isLive } = useApi(
+    () => api.getAgents(),
+    [] as any[],
+    { pollMs: 15000 }
+  );
+  const { data: shieldStats, loading: shieldLoading } = useApi(
+    () => api.getShieldStats(),
+    mockDashboardStats,
+    { pollMs: 15000 }
+  );
+  const { data: auditStats, loading: auditLoading } = useApi(
+    () => api.getAuditStats(),
+    { total: 50, allowed: 40, denied: 5, intercepted: 5, commands_today: 1247, l1_count: 23, l2_count: 12, l3_count: 4 },
+    { pollMs: 30000 }
+  );
+  const { data: alerts, loading: alertsLoading } = useApi(
+    () => api.getAlerts(),
+    mockAlerts,
+    { pollMs: 10000 }
+  );
+  const { data: auditEvents, loading: eventsLoading } = useApi(
+    () => api.getAuditEvents({ limit: 20 }),
+    mockAuditEvents,
+    { pollMs: 15000 }
+  );
+  const { events: sseEvents, connected: sseConnected } = useSSE();
+
+  const loading = agentsLoading || shieldLoading || auditLoading;
+  const onlineAgents = agents.filter?.((a: any) => a.status === 'online')?.length || 0;
+  const totalAgents = agents.length || 0;
+  const s = { ...mockDashboardStats, ...shieldStats, ...auditStats };
+  const pendingAlerts = alerts.filter?.((a: any) => !a.resolved) || [];
+  const recentEvents = sseConnected && sseEvents.length > 0 ? sseEvents.slice(0, 20) : (auditEvents as any[]).slice(0, 20);
   const pieData = [
-    { name: 'L3 Critical', value: s.l3_count },
-    { name: 'L2 Medium', value: s.l2_count },
-    { name: 'L1 Low', value: s.l1_count },
+    { name: 'L3 Critical', value: s.l3_count || 0 },
+    { name: 'L2 Medium', value: s.l2_count || 0 },
+    { name: 'L1 Low', value: s.l1_count || 0 },
   ];
+
+  if (loading) return <LoadingSkeleton lines={8} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {/* Stats */}
+      {!isLive && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          ⚠️ Connected to mock data. Start relay for live data.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Agents" value={`${s.online_agents}/${s.total_agents}`} trend={{ value: 12, label: 'this week' }} icon={<Bot size={24} />} color="accent" />
-        <StatCard label="Active Alerts" value={s.active_alerts} trend={{ value: -8, label: 'vs yesterday' }} icon={<AlertTriangle size={24} />} color="red" />
-        <StatCard label="Commands Today" value={s.commands_today.toLocaleString()} trend={{ value: 5, label: 'vs yesterday' }} icon={<Activity size={24} />} color="green" />
-        <StatCard label="Uptime" value={`${s.uptime_pct}%`} icon={<Clock size={24} />} color="blue" />
+        <StatCard label="Total Agents" value={`${onlineAgents}/${totalAgents}`} trend={{ value: 12, label: 'this week' }} icon={<Bot size={24} />} color="accent" />
+        <StatCard label="Active Alerts" value={pendingAlerts.length} trend={{ value: -8, label: 'vs yesterday' }} icon={<AlertTriangle size={24} />} color="red" />
+        <StatCard label="Commands Today" value={(s.commands_today || 0).toLocaleString()} trend={{ value: 5, label: 'vs yesterday' }} icon={<Activity size={24} />} color="green" />
+        <StatCard label="Uptime" value={`${s.uptime_pct || 99.7}%`} icon={<Clock size={24} />} color="blue" />
       </div>
 
-      {/* Quick Actions */}
       <div className="flex flex-wrap gap-3">
         <button onClick={() => navigate('/shield')} className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)] hover:shadow-lg hover:shadow-indigo-500/20">
           <Shield size={16} /> Approve Pending ({pendingAlerts.length})
@@ -42,17 +83,11 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        {/* Commands chart */}
         <div className="col-span-1 xl:col-span-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Commands — Last 24h</h3>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={mockCommandsOver24h}>
-              <defs>
-                <linearGradient id="cmdGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
-                </linearGradient>
-              </defs>
+              <defs><linearGradient id="cmdGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} /><stop offset="100%" stopColor="#6366f1" stopOpacity={0} /></linearGradient></defs>
               <XAxis dataKey="hour" tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
@@ -61,7 +96,6 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
 
-        {/* Shield Status */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Shield Status</h3>
           <div className="flex items-center justify-center">
@@ -82,11 +116,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Activity Feed */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Recent Activity</h3>
+        <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Recent Activity {sseConnected && <span className="ml-2 text-emerald-400">● Live</span>}</h3>
         <div className="space-y-2 max-h-[360px] overflow-y-auto">
-          {recentEvents.map(ev => {
+          {recentEvents.map((ev: any, i: number) => {
             const icons: Record<string, string> = {
               command_executed: '✓', command_intercepted: '🛡', session_started: '→',
               session_ended: '←', canary_triggered: '🐦', policy_violation: '⚠', agent_heartbeat: '💓',
@@ -95,15 +128,17 @@ export default function Dashboard() {
               command_executed: 'green', command_intercepted: 'red', session_started: 'blue',
               canary_triggered: 'amber', policy_violation: 'red', agent_heartbeat: 'default',
             };
+            const eventType = ev.event_type || ev.type || 'unknown';
+            const ts = ev.timestamp_iso || ev.timestamp || ev.time;
             return (
-              <div key={ev.id} className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-[var(--color-surface2)]">
-                <span className="text-base">{icons[ev.event_type] || '•'}</span>
-                <Badge variant={badgeMap[ev.event_type] || 'default'}>{ev.event_type.replace(/_/g, ' ')}</Badge>
+              <div key={ev.id || i} className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-[var(--color-surface2)]">
+                <span className="text-base">{icons[eventType] || '•'}</span>
+                <Badge variant={badgeMap[eventType] || 'default'}>{eventType.replace(/_/g, ' ')}</Badge>
                 <span className="flex-1 truncate text-sm">
-                  {ev.command || `${ev.user || 'system'} — ${ev.event_type.replace(/_/g, ' ')}`}
+                  {ev.command || `${ev.user || ev.username || 'system'} — ${eventType.replace(/_/g, ' ')}`}
                 </span>
                 {ev.risk_score && <span className="text-xs font-mono text-rose-400">risk:{ev.risk_score}</span>}
-                <span className="text-xs text-[var(--color-dim)]">{new Date(ev.timestamp_iso).toLocaleTimeString()}</span>
+                <span className="text-xs text-[var(--color-dim)]">{ts ? new Date(ts).toLocaleTimeString() : ''}</span>
               </div>
             );
           })}

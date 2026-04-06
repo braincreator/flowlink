@@ -1,33 +1,57 @@
 import { useState } from 'react';
-import { Shield as ShieldIcon, ShieldAlert, ShieldCheck, ShieldX, Bird, FileCode, BarChart3 } from 'lucide-react';
-import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Badge, RiskGauge } from '../components/Layout';
-import { mockAlerts, mockInterceptionsOverTime, mockTopDangerousCommands, mockCanaries, mockPolicies, mockDashboardStats } from '../api/client';
-
-const PIE_COLORS = ['#f43f5e', '#f59e0b', '#6366f1'];
+import { ShieldAlert as ShieldAlertIcon, ShieldCheck, Bird, FileCode } from 'lucide-react';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { Badge, RiskGauge, LoadingSkeleton } from '../components/Layout';
+import { useApi, useSSE } from '../hooks/useApi';
+import { api, mockAlerts, mockInterceptionsOverTime, mockTopDangerousCommands, mockCanaries, mockPolicies, mockDashboardStats } from '../api/client';
+import type { ShieldAlert as ShieldAlertType } from '../types';
 
 export default function Shield() {
-  const [alerts, setAlerts] = useState(mockAlerts);
   const [tab, setTab] = useState<'alerts' | 'canaries' | 'policies'>('alerts');
-  const s = mockDashboardStats;
-  const pending = alerts.filter(a => !a.resolved);
+  const [localAlerts, setLocalAlerts] = useState<ShieldAlertType[]>(mockAlerts);
+  const { connected: sseConnected } = useSSE();
 
-  const resolve = (id: string, approved: boolean) => {
-    setAlerts(prev => prev.map(a => a.alert_id === id ? { ...a, resolved: true, approved } : a));
+  const { data: alerts, loading: alertsLoading, isLive: alertsLive, refresh: refreshAlerts } = useApi(
+    () => api.getAlerts(),
+    mockAlerts,
+    { pollMs: 5000 }
+  );
+
+  const { data: stats, loading: statsLoading } = useApi(
+    () => api.getShieldStats(),
+    mockDashboardStats,
+    { pollMs: 15000 }
+  );
+
+  // Keep localAlerts in sync with API data
+  const currentAlerts: ShieldAlertType[] = alertsLive ? alerts : localAlerts;
+  const s = { ...mockDashboardStats, ...stats };
+  const pending = currentAlerts.filter((a: ShieldAlertType) => !a.resolved);
+
+  const resolve = async (alertId: string, approved: boolean) => {
+    // Optimistic update
+    // Optimistic update
+    setLocalAlerts(prev => prev.map(a => a.alert_id === alertId ? { ...a, resolved: true, approved } : a));
+    try {
+      if (approved) await api.approveAlert(alertId);
+      else await api.rejectAlert(alertId);
+    } catch { /* keep optimistic state */ }
+    refreshAlerts();
   };
 
   const levelColor = (l: string) => l === 'L3' ? 'red' : l === 'L2' ? 'amber' : 'blue';
   const levelBg = (l: string) => l === 'L3' ? 'border-rose-500/30 bg-rose-500/5' : l === 'L2' ? 'border-amber-500/30 bg-amber-500/5' : 'border-blue-500/30 bg-blue-500/5';
 
-  const pieData = [
-    { name: 'L3 Critical', value: s.l3_count },
-    { name: 'L2 Medium', value: s.l2_count },
-    { name: 'L1 Low', value: s.l1_count },
-  ];
+  if (alertsLoading || statsLoading) return <LoadingSkeleton lines={8} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {/* Stats row */}
+      {!alertsLive && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          ⚠️ Connected to mock data. Start relay for live data.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-500/10 to-transparent p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Pending</div>
@@ -35,22 +59,21 @@ export default function Shield() {
         </div>
         <div className="rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-transparent p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Approved</div>
-          <div className="mt-1 text-2xl font-bold text-emerald-400">{alerts.filter(a => a.approved === true).length}</div>
+          <div className="mt-1 text-2xl font-bold text-emerald-400">{currentAlerts.filter((a: ShieldAlertType) => a.approved === true).length}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Total Intercepts</div>
-          <div className="mt-1 text-2xl font-bold">{alerts.length}</div>
+          <div className="mt-1 text-2xl font-bold">{currentAlerts.length}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">False Positive Rate</div>
-          <div className="mt-1 text-2xl font-bold text-amber-400">12.3%</div>
+          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">SSE</div>
+          <div className="mt-1 text-2xl font-bold">{sseConnected ? <span className="text-emerald-400">● Live</span> : <span className="text-[var(--color-dim)]">○ Off</span>}</div>
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1">
         {[
-          { key: 'alerts' as const, label: 'Alerts', icon: ShieldAlert, count: pending.length },
+          { key: 'alerts' as const, label: 'Alerts', icon: ShieldAlertIcon, count: pending.length },
           { key: 'canaries' as const, label: 'Canaries', icon: Bird, count: mockCanaries.length },
           { key: 'policies' as const, label: 'Policy Rules', icon: FileCode, count: mockPolicies.length },
         ].map(t => (
@@ -70,7 +93,7 @@ export default function Shield() {
               <div className="text-sm">No pending alerts</div>
             </div>
           )}
-          {pending.map(alert => (
+          {pending.map((alert: ShieldAlertType) => (
             <div key={alert.alert_id} className={`rounded-xl border p-4 ${levelBg(alert.threat_level)}`}>
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
@@ -132,27 +155,19 @@ export default function Shield() {
               </div>
               <div className="text-xs text-[var(--color-dim)] mb-2">Priority: {p.priority}</div>
               <div className="rounded-lg bg-[var(--color-bg)] p-3 font-mono text-xs text-[var(--color-dim)]">
-                {Object.entries(p.conditions).map(([k, v]) => (
-                  <div key={k}><span className="text-[var(--color-accent-light)]">{k}</span>: {v}</div>
-                ))}
+                {Object.entries(p.conditions).map(([k, v]) => <div key={k}><span className="text-[var(--color-accent-light)]">{k}</span>: {v}</div>)}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Charts */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Interceptions Over Time</h3>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={mockInterceptionsOverTime}>
-              <defs>
-                <linearGradient id="intGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#f43f5e" stopOpacity={0} />
-                </linearGradient>
-              </defs>
+              <defs><linearGradient id="intGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f43f5e" stopOpacity={0.3} /><stop offset="100%" stopColor="#f43f5e" stopOpacity={0} /></linearGradient></defs>
               <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
               <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
@@ -160,7 +175,6 @@ export default function Shield() {
             </AreaChart>
           </ResponsiveContainer>
         </div>
-
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Top Dangerous Commands</h3>
           <ResponsiveContainer width="100%" height={200}>

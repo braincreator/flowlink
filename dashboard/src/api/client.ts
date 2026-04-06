@@ -3,7 +3,103 @@ import type {
   PolicyRule, Device, User, CanaryToken, SystemInfo, DashboardStats
 } from '../types';
 
-// ═══ Mock Data ═══
+// ═══ API Client ═══
+
+const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8080';
+
+class ApiClient {
+  private token: string | null = null;
+
+  constructor() {
+    const stored = localStorage.getItem('flowlink_token');
+    if (stored) this.token = stored;
+  }
+
+  getToken() { return this.token; }
+
+  setToken(token: string | null) {
+    this.token = token;
+    if (token) localStorage.setItem('flowlink_token', token);
+    else localStorage.removeItem('flowlink_token');
+  }
+
+  private headers(): Record<string, string> {
+    const h: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.token) h['Authorization'] = `Bearer ${this.token}`;
+    return h;
+  }
+
+  private async request<T>(method: string, path: string, body?: any): Promise<T> {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: this.headers(),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(error.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  private async requestText(method: string, path: string): Promise<string> {
+    const res = await fetch(`${API_BASE}${path}`, { method, headers: this.headers() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  }
+
+  // Health
+  getHealth() { return this.request<{ status: string }>('GET', '/health'); }
+
+  // Agents
+  getAgents() { return this.request<Agent[]>('GET', '/api/agents'); }
+  registerAgent(agent: any) { return this.request('POST', '/api/agents/register', agent); }
+  removeAgent(id: string) { return this.request('DELETE', `/api/agents/${id}`); }
+
+  // Shield
+  getAlerts() { return this.request<ShieldAlert[]>('GET', '/api/shield/alerts'); }
+  approveAlert(pid: string) { return this.request('POST', `/api/shield/approve/${pid}`); }
+  rejectAlert(pid: string) { return this.request('POST', `/api/shield/reject/${pid}`); }
+  resolveAlert(data: any) { return this.request('POST', '/api/shield/resolve', data); }
+  getShieldStats() { return this.request<any>('GET', '/api/shield/stats'); }
+
+  // Audit
+  getAuditEvents(params: Record<string, any> = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => [k, String(v)])
+    ).toString();
+    return this.request<AuditEvent[]>('GET', `/api/audit${qs ? `?${qs}` : ''}`);
+  }
+  getAuditStats() { return this.request<any>('GET', '/api/audit/stats'); }
+  exportAudit(format: string) { return this.requestText('GET', `/api/audit/export?format=${format}`); }
+
+  // Approvals
+  getApprovals() { return this.request<any[]>('GET', '/api/approvals'); }
+  approveRequest(id: string) { return this.request('POST', `/api/approvals/${id}/approve`); }
+  rejectRequest(id: string) { return this.request('POST', `/api/approvals/${id}/reject`); }
+
+  // Devices
+  getDevices() { return this.request<Device[]>('GET', '/api/devices'); }
+  pairDevice(data: any) { return this.request<any>('POST', '/api/devices/pair', data); }
+  confirmPairing(data: any) { return this.request<any>('POST', '/api/devices/confirm', data); }
+  removeDevice(id: string) { return this.request('DELETE', `/api/devices/${id}`); }
+
+  // Metrics
+  getMetrics() { return this.requestText('GET', '/metrics'); }
+
+  // SSE URL helper
+  getSSEUrl() {
+    const base = `${API_BASE}/api/events`;
+    return this.token ? `${base}?token=${this.token}` : base;
+  }
+
+  // API base for external use
+  getApiBase() { return API_BASE; }
+}
+
+export const api = new ApiClient();
+
+// ═══ Mock Data (fallback when relay is offline) ═══
 
 const NOW = Date.now();
 const HOUR = 3600000;
@@ -125,7 +221,6 @@ export const mockDashboardStats: DashboardStats = {
   l3_count: 4,
 };
 
-// Chart data
 export const mockCommandsOver24h = Array.from({ length: 24 }, (_, i) => ({
   hour: `${String(i).padStart(2, '0')}:00`,
   commands: Math.round(Math.sin(i / 3.8) * 30 + 50 + Math.random() * 20),
@@ -153,3 +248,26 @@ export const mockStorageByAgent = [
   { agent: 'ci-runner-03', used: 1.2, total: 10 },
   { agent: 'dev-laptop', used: 0.5, total: 10 },
 ];
+
+export const mockPromMetrics = `# HELP flowlink_agents_total Total registered agents
+# TYPE flowlink_agents_total gauge
+flowlink_agents_total{status="online"} 6
+flowlink_agents_total{status="offline"} 2
+
+# HELP flowlink_commands_total Total commands executed
+# TYPE flowlink_commands_total counter
+flowlink_commands_total 1247
+
+# HELP flowlink_shield_interceptions_total Total shield interceptions
+# TYPE flowlink_shield_interceptions_total counter
+flowlink_shield_interceptions_total{level="L3"} 4
+flowlink_shield_interceptions_total{level="L2"} 12
+flowlink_shield_interceptions_total{level="L1"} 23
+
+# HELP flowlink_sessions_active Active sessions
+# TYPE flowlink_sessions_active gauge
+flowlink_sessions_active 3
+
+# HELP flowlink_uptime_seconds Relay uptime
+# TYPE flowlink_uptime_seconds counter
+flowlink_uptime_seconds 1234567`;

@@ -1,58 +1,80 @@
-import { Activity, Cpu, MemoryStick, HardDrive, CheckCircle, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Activity, Cpu, MemoryStick, CheckCircle, XCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Badge } from '../components/Layout';
-import { mockSystemInfo, mockAgents } from '../api/client';
+import { Badge, LoadingSkeleton } from '../components/Layout';
+import { useApi } from '../hooks/useApi';
+import { api } from '../api/client';
+import { mockSystemInfo, mockAgents, mockPromMetrics } from '../api/client';
 
 const cpuData = Array.from({ length: 30 }, (_, i) => ({ t: i, cpu: Math.round(Math.random() * 40 + 15) }));
 const memData = Array.from({ length: 30 }, (_, i) => ({ t: i, mem: Math.round(Math.random() * 20 + 35) }));
 
-const promLines = `# HELP flowlink_agents_total Total registered agents
-# TYPE flowlink_agents_total gauge
-flowlink_agents_total{status="online"} 6
-flowlink_agents_total{status="offline"} 2
-
-# HELP flowlink_commands_total Total commands executed
-# TYPE flowlink_commands_total counter
-flowlink_commands_total 1247
-
-# HELP flowlink_shield_interceptions_total Total shield interceptions
-# TYPE flowlink_shield_interceptions_total counter
-flowlink_shield_interceptions_total{level="L3"} 4
-flowlink_shield_interceptions_total{level="L2"} 12
-flowlink_shield_interceptions_total{level="L1"} 23
-
-# HELP flowlink_sessions_active Active sessions
-# TYPE flowlink_sessions_active gauge
-flowlink_sessions_active 3
-
-# HELP flowlink_uptime_seconds Relay uptime
-# TYPE flowlink_uptime_seconds counter
-flowlink_uptime_seconds 1234567`;
-
 export default function Metrics() {
-  const info = mockSystemInfo;
+  const { data: agents, loading: agentsLoading, isLive: agentsLive } = useApi(
+    () => api.getAgents(),
+    mockAgents,
+    { pollMs: 15000 }
+  );
+
+  const { data: promText, loading: metricsLoading, isLive: metricsLive } = useApi(
+    () => api.getMetrics(),
+    mockPromMetrics,
+    { pollMs: 10000 }
+  );
+
+  const { data: health, isLive: healthLive } = useApi(
+    () => api.getHealth(),
+    { status: 'ok' },
+    { pollMs: 10000 }
+  );
+
+  const { data: systemInfo } = useApi(
+    async () => mockSystemInfo, // System info from relay config (TODO: dedicated endpoint)
+    mockSystemInfo,
+  );
+
+  const loading = agentsLoading || metricsLoading;
+  const info = { ...mockSystemInfo, ...systemInfo };
+
+  if (loading) return <LoadingSkeleton lines={8} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {/* Health checks */}
+      {!healthLive && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          ⚠️ Connected to mock data. Start relay for live data.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {[
-          { name: 'Relay', status: 'healthy', detail: 'v0.9.2 · 14d uptime' },
-          { name: 'Database', status: 'healthy', detail: 'SQLite · 12 MB' },
-          { name: 'Agents', status: 'degraded', detail: '6/8 online' },
-        ].map(h => (
-          <div key={h.name} className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            {h.status === 'healthy' ? <CheckCircle size={20} className="text-emerald-400" /> : <XCircle size={20} className="text-amber-400" />}
-            <div>
-              <div className="font-medium">{h.name}</div>
-              <div className="text-xs text-[var(--color-dim)]">{h.detail}</div>
-            </div>
-            <Badge variant={h.status === 'healthy' ? 'green' : 'amber'} className="ml-auto">{h.status}</Badge>
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          {healthLive ? <CheckCircle size={20} className="text-emerald-400" /> : <XCircle size={20} className="text-amber-400" />}
+          <div>
+            <div className="font-medium">Relay</div>
+            <div className="text-xs text-[var(--color-dim)]">{healthLive ? `${info.version} · Connected` : 'Offline'}</div>
           </div>
-        ))}
+          <Badge variant={healthLive ? 'green' : 'amber'} className="ml-auto">{healthLive ? 'healthy' : 'offline'}</Badge>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          <CheckCircle size={20} className="text-emerald-400" />
+          <div>
+            <div className="font-medium">SSE</div>
+            <div className="text-xs text-[var(--color-dim)]">Real-time events</div>
+          </div>
+          <Badge variant="green" className="ml-auto">ready</Badge>
+        </div>
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          {agents.filter((a: any) => a.status === 'online').length === agents.length ? <CheckCircle size={20} className="text-emerald-400" /> : <XCircle size={20} className="text-amber-400" />}
+          <div>
+            <div className="font-medium">Agents</div>
+            <div className="text-xs text-[var(--color-dim)]">{agents.filter((a: any) => a.status === 'online').length}/{agents.length} online</div>
+          </div>
+          <Badge variant={agents.filter((a: any) => a.status === 'online').length === agents.length ? 'green' : 'amber'} className="ml-auto">
+            {agents.filter((a: any) => a.status === 'online').length === agents.length ? 'healthy' : 'degraded'}
+          </Badge>
+        </div>
       </div>
 
-      {/* System charts */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 mb-4">
@@ -69,7 +91,6 @@ export default function Metrics() {
             </LineChart>
           </ResponsiveContainer>
         </div>
-
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 mb-4">
             <MemoryStick size={16} className="text-emerald-400" />
@@ -87,21 +108,20 @@ export default function Metrics() {
         </div>
       </div>
 
-      {/* Per-agent metrics */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Agent Resources</h3>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {mockAgents.filter(a => a.status === 'online').map(a => (
+          {agents.filter((a: any) => a.status === 'online').map((a: any) => (
             <div key={a.id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
               <div className="flex items-center gap-2 mb-3">
                 <div className="h-2 w-2 rounded-full bg-emerald-400 pulse-dot" />
                 <span className="text-sm font-medium">{a.hostname}</span>
               </div>
               {[
-                { label: 'CPU', val: a.cpu!, color: a.cpu! > 80 ? '#f43f5e' : '#10b981' },
-                { label: 'RAM', val: a.ram!, color: a.ram! > 80 ? '#f43f5e' : '#10b981' },
-                { label: 'Disk', val: a.disk!, color: a.disk! > 80 ? '#f59e0b' : '#10b981' },
-              ].map(m => (
+                { label: 'CPU', val: a.cpu ?? 0, color: a.cpu > 80 ? '#f43f5e' : '#10b981' },
+                { label: 'RAM', val: a.ram ?? 0, color: a.ram > 80 ? '#f43f5e' : '#10b981' },
+                { label: 'Disk', val: a.disk ?? 0, color: a.disk > 80 ? '#f59e0b' : '#10b981' },
+              ].map((m: any) => (
                 <div key={m.label} className="mb-2">
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-[var(--color-dim)]">{m.label}</span>
@@ -117,14 +137,13 @@ export default function Metrics() {
         </div>
       </div>
 
-      {/* Prometheus metrics */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <div className="flex items-center gap-2 mb-4">
           <Activity size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Prometheus Metrics</h3>
+          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Prometheus Metrics {metricsLive && <span className="ml-2 text-emerald-400 text-xs">● Live</span>}</h3>
         </div>
         <pre className="rounded-xl bg-[#0d0e14] p-4 font-mono text-xs leading-relaxed text-[var(--color-dim)] overflow-x-auto max-h-96 overflow-y-auto">
-          {promLines}
+          {promText}
         </pre>
       </div>
     </div>

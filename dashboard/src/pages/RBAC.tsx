@@ -1,17 +1,31 @@
 import { useState } from 'react';
-import { UserPlus, Key, Shield, Edit, Trash2 } from 'lucide-react';
-import { Badge, DataTable, SlidePanel, Modal } from '../components/Layout';
+import { UserPlus, Key, Shield, Edit } from 'lucide-react';
+import { Badge, DataTable, SlidePanel, Modal, LoadingSkeleton } from '../components/Layout';
+import { useApi } from '../hooks/useApi';
 import { mockUsers } from '../api/client';
 import type { User } from '../types';
 
 export default function RBAC() {
-  const [users] = useState(mockUsers);
   const [addOpen, setAddOpen] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
   const [tokenUser, setTokenUser] = useState<User | null>(null);
 
+  const { data: users, loading, isLive, refresh } = useApi(
+    async () => mockUsers, // RBAC users from relay config endpoint (TODO: dedicated endpoint)
+    mockUsers,
+    { pollMs: 30000 }
+  );
+
+  if (loading) return <LoadingSkeleton lines={4} />;
+
   return (
     <div className="space-y-6 fade-in">
+      {!isLive && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          ⚠️ Connected to mock data. Start relay for live data.
+        </div>
+      )}
+
       <div className="flex justify-between items-center">
         <div className="text-sm text-[var(--color-dim)]">{users.length} users</div>
         <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)]">
@@ -49,7 +63,6 @@ export default function RBAC() {
         data={users} searchPlaceholder="Search users..."
       />
 
-      {/* Edit Drawer */}
       <SlidePanel open={!!editUser} onClose={() => setEditUser(null)} title={`Edit ${editUser?.username || ''}`}>
         {editUser && (
           <div className="space-y-6">
@@ -69,22 +82,15 @@ export default function RBAC() {
               <textarea defaultValue={editUser.allowed_paths.join('\n')} rows={4}
                 className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none resize-none" />
             </div>
-            <div>
-              <label className="mb-1.5 block text-sm text-[var(--color-dim)]">Status</label>
-              <select defaultValue={editUser.status} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
-                <option value="active">Active</option><option value="disabled">Disabled</option>
-              </select>
-            </div>
-            <button className="w-full rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)]">Save Changes</button>
+            <button onClick={() => { setEditUser(null); refresh(); }} className="w-full rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)]">Save Changes</button>
           </div>
         )}
       </SlidePanel>
 
-      {/* Add User Modal */}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add User" actions={
         <>
           <button onClick={() => setAddOpen(false)} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">Cancel</button>
-          <button onClick={() => setAddOpen(false)} className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm text-white">Create User</button>
+          <button onClick={() => { setAddOpen(false); refresh(); }} className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm text-white">Create User</button>
         </>
       }>
         <div className="space-y-3">
@@ -99,7 +105,6 @@ export default function RBAC() {
         </div>
       </Modal>
 
-      {/* Token Modal */}
       <Modal open={!!tokenUser} onClose={() => setTokenUser(null)} title={`API Tokens — ${tokenUser?.username || ''}`}>
         <div className="space-y-3">
           <div className="rounded-lg bg-[var(--color-bg)] p-3 font-mono text-xs">

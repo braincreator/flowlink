@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { Search, Download, Filter } from 'lucide-react';
-import { Badge, DataTable } from '../components/Layout';
+import { useState, useCallback } from 'react';
+import { Search, Download } from 'lucide-react';
+import { Badge, DataTable, LoadingSkeleton } from '../components/Layout';
+import { useApi } from '../hooks/useApi';
+import { api } from '../api/client';
 import { mockAuditEvents } from '../api/client';
 import type { AuditEvent } from '../types';
 
@@ -18,64 +20,94 @@ export default function Audit() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('all');
 
-  const types = [...new Set(mockAuditEvents.map(e => e.event_type))];
-  const filtered = mockAuditEvents.filter(e => {
-    if (filterType !== 'all' && e.event_type !== filterType) return false;
+  const fetchEvents = useCallback(() => api.getAuditEvents({
+    event_type: filterType !== 'all' ? filterType : undefined,
+    limit: 100,
+  }), [filterType]);
+
+  const { data: events, loading, isLive, refresh } = useApi(fetchEvents, mockAuditEvents, { pollMs: 15000 });
+
+  const { data: auditStats } = useApi(
+    () => api.getAuditStats(),
+    { total: 50, allowed: 40, denied: 5, intercepted: 5 },
+    { pollMs: 30000 }
+  );
+
+  const types = [...new Set(events.map((e: AuditEvent) => e.event_type))];
+  const filtered = events.filter((e: AuditEvent) => {
     if (search && !`${e.command} ${e.user} ${e.agent_id}`.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
-  const denied = mockAuditEvents.filter(e => e.result === 'denied').length;
-  const allowed = mockAuditEvents.filter(e => e.result === 'allowed').length;
+  const denied = events.filter((e: AuditEvent) => e.result === 'denied').length;
+  const allowed = events.filter((e: AuditEvent) => e.result === 'allowed').length;
+
+  const handleExport = async (format: string) => {
+    try {
+      const text = await api.exportAudit(format);
+      const blob = new Blob([text], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `flowlink-audit.${format === 'json' ? 'json' : format === 'cef' ? 'cef' : 'leef'}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {}
+  };
+
+  if (loading) return <LoadingSkeleton lines={8} />;
 
   return (
     <div className="space-y-6 fade-in">
-      {/* Stats */}
+      {!isLive && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-400">
+          ⚠️ Connected to mock data. Start relay for live data.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Total Events</div>
-          <div className="mt-1 text-2xl font-bold">{mockAuditEvents.length}</div>
+          <div className="mt-1 text-2xl font-bold">{(auditStats as any).total || events.length}</div>
         </div>
         <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Allowed</div>
-          <div className="mt-1 text-2xl font-bold text-emerald-400">{allowed}</div>
+          <div className="mt-1 text-2xl font-bold text-emerald-400">{(auditStats as any).allowed || allowed}</div>
         </div>
         <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Denied</div>
-          <div className="mt-1 text-2xl font-bold text-rose-400">{denied}</div>
+          <div className="mt-1 text-2xl font-bold text-rose-400">{(auditStats as any).denied || denied}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Deny Rate</div>
-          <div className="mt-1 text-2xl font-bold">{((denied / (allowed + denied)) * 100).toFixed(1)}%</div>
+          <div className="mt-1 text-2xl font-bold">{allowed + denied > 0 ? ((denied / (allowed + denied)) * 100).toFixed(1) : '0'}%</div>
         </div>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-dim)]" />
           <input type="text" placeholder="Search commands, users..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] py-2.5 pl-9 pr-3 text-sm placeholder-[var(--color-dim)] focus:border-[var(--color-accent)] focus:outline-none" />
         </div>
-        <select value={filterType} onChange={e => setFilterType(e.target.value)}
+        <select value={filterType} onChange={e => { setFilterType(e.target.value); setTimeout(refresh, 0); }}
           className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
           <option value="all">All Events</option>
           {types.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
         </select>
         <div className="flex gap-2">
-          <button className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
+          <button onClick={() => handleExport('json')} className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
             <Download size={14} /> JSON
           </button>
-          <button className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
+          <button onClick={() => handleExport('cef')} className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
             <Download size={14} /> CEF
           </button>
-          <button className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
+          <button onClick={() => handleExport('leef')} className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
             <Download size={14} /> LEEF
           </button>
         </div>
       </div>
 
-      {/* Table */}
       <DataTable
         columns={[
           { key: 'timestamp_iso', label: 'Time', render: (r: AuditEvent) => <span className="text-xs text-[var(--color-dim)] whitespace-nowrap">{new Date(r.timestamp_iso).toLocaleString()}</span> },
