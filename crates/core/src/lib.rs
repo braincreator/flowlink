@@ -1,5 +1,8 @@
-// FlowLink Core — Protocol types
-// Port of internal/protocol/protocol.go
+// FlowLink Core — Protocol types, error codes, config
+// Port of internal/protocol/*.go
+
+pub mod codes;
+pub mod config;
 
 use serde::{Deserialize, Serialize};
 
