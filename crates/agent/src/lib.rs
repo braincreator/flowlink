@@ -6,6 +6,8 @@ pub mod policy;
 pub mod connection;
 pub mod approval;
 pub mod dispatch;
+pub mod fileops;
+pub mod backup;
 
 use flowlink_core::config::AgentConfig;
 
@@ -33,12 +35,23 @@ impl Agent {
         };
         let approval = ApprovalManager::new(approval_mode);
 
+        let fileops = fileops::FileOps::new(
+            self.config.sandbox.allowed_dirs.clone(),
+            self.config.sandbox.max_file_size,
+        );
+        let backup = backup::BackupManager::new(
+            self.config.backup.backup_dir.clone(),
+            self.config.backup.max_snapshots,
+            self.config.backup.retention_days,
+        );
         let conn = connection::Connection::new(
             self.config.relay_url.clone(),
             self.config.agent_id.clone(),
             self.config.token.clone(),
             policy,
             approval,
+            fileops,
+            backup,
         );
         conn.run().await
     }

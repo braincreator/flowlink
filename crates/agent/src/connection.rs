@@ -7,6 +7,8 @@ use log::{info, warn, error};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::approval::ApprovalManager;
+use crate::backup::BackupManager;
+use crate::fileops::FileOps;
 use crate::policy::PolicyEngine;
 
 pub struct Connection {
@@ -15,6 +17,8 @@ pub struct Connection {
     token: String,
     policy: PolicyEngine,
     approval: ApprovalManager,
+    fileops: FileOps,
+    backup: BackupManager,
 }
 
 impl Connection {
@@ -24,8 +28,10 @@ impl Connection {
         token: String,
         policy: PolicyEngine,
         approval: ApprovalManager,
+        fileops: FileOps,
+        backup: BackupManager,
     ) -> Self {
-        Self { url, agent_id, token, policy, approval }
+        Self { url, agent_id, token, policy, approval, fileops, backup }
     }
 
     /// Connect, authenticate, run message loop with auto-reconnect + exponential backoff.
@@ -110,7 +116,7 @@ impl Connection {
             }
         };
         info!("Received: {:?}", msg.msg_type);
-        crate::dispatch::dispatch(&msg, &self.policy, &self.approval).await
+        crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup).await
     }
 }
 
