@@ -445,6 +445,23 @@ impl ShieldGuard {
             error!("Audit log failed: {}", e);
         }
     }
+
+    /// Send an AuditEvent to the relay's audit channel (plaintext, non-blocking)
+    async fn send_audit_event(&self, agent_id: &str, event: flowlink_core::channels::AuditEvent) {
+        if let Some(ref relay) = self.relay_client {
+            let agent_id = agent_id.to_string();
+            let relay = relay.clone();
+            tokio::spawn(async move {
+                let url = relay.relay_url();
+                let client = reqwest::Client::new();
+                let _ = client
+                    .post(format!("{}/api/audit/event", url))
+                    .json(&event)
+                    .send()
+                    .await;
+            });
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,15 @@
+tokens:
+  - path: "/etc/shadow.bak"
+    description: "Fake shadow file backup"
+    expected_readers: ["root"]
+    alert_threshold: Any
+
+  - path: "/root/.aws/credentials"
+    description: "Fake AWS credentials"
+    expected_readers: ["deploy", "admin"]
+    alert_threshold: NonAdmin
+
+  - path: "/var/lib/.encryption-key"
+    description: "Fake encryption key"
+    expected_readers: ["root"]
+    alert_threshold: Any

@@ -2,6 +2,7 @@
 // Port of internal/agent/*.go
 
 pub mod executor;
+pub mod session_recorder;
 pub mod policy;
 pub mod connection;
 pub mod approval;

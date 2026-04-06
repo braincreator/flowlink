@@ -5,6 +5,7 @@ mod interceptor;
 mod snapshot;
 mod audit;
 mod notifier;
+mod canary;
 mod guard;
 mod ebpf_kernel;
 mod guard_hybrid;

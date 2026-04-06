@@ -1,6 +1,7 @@
 // FlowLink Core — Protocol types, error codes, config
 // Port of internal/protocol/*.go
 
+pub mod channels;
 pub mod codes;
 pub mod config;
 pub mod rbac;

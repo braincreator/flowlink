@@ -65,6 +65,9 @@ impl Relay {
             device_manager: Arc::new(DeviceManager::new()),
             llm_proxy,
             shield_alerts: Arc::new(server::ShieldAlertManager::new()),
+            audit_store: Arc::new(audit::AuditStore::new(
+                std::path::Path::new(&shellexpand::tilde("~/.flowlink/audit.jsonl").to_string())
+            )),
             metrics: Arc::new(metrics::Metrics::new()),
         };
 

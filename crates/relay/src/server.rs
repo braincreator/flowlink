@@ -26,6 +26,7 @@ use crate::middleware::{auth_middleware_simple, rate_limit_middleware, request_i
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
 use flowlink_core::ShieldAlertPayload;
+use crate::audit::{AuditStore, AuditFilter, SiemFormat};
 
 // ═══════════════════════════════════════════════
 // Shared State
@@ -41,6 +42,7 @@ pub struct AppState {
     pub device_manager: Arc<DeviceManager>,
     pub llm_proxy: Option<Arc<LlmProxy>>,
     pub shield_alerts: Arc<ShieldAlertManager>,
+    pub audit_store: Arc<AuditStore>,
     pub metrics: Arc<Metrics>,
 }
 
@@ -600,6 +602,89 @@ async fn llm_health(State(state): State<AppState>) -> Json<serde_json::Value> {
 }
 
 // ═══════════════════════════════════════════════
+// Audit Channel Handlers
+// ═══════════════════════════════════════════════
+
+#[derive(Deserialize)]
+struct AuditQueryParams {
+    agent_id: Option<String>,
+    event_type: Option<String>,
+    since: Option<u64>,
+    until: Option<u64>,
+    min_risk_score: Option<u8>,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct AuditExportParams {
+    format: Option<String>,
+    agent_id: Option<String>,
+    event_type: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn audit_query(State(state): State<AppState>, Query(params): Query<AuditQueryParams>) -> Json<Vec<flowlink_core::channels::AuditEvent>> {
+    let filter = AuditFilter {
+        agent_id: params.agent_id,
+        event_type: params.event_type,
+        since: params.since,
+        until: params.until,
+        min_risk_score: params.min_risk_score,
+        limit: params.limit,
+    };
+    Json(state.audit_store.query(&filter))
+}
+
+async fn audit_stats_handler(State(state): State<AppState>) -> Json<crate::audit::AuditStats> {
+    Json(state.audit_store.stats())
+}
+
+async fn audit_export(State(state): State<AppState>, Query(params): Query<AuditExportParams>) -> impl IntoResponse {
+    let filter = AuditFilter {
+        agent_id: params.agent_id,
+        event_type: params.event_type,
+        since: None,
+        until: None,
+        min_risk_score: None,
+        limit: params.limit,
+    };
+    let format = match params.format.as_deref() {
+        Some("cef") => SiemFormat::Cef,
+        Some("leef") => SiemFormat::Leef,
+        _ => SiemFormat::Json,
+    };
+    let body = state.audit_store.export_siem(&format, &filter);
+    let content_type = match format {
+        SiemFormat::Cef => "text/plain",
+        SiemFormat::Leef => "text/plain",
+        SiemFormat::Json => "application/json",
+    };
+    ([(axum::http::header::CONTENT_TYPE, content_type)], body).into_response()
+}
+
+async fn audit_ingest(State(state): State<AppState>, Json(event): Json<flowlink_core::channels::AuditEvent>) -> Json<SimpleResponse> {
+    match state.audit_store.record(event) {
+        Ok(()) => Json(SimpleResponse { ok: true, message: None }),
+        Err(e) => Json(SimpleResponse { ok: false, message: Some(e.to_string()) }),
+    }
+}
+
+async fn canary_alert_handler(State(state): State<AppState>, Json(alert): Json<serde_json::Value>) -> Json<SimpleResponse> {
+    let event = flowlink_core::channels::AuditEvent::new(
+        alert.get("agent_id").and_then(|v| v.as_str()).unwrap_or("unknown"),
+        flowlink_core::channels::AuditEventType::CanaryTriggered {
+            path: alert.get("token_path").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+            accessor: alert.get("accessor").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+            access_type: alert.get("access_type").and_then(|v| v.as_str()).unwrap_or("read").to_string(),
+        },
+    );
+    match state.audit_store.record(event) {
+        Ok(()) => Json(SimpleResponse { ok: true, message: None }),
+        Err(e) => Json(SimpleResponse { ok: false, message: Some(e.to_string()) }),
+    }
+}
+
+// ═══════════════════════════════════════════════
 // Router Builder
 // ═══════════════════════════════════════════════
 
@@ -629,6 +714,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/shield/stats", get(shield_stats))
         .route("/api/shield/ingest", post(shield_ingest_alert))
         .route("/api/shield/resolve", post(shield_resolve))
+        // Audit channel routes
+        .route("/api/audit", get(audit_query))
+        .route("/api/audit/stats", get(audit_stats_handler))
+        .route("/api/audit/export", get(audit_export))
+        .route("/api/audit/event", post(audit_ingest))
+        .route("/api/shield/canary", post(canary_alert_handler))
         .route("/metrics", axum::routing::get(crate::metrics::metrics_handler))
         .with_state(state)
         // Middleware layers (innermost first)
@@ -662,6 +753,7 @@ mod tests {
             device_manager: Arc::new(DeviceManager::new()),
             llm_proxy: None,
             shield_alerts: Arc::new(ShieldAlertManager::new()),
+            audit_store: Arc::new(AuditStore::new(&tempfile::tempdir().unwrap().path().join("audit.jsonl"))),
             metrics: Arc::new(Metrics::new()),
         }
     }

@@ -45,6 +45,9 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         device_manager,
         llm_proxy: None,
         shield_alerts: Arc::new(ShieldAlertManager::new()),
+        audit_store: Arc::new(flowlink_relay::audit::AuditStore::new(
+            &tmp.path().join("audit.jsonl")
+        )),
         metrics: Arc::new(flowlink_relay::metrics::Metrics::new()),
     };
     (state, tmp)

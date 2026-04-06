@@ -39,6 +39,10 @@ impl RelayClient {
         }
     }
 
+    pub fn relay_url(&self) -> &str {
+        &self.relay_url
+    }
+
     /// Report an interception to the relay's `/api/shield/ingest` endpoint.
     pub async fn report_interception(
         &self,
