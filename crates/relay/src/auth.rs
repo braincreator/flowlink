@@ -38,6 +38,10 @@ impl AuthManager {
         self.clients.insert(id, client);
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.clients.is_empty()
+    }
+
     pub fn validate_token(&self, token: &str) -> Option<Client> {
         let client_id = self.token_to_client.get(token)?;
         let id: String = client_id.value().clone();
