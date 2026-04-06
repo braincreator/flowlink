@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 use std::fmt;
+use crate::policy_dsl::{PolicyEngine, EvalContext as PolicyEvalContext, PolicyDecision};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ThreatLevel { Critical, High, Medium, Low }
@@ -327,6 +328,38 @@ impl AnalysisEngine {
         }
         None
     }
+
+    /// Analyze command, then evaluate against policy engine.
+    /// Policy can override threat analysis (e.g., L1 threat but policy says allow).
+    pub fn analyze_with_policy(&self, cmd: &Command, policy: &PolicyEngine, policy_ctx: &PolicyEvalContext) -> PolicyAwareResult {
+        let analysis = self.analyze(cmd);
+        let decision = policy.evaluate(&cmd.raw, policy_ctx);
+
+        match &decision.action {
+            crate::policy_dsl::PolicyAction::Allow => PolicyAwareResult {
+                allowed: true,
+                threat: None,
+                policy_decision: Some(decision),
+            },
+            crate::policy_dsl::PolicyAction::Deny => PolicyAwareResult {
+                allowed: false,
+                threat: analysis.threat,
+                policy_decision: Some(decision),
+            },
+            crate::policy_dsl::PolicyAction::Ask => PolicyAwareResult {
+                allowed: false,
+                threat: analysis.threat,
+                policy_decision: Some(decision),
+            },
+        }
+    }
+}
+
+/// Result of analysis combined with policy evaluation.
+pub struct PolicyAwareResult {
+    pub allowed: bool,
+    pub threat: Option<Threat>,
+    pub policy_decision: Option<PolicyDecision>,
 }
 
 #[cfg(test)]

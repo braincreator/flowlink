@@ -12,6 +12,7 @@ pub mod tls;
 pub mod server;
 pub mod mcp;
 pub mod devices;
+pub mod metrics;
 
 use std::sync::Arc;
 use log::info;
@@ -63,6 +64,7 @@ impl Relay {
             device_manager: Arc::new(DeviceManager::new()),
             llm_proxy,
             shield_alerts: Arc::new(server::ShieldAlertManager::new()),
+            metrics: Arc::new(metrics::Metrics::new()),
         };
 
         let app = server::build_router(state);

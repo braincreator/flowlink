@@ -29,6 +29,8 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 rustls-pemfile = "2"
 tower-http = { version = "0.6", features = ["cors"] }
 tower = { version = "0.5", features = ["util"] }
+prometheus = "0.13"
+regex = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }

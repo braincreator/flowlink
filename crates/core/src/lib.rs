@@ -3,6 +3,7 @@
 
 pub mod codes;
 pub mod config;
+pub mod rbac;
 
 use serde::{Deserialize, Serialize};
 

@@ -21,6 +21,7 @@ use crate::devices::DeviceManager;
 use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;
 use crate::llm::{LlmProxy, LlmRequest};
+use crate::metrics::Metrics;
 use crate::middleware::{auth_middleware_simple, rate_limit_middleware, request_id_middleware, logging_middleware, cors_layer};
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
@@ -40,6 +41,7 @@ pub struct AppState {
     pub device_manager: Arc<DeviceManager>,
     pub llm_proxy: Option<Arc<LlmProxy>>,
     pub shield_alerts: Arc<ShieldAlertManager>,
+    pub metrics: Arc<Metrics>,
 }
 
 // ═══════════════════════════════════════════════
@@ -627,6 +629,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/shield/stats", get(shield_stats))
         .route("/api/shield/ingest", post(shield_ingest_alert))
         .route("/api/shield/resolve", post(shield_resolve))
+        .route("/metrics", axum::routing::get(Metrics::handler))
         .with_state(state)
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))
@@ -659,6 +662,7 @@ mod tests {
             device_manager: Arc::new(DeviceManager::new()),
             llm_proxy: None,
             shield_alerts: Arc::new(ShieldAlertManager::new()),
+            metrics: Arc::new(Metrics::new()),
         }
     }
 

@@ -12,8 +12,10 @@ mod ebpf;
 mod es_framework;
 mod es_monitor;
 mod server;
+mod policy_dsl;
 mod relay_client;
 mod forensic;
+pub mod metrics;
 #[cfg(target_os = "linux")]
 pub(crate) mod forensic_linux;
 #[cfg(target_os = "macos")]
@@ -30,6 +32,7 @@ pub use guard_hybrid::{HybridGuard, HybridConfig, HybridHandle};
 pub use ebpf::{ProcessMonitor, SimulatedMonitor};
 pub use server::shield_router;
 pub use relay_client::RelayClient;
+pub use policy_dsl::{PolicyEngine, PolicySet, PolicyRule, PolicyAction, PolicyDecision, Condition, EvalContext};
 pub use forensic::ForensicContext;
 
 use std::sync::Arc;

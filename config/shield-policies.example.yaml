@@ -1,0 +1,40 @@
+version: "1.0"
+default_action: ask
+rules:
+  - name: "allow-read-only"
+    description: "Safe read commands always allowed"
+    action: allow
+    priority: 100
+    enabled: true
+    conditions:
+      - CommandPattern:
+          pattern: "ls *"
+      - CommandPattern:
+          pattern: "cat *"
+
+  - name: "block-destructive"
+    description: "Block destructive commands from anyone"
+    action: deny
+    priority: 90
+    enabled: true
+    conditions:
+      - CommandRegex:
+          regex: "rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?/(etc|var|usr|boot|sys)"
+
+  - name: "require-approval-for-root"
+    description: "Non-admin users need approval for root commands"
+    action: ask
+    priority: 50
+    enabled: true
+    conditions:
+      - UidEq: { uid: 0 }
+      - UserNotIn: { users: ["admin", "deploy"] }
+
+  - name: "business-hours-only-for-containers"
+    description: "Container operations only during business hours"
+    action: ask
+    priority: 30
+    enabled: true
+    conditions:
+      - OriginIs: { origin: "container" }
+      - TimeBetween: { start: "09:00", end: "18:00" }

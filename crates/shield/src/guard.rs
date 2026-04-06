@@ -8,6 +8,7 @@ use anyhow::Result;
 use log::{info, warn, error};
 
 use crate::engine::{AnalysisEngine, Command, ThreatLevel};
+use crate::policy_dsl::PolicyEngine;
 use crate::interceptor::{ProcessInfo, sigstop, sigcont, sigkill};
 use crate::forensic::ForensicContext;
 use crate::snapshot::{SnapshotBackend, create_snapshot};
@@ -26,6 +27,7 @@ pub struct ShieldGuardConfig {
     pub allowed_uids: Vec<u32>,
     pub monitored_binaries: Vec<String>,
     pub snapshot_dataset: Option<String>,
+    pub policy_file: Option<String>,
 }
 
 impl Default for ShieldGuardConfig {
@@ -39,6 +41,7 @@ impl Default for ShieldGuardConfig {
             allowed_uids: vec![0], // root exempt by default
             monitored_binaries: vec![],
             snapshot_dataset: None,
+            policy_file: None,
         }
     }
 }
@@ -97,6 +100,7 @@ pub struct ShieldStats {
 /// The core shield guard — orchestrates the full interception pipeline
 pub struct ShieldGuard {
     engine: AnalysisEngine,
+    policy_engine: Option<PolicyEngine>,
     snapshot_backend: SnapshotBackend,
     audit: Arc<RwLock<AuditLog>>,
     notifier: Notifier,
@@ -128,8 +132,17 @@ impl ShieldGuard {
         relay_client: Option<RelayClient>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
+        let policy_engine = config.policy_file.as_ref().and_then(|path| {
+            PolicyEngine::load_from_file(std::path::Path::new(path))
+                .map_err(|e| { warn!("Failed to load policy file {}: {}", path, e); e })
+                .ok()
+        });
+        if policy_engine.is_some() {
+            info!("Policy engine loaded from config");
+        }
         Self {
             engine,
+            policy_engine,
             snapshot_backend,
             audit,
             notifier,
@@ -408,6 +421,10 @@ impl ShieldGuard {
     /// Get approval sender (for external use)
     pub fn approval_sender(&self) -> mpsc::Sender<ApprovalResponse> {
         self.approval_tx.clone()
+    }
+
+    pub fn policy_engine(&self) -> Option<&PolicyEngine> {
+        self.policy_engine.as_ref()
     }
 
     async fn audit_log(&self, proc_info: &ProcessInfo, action: &str, rule: &str, snapshot: Option<String>, result: &str) {
