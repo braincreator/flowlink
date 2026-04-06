@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message as AxumMsg}},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Json,
@@ -7,13 +7,13 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use futures_util::stream::Stream;
+use futures_util::{SinkExt, StreamExt};
 use log::info;
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
+use std::{convert::Infallible, pin::Pin};
+use futures_util::stream::Stream;
 use std::sync::Arc;
-use tokio_stream::StreamExt;
-use tokio_stream::wrappers::BroadcastStream;
+// StreamExt comes from futures_util (re-exported via axum)
 
 use crate::approval::{ApprovalDecision, ApprovalQueue};
 use crate::eventbus::EventBus;
@@ -47,7 +47,8 @@ struct HealthResponse {
 #[derive(Serialize)]
 struct SimpleResponse {
     ok: bool,
-    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +69,8 @@ fn default_timeout() -> i32 { 60 }
 #[derive(Deserialize)]
 struct WsParams {
     token: Option<String>,
+    #[serde(default)]
+    agent_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -106,11 +109,7 @@ async fn approve_approval(
     let ok = state.approvals.resolve(&id, ApprovalDecision::Approved);
     Json(SimpleResponse {
         ok,
-        message: if ok {
-            "Approved".into()
-        } else {
-            "Not found".into()
-        },
+        message: if ok { Some("Approved".into()) } else { Some("Not found".into()) },
     })
 }
 
@@ -121,11 +120,7 @@ async fn reject_approval(
     let ok = state.approvals.resolve(&id, ApprovalDecision::Rejected);
     Json(SimpleResponse {
         ok,
-        message: if ok {
-            "Rejected".into()
-        } else {
-            "Not found".into()
-        },
+        message: if ok { Some("Rejected".into()) } else { Some("Not found".into()) },
     })
 }
 
@@ -150,19 +145,11 @@ async fn exec_agent(
         });
 
     match state.handler.send_to_agent(&agent_id, msg).await {
-        Ok(()) => Json(SimpleResponse {
-            ok: true,
-            message: "Sent".into(),
-        })
-        .into_response(),
+        Ok(()) => Json(SimpleResponse { ok: true, message: Some("Sent".into()) }).into_response(),
         Err(e) => (
             axum::http::StatusCode::BAD_REQUEST,
-            Json(SimpleResponse {
-                ok: false,
-                message: e.to_string(),
-            }),
-        )
-            .into_response(),
+            Json(SimpleResponse { ok: false, message: Some(e.to_string()) }),
+        ).into_response(),
     }
 }
 
@@ -173,147 +160,176 @@ async fn sse_events(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let channels: Vec<String> = if params.channels == "all" {
         vec![
-            "heartbeat".into(),
-            "exec_done".into(),
-            "exec_output".into(),
-            "approval_request".into(),
-            "shield_alert".into(),
-            "agent_disconnect".into(),
-            "sysinfo".into(),
+            "heartbeat".into(), "exec_done".into(), "exec_output".into(),
+            "approval_request".into(), "shield_alert".into(),
+            "agent_disconnect".into(), "sysinfo".into(),
         ]
     } else {
         params.channels.split(',').map(|s| s.trim().to_string()).collect()
     };
 
-    let rx = state.eventbus.subscribe("_sse_aggregate");
-
-    // For each channel, subscribe and re-broadcast into _sse_aggregate
-    let subscribers: Vec<tokio::sync::broadcast::Receiver<String>> = channels
-        .iter()
-        .map(|ch| state.eventbus.subscribe(ch))
-        .collect();
-
     let eventbus = state.eventbus.clone();
-    let channels_clone = channels.clone();
+    let (tx, rx) = tokio::sync::mpsc::channel::<Event>(256);
 
-    // Spawn a task to merge all channel broadcasts into _sse_aggregate
-    tokio::spawn(async move {
-        // Create separate receivers for the merger task
-        for ch in &channels_clone {
-            let rx = eventbus.subscribe(ch);
-            let tx = eventbus.subscribe("_sse_aggregate"); // we need a sender...
-            // Actually, let's just forward directly
-            let eventbus2 = eventbus.clone();
-            let ch2 = ch.clone();
-            tokio::spawn(async move {
-                let mut rx = eventbus2.subscribe(&ch2);
-                while let Ok(data) = rx.recv().await {
-                    eventbus2.publish("_sse_merge", &data);
+    // Spawn forwarders for each channel
+    for ch in channels {
+        let eventbus = eventbus.clone();
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let mut sub = eventbus.subscribe(&ch);
+            while let Ok(data) = sub.recv().await {
+                if tx.send(Event::default().data(data)).await.is_err() {
+                    break;
                 }
-            });
-        }
-    });
+            }
+        });
+    }
+    drop(tx); // drop our copy so the channel closes when all forwarders die
 
-    // Simpler approach: subscribe to _sse_merge
-    let merge_rx = state.eventbus.subscribe("_sse_merge");
-
-    let stream = BroadcastStream::new(merge_rx).filter_map(|item| {
-        item.ok().map(|data| {
-            Ok::<Event, Infallible>(Event::default().data(data))
-        })
-    });
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+        .map(|event| Ok::<Event, Infallible>(event));
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 // ═══════════════════════════════════════════════
-// WebSocket upgrade (axum-native via axum::extract::ws)
+// WebSocket upgrade (axum native)
 // ═══════════════════════════════════════════════
 
-// We use tokio-tungstenite directly via axum's upgrade mechanism.
-// Since axum 0.8 doesn't include built-in ws, we use the raw upgrade.
-
 async fn ws_upgrade(
-    State(state): State<AppState>,
+    ws: WebSocketUpgrade,
     Query(params): Query<WsParams>,
-    mut req: axum::http::Request<axum::body::Body>,
+    State(state): State<AppState>,
 ) -> impl IntoResponse {
-    use axum::body::Body;
-    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
-    use futures_util::SinkExt;
-
     let token = match params.token {
         Some(t) => t,
-        None => {
-            return (
-                axum::http::StatusCode::UNAUTHORIZED,
-                Json(SimpleResponse { ok: false, message: "Missing token".into() }),
-            ).into_response();
-        }
+        None => return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(SimpleResponse { ok: false, message: Some("Missing token param".into()) }),
+        ).into_response(),
     };
 
+    let agent_id = match params.agent_id {
+        Some(id) => id,
+        None => return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(SimpleResponse { ok: false, message: Some("Missing agent_id param".into()) }),
+        ).into_response(),
+    };
+
+    // Validate token
     let client = match state.handler.auth.validate_token(&token) {
         Some(c) if c.active => c,
-        _ => {
-            return (
-                axum::http::StatusCode::UNAUTHORIZED,
-                Json(SimpleResponse { ok: false, message: "Invalid token".into() }),
-            ).into_response();
-        }
+        _ => return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(SimpleResponse { ok: false, message: Some("Invalid or inactive token".into()) }),
+        ).into_response(),
     };
 
-    // Convert axum request to tungstenite request for the handshake
-    let ws_req = Request::from(req);
-    let mut response = Response::new(None);
+    info!("WS upgrade for agent {} (client {})", agent_id, client.client_id);
 
-    // Accept with no extensions
-    let key = ws_req.headers().get("sec-websocket-key")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-
-    if key.is_none() {
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(SimpleResponse { ok: false, message: "Missing WebSocket key".into() }),
-        ).into_response();
-    }
-
-    // Use tungstenite's accept_hdr to build the response, then we manually upgrade
-    // Simpler: use tokio-tungstenite's accept_async directly on the upgraded stream
-
-    // Actually, let's use axum's oneshot connection upgrade approach
-    // For axum 0.8 without ws feature, we'll use hyper's upgrade
-    use axum::extract::FromRequestParts;
-
-    // We need the underlying TCP stream. Let's use a different approach:
-    // upgrade the connection via hyper, then pass to tungstenite.
-
-    // Simplest working approach for axum + tungstenite:
-    // Use hyper::upgrade to get the IO, then wrap in tungstenite.
-
-    // axum 0.8 oneshot upgrade
-    let oneshot = match axum::extract::connect_info::IntoMakeServiceWithConnectInfo::<_, ()>::oneshot_upgrade(&mut req) {
-        // This won't work directly. Let's use a different approach.
-        _ => {
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(SimpleResponse { ok: false, message: "Upgrade failed".into() }),
-            ).into_response();
-        }
-    };
-
-    // This approach is getting complicated. Let's simplify by using
-    // a manual upgrade with tokio-tungstenite.
-
-    // ... (see simplified version below)
-    todo_ws_upgrade()
+    ws.on_upgrade(move |socket| handle_ws(socket, agent_id, state))
 }
 
-fn todo_ws_upgrade() -> axum::response::Response {
-    (
-        axum::http::StatusCode::NOT_IMPLEMENTED,
-        "Use /ws?tungstenite endpoint",
-    ).into_response()
+async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
+    let (mut ws_sink, mut ws_stream) = socket.split();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<AxumMsg>(256);
+
+    // Register sender
+    state.handler.register_sender(agent_id.clone(), tx.clone());
+
+    // Register in pool
+    state.pool.register(crate::pool::AgentInfo {
+        agent_id: agent_id.clone(),
+        hostname: String::new(),
+        os: String::new(),
+        arch: String::new(),
+        connected_at: chrono::Utc::now().timestamp(),
+        last_heartbeat: chrono::Utc::now().timestamp(),
+        labels: vec![],
+        capabilities: vec![],
+    });
+
+    // Send Connected ack
+    let connected = flowlink_core::Message::new(flowlink_core::MessageType::Connected)
+        .with_agent_id(&agent_id)
+        .with_payload(flowlink_core::ConnectedPayload {
+            agent_id: agent_id.clone(),
+            relay_id: "relay-0".into(),
+            heartbeat_interval_sec: 30,
+            server_time: chrono::Utc::now().timestamp(),
+            relay_public_key: None,
+            relay_key_id: None,
+        });
+    if let Ok(json) = serde_json::to_string(&connected) {
+        let _ = ws_sink.send(AxumMsg::Text(json.into())).await;
+    }
+
+    let aid = agent_id.clone();
+    let pool = state.pool.clone();
+    let eventbus = state.eventbus.clone();
+
+    // Read loop
+    let read_task = async {
+        while let Some(msg) = futures_util::StreamExt::next(&mut ws_stream).await {
+            match msg {
+                Ok(AxumMsg::Text(text)) => {
+                    let text_str: String = text.to_string();
+                    if let Ok(msg) = serde_json::from_str::<flowlink_core::Message>(&text_str) {
+                        match msg.msg_type {
+                            flowlink_core::MessageType::Heartbeat => {
+                                pool.update_heartbeat(&aid);
+                                eventbus.publish("heartbeat", &text_str);
+                            }
+                            flowlink_core::MessageType::ExecDone => {
+                                eventbus.publish("exec_done", &text_str);
+                            }
+                            flowlink_core::MessageType::ExecOutput => {
+                                eventbus.publish("exec_output", &text_str);
+                            }
+                            flowlink_core::MessageType::NeedsApproval => {
+                                eventbus.publish("approval_request", &text_str);
+                            }
+                            flowlink_core::MessageType::ShieldAlert => {
+                                eventbus.publish("shield_alert", &text_str);
+                            }
+                            flowlink_core::MessageType::SysInfo => {
+                                eventbus.publish("sysinfo", &text_str);
+                            }
+                            flowlink_core::MessageType::Disconnect => break,
+                            other => {
+                                log::info!("Agent {aid}: {:?}", other);
+                            }
+                        }
+                    }
+                }
+                Ok(AxumMsg::Close(_)) => break,
+                Err(e) => {
+                    log::error!("Agent {aid} WS error: {e}");
+                    break;
+                }
+                _ => {}
+            }
+        }
+    };
+
+    // Write loop — forward queued messages
+    let write_task = async {
+        while let Some(msg) = rx.recv().await {
+            if ws_sink.send(msg).await.is_err() {
+                break;
+            }
+        }
+    };
+
+    tokio::select! {
+        _ = read_task => {},
+        _ = write_task => {},
+    }
+
+    pool.unregister(&aid);
+    state.handler.remove_sender(&aid);
+    eventbus.publish("agent_disconnect", &serde_json::to_string(&serde_json::json!({"agent_id": aid})).unwrap_or_default());
 }
 
 // ═══════════════════════════════════════════════
