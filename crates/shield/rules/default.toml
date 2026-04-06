@@ -1,0 +1,82 @@
+# FlowLink Shield — Default rules
+# Pattern matches against full command line (comm + args)
+
+[[rule]]
+name = "destructive_rm"
+description = "rm -rf with dangerous paths"
+pattern = "rm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+/|-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\s+/)"
+action = "block"
+snapshot = true
+timeout_secs = 60
+
+[[rule]]
+name = "drop_database"
+description = "SQL DROP DATABASE/TABLE/SCHEMA"
+pattern = "(?i)(drop\\s+(database|table|schema))"
+action = "block"
+snapshot = true
+timeout_secs = 60
+
+[[rule]]
+name = "format_disk"
+description = "Disk format or raw write to device"
+pattern = "(mkfs\\.|dd\\s+.*of=/dev/|dd\\s+if=.*of=/dev/)"
+action = "block"
+snapshot = true
+timeout_secs = 60
+
+[[rule]]
+name = "docker_force_remove"
+description = "Docker force remove container/image"
+pattern = "docker\\s+(rm|rmi)\\s+.*(-f\\b|--force\\b)"
+action = "block"
+snapshot = true
+timeout_secs = 60
+
+[[rule]]
+name = "chmod_777_recursive"
+description = "Recursive chmod 777"
+pattern = "chmod\\s+-R\\s+777"
+action = "warn"
+snapshot = false
+timeout_secs = 0
+
+[[rule]]
+name = "killall_important"
+description = "Kill critical system processes"
+pattern = "killall\\s+(sshd|systemd|init|docker|nginx|postgres|mysql)"
+action = "block"
+snapshot = false
+timeout_secs = 60
+
+[[rule]]
+name = "systemctl_stop_critical"
+description = "Stopping critical services"
+pattern = "systemctl\\s+(stop|disable|mask)\\s+(sshd|docker|nginx|postgresql|mysql|firewalld|iptables)"
+action = "block"
+snapshot = false
+timeout_secs = 60
+
+[[rule]]
+name = "iptables_flush"
+description = "Flushing firewall rules"
+pattern = "iptables\\s+(-F|--flush)|iptables\\s+-X"
+action = "block"
+snapshot = false
+timeout_secs = 60
+
+[[rule]]
+name = "shutdown_reboot"
+description = "System shutdown or reboot"
+pattern = "(shutdown\\s+|reboot\\b|poweroff\\b|halt\\b|init\\s+[06])"
+action = "block"
+snapshot = true
+timeout_secs = 120
+
+[[rule]]
+name = "pip_force_install"
+description = "pip install with --force (potential breakage)"
+pattern = "pip\\s+install.*--force"
+action = "warn"
+snapshot = false
+timeout_secs = 0
