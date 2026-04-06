@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2021"
 description = "FlowLink agent — connects to relay, executes commands, manages backups"
 
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3"
+
+[[bench]]
+name = "agent_bench"
+harness = false
+
 [dependencies]
 flowlink-core = { path = "../core" }
 flowlink-crypto = { path = "../crypto" }

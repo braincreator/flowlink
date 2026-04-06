@@ -31,5 +31,12 @@ tower-http = { version = "0.6", features = ["cors"] }
 tower = { version = "0.5", features = ["util"] }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
 http-body-util = "0.1"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+
+[[bench]]
+name = "bench_relay"
+harness = false
 

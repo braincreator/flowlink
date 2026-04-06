@@ -91,6 +91,9 @@ pub async fn dispatch(
         | MessageType::BackupDeleteOk
         | MessageType::BackupProgress
         | MessageType::ShieldAlertResponse
+        | MessageType::PairingRequest
+        | MessageType::PairingConfirm
+        | MessageType::PairingResponse
         | MessageType::Error => {
             info!("Ignoring message type: {:?}", msg.msg_type);
             None
