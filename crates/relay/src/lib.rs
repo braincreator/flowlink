@@ -5,6 +5,8 @@ pub mod eventbus;
 pub mod approval;
 pub mod ratelimit;
 pub mod audit;
+pub mod registry;
+pub mod llm;
 
 use flowlink_core::config::RelayConfig;
 use log::info;
