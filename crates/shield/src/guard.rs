@@ -9,6 +9,7 @@ use log::{info, warn, error};
 
 use crate::engine::{AnalysisEngine, Command, ThreatLevel};
 use crate::interceptor::{ProcessInfo, sigstop, sigcont, sigkill};
+use crate::forensic::ForensicContext;
 use crate::snapshot::{SnapshotBackend, create_snapshot};
 use crate::audit::{AuditLog, AuditEntry};
 use crate::notifier::Notifier;
@@ -48,6 +49,7 @@ pub struct PendingAction {
     pub pid: u32,
     pub threat: crate::engine::Threat,
     pub process_info: ProcessInfo,
+    pub forensic: Option<ForensicContext>,
     pub snapshot: Option<String>,
     pub intercepted_at: chrono::DateTime<chrono::Utc>,
     pub timeout_handle: Option<tokio::task::JoinHandle<()>>,
@@ -64,6 +66,7 @@ pub struct ApprovalRequest {
     pub username: String,
     pub snapshot: Option<String>,
     pub intercepted_at: String,
+    pub forensic: Option<ForensicContext>,
 }
 
 /// Response to an approval request
@@ -76,8 +79,8 @@ pub struct ApprovalResponse {
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum InterceptResult {
     Allowed,
-    Intercepted { pid: u32, threat: String },
-    Blocked { pid: u32, reason: String },
+    Intercepted { pid: u32, threat: String, forensic: Option<ForensicContext> },
+    Blocked { pid: u32, reason: String, forensic: Option<ForensicContext> },
 }
 
 /// Running statistics
@@ -201,6 +204,7 @@ impl ShieldGuard {
             return InterceptResult::Blocked {
                 pid,
                 reason: format!("SIGSTOP failed: {}", e),
+                forensic: None,
             };
         }
         info!("🛑 Intercepted PID {} — threat: {} ({:?})", pid, threat.name, threat.level);
@@ -222,6 +226,23 @@ impl ShieldGuard {
             None
         };
 
+        // Step 2b: Collect forensic context
+        let forensic = ForensicContext::collect(pid, &proc_info.full_command(), &[])
+            .ok()
+            .map(|mut ctx| {
+                ctx = ctx.with_threat(
+                    match threat.level {
+                        ThreatLevel::Critical => "L1",
+                        ThreatLevel::High => "L2",
+                        ThreatLevel::Medium => "L3",
+                        ThreatLevel::Low => "L3",
+                    },
+                    Some(&threat.name),
+                );
+                ctx.snapshot_id = snapshot.clone();
+                ctx
+            });
+
         // Step 3: Audit
         self.audit_log(&proc_info, "intercepted", &threat.name, snapshot.clone(), "pending").await;
 
@@ -235,6 +256,7 @@ impl ShieldGuard {
                 &threat.name,
                 "intercepted",
                 snapshot.as_deref(),
+                forensic.as_ref(),
             ).await;
         }
 
@@ -267,6 +289,7 @@ impl ShieldGuard {
             return InterceptResult::Blocked {
                 pid,
                 reason: format!("Auto-killed critical threat: {}", threat.name),
+                forensic,
             };
         }
 
@@ -277,6 +300,7 @@ impl ShieldGuard {
             pid,
             threat: threat.clone(),
             process_info: proc_info.clone(),
+            forensic: forensic.clone(),
             snapshot: snapshot.clone(),
             intercepted_at: chrono::Utc::now(),
             timeout_handle: None,
@@ -310,6 +334,7 @@ impl ShieldGuard {
         InterceptResult::Intercepted {
             pid,
             threat: threat.name.clone(),
+            forensic,
         }
     }
 
@@ -507,6 +532,7 @@ mod tests {
             username: "root".into(),
             snapshot: Some("snap".into()),
             intercepted_at: "2026-04-06T12:00:00Z".into(),
+            forensic: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("rm_rf"));
@@ -518,7 +544,7 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("Allowed"));
 
-        let r2 = InterceptResult::Blocked { pid: 1, reason: "test".into() };
+        let r2 = InterceptResult::Blocked { pid: 1, reason: "test".into(), forensic: None };
         let json2 = serde_json::to_string(&r2).unwrap();
         assert!(json2.contains("Blocked"));
     }

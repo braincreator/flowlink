@@ -13,6 +13,11 @@ mod es_framework;
 mod es_monitor;
 mod server;
 mod relay_client;
+mod forensic;
+#[cfg(target_os = "linux")]
+pub(crate) mod forensic_linux;
+#[cfg(target_os = "macos")]
+pub(crate) mod forensic_macos;
 
 pub use engine::{AnalysisEngine, Command, AnalysisResult, Threat, ThreatLevel};
 pub use interceptor::{ProcessInfo, sigstop, sigcont, sigkill};
@@ -25,6 +30,7 @@ pub use guard_hybrid::{HybridGuard, HybridConfig, HybridHandle};
 pub use ebpf::{ProcessMonitor, SimulatedMonitor};
 pub use server::shield_router;
 pub use relay_client::RelayClient;
+pub use forensic::ForensicContext;
 
 use std::sync::Arc;
 use anyhow::Result;

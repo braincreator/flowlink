@@ -203,11 +203,11 @@ async fn handle_kernel_event(guard: &HybridGuard, event: &KernelEvent) -> Result
             info!("✅ HybridGuard: approved, resuming pid={}", event.pid);
             let _ = sigcont(event.pid);
         }
-        crate::guard::InterceptResult::Blocked { pid, reason } => {
+        crate::guard::InterceptResult::Blocked { pid, reason, .. } => {
             warn!("🚫 HybridGuard: blocked pid={}, reason={}", pid, reason);
             let _ = sigkill(event.pid);
         }
-        crate::guard::InterceptResult::Intercepted { pid, threat } => {
+        crate::guard::InterceptResult::Intercepted { pid, threat, .. } => {
             // Left in pending state — approval will come via resolve_approval
             info!("⚠️ HybridGuard: pid={} intercepted, pending approval: {}", pid, threat);
         }

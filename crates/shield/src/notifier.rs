@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 use log::{info, warn};
+use crate::forensic::ForensicContext;
 
 #[derive(Debug, Serialize)]
 struct AlertPayload {
@@ -15,6 +16,7 @@ struct AlertPayload {
     action: String,
     snapshot: Option<String>,
     timestamp: String,
+    forensic: Option<ForensicContext>,
 }
 
 pub struct Notifier {
@@ -40,6 +42,7 @@ impl Notifier {
         rule_name: &str,
         action: &str,
         snapshot: Option<&str>,
+        forensic: Option<&ForensicContext>,
     ) {
         let url = match &self.webhook_url {
             Some(u) => u,
@@ -59,6 +62,7 @@ impl Notifier {
             action: action.to_string(),
             snapshot: snapshot.map(|s| s.to_string()),
             timestamp: chrono::Utc::now().to_rfc3339(),
+            forensic: forensic.cloned(),
         };
 
         match self.client.post(url).json(&payload).send().await {
@@ -73,10 +77,37 @@ impl Notifier {
         command: &str,
         rule_name: &str,
         snapshot: Option<&str>,
+        forensic: Option<&ForensicContext>,
     ) -> String {
         let snap_text = match snapshot {
             Some(s) => format!("📸 Снапшот: <code>{}</code>", s),
             None => "📸 Снапшот: недоступен".to_string(),
+        };
+
+        let forensic_block = match forensic {
+            Some(f) => {
+                let origin = f.origin_description();
+                let tree = f.format_process_tree();
+                let risk = f.risk_score;
+                let container = match &f.container_info {
+                    Some(c) => format!("{} ({})", c.name, c.runtime),
+                    None => "нет".to_string(),
+                };
+                format!(
+                    "\n🔍 <b>Forensic</b>\n\
+                     │ Уровень: {} | Риск: {}/100\n\
+                     │ Пользователь: {} (uid={})\n\
+                     │ Источник: {}\n\
+                     │ Дерево: {}\n\
+                     │ Контейнер: {}\n\
+                     │ Время: {}",
+                    f.threat_level, risk,
+                    f.username, f.uid,
+                    origin, tree, container,
+                    f.timestamp_iso
+                )
+            }
+            None => String::new(),
         };
 
         format!(
@@ -84,9 +115,10 @@ impl Notifier {
              👤 Пользователь: <code>{}</code>\n\
              ⌨️ Команда: <code>{}</code>\n\
              📋 Правило: <code>{}</code>\n\
-             {}\n\n\
+             {}{}
+\n\
              ⏸ Процесс заморожен (SIGSTOP). Ожидание подтверждения...",
-            username, command, rule_name, snap_text
+            username, command, rule_name, snap_text, forensic_block
         )
     }
 }
@@ -98,7 +130,7 @@ mod tests {
     #[test]
     fn format_telegram_alert_with_snapshot() {
         let msg = Notifier::format_telegram_alert(
-            "alice", "rm -rf /", "rm_rf", Some("tank/data@shield-rm_rf-20260406"),
+            "alice", "rm -rf /", "rm_rf", Some("tank/data@shield-rm_rf-20260406"), None,
         );
         assert!(msg.contains("alice"));
         assert!(msg.contains("rm -rf /"));
@@ -110,14 +142,14 @@ mod tests {
 
     #[test]
     fn format_telegram_alert_no_snapshot() {
-        let msg = Notifier::format_telegram_alert("root", "mkfs /dev/sda", "format_disk", None);
+        let msg = Notifier::format_telegram_alert("root", "mkfs /dev/sda", "format_disk", None, None);
         assert!(msg.contains("недоступен"));
         assert!(msg.contains("root"));
     }
 
     #[test]
     fn format_telegram_alert_html_formatting() {
-        let msg = Notifier::format_telegram_alert("bob", "echo hi", "test", None);
+        let msg = Notifier::format_telegram_alert("bob", "echo hi", "test", None, None);
         assert!(msg.contains("<b>"));
         assert!(msg.contains("<code>"));
     }
@@ -137,7 +169,7 @@ mod tests {
     #[tokio::test]
     async fn alert_no_url_does_not_panic() {
         let n = Notifier::new(None);
-        n.alert(1234, 1000, "root", "ls", "safe", "allowed", None).await;
+        n.alert(1234, 1000, "root", "ls", "safe", "allowed", None, None).await;
     }
 
     #[test]
@@ -151,6 +183,7 @@ mod tests {
             action: "intercepted".into(),
             snapshot: Some("snap1".into()),
             timestamp: "2026-04-06T12:00:00Z".into(),
+            forensic: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("alice"));
@@ -169,6 +202,7 @@ mod tests {
             action: "blocked".into(),
             snapshot: None,
             timestamp: "2026-04-06T12:00:00Z".into(),
+            forensic: None,
         };
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("null")); // snapshot is null
