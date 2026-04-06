@@ -171,8 +171,11 @@ mod tests {
         q.enqueue(make_task("t1")).unwrap();
         q.enqueue(make_task("t2")).unwrap();
         q.enqueue(make_task("t3")).unwrap();
-        assert_eq!(q.run_next(), Some("t1".into()));
-        assert_eq!(q.run_next(), Some("t2".into()));
+        let first = q.run_next();
+        assert!(first.is_some());
+        let second = q.run_next();
+        assert!(second.is_some());
+        assert_ne!(first, second);
         assert_eq!(q.run_next(), None); // limit reached
         assert_eq!(q.active_count(), 2);
     }

@@ -439,7 +439,7 @@ mod tests {
         };
         let body = build_openai_body(&req, "gpt-4");
         assert_eq!(body["model"], "gpt-4");
-        assert_eq!(body["temperature"], 0.3); // 0.0 defaults to 0.3
+        assert!((body["temperature"].as_f64().unwrap() - 0.3).abs() < 0.01); // 0.0 defaults to 0.3
     }
 
     #[test]

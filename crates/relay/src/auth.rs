@@ -34,6 +34,10 @@ impl AuthManager {
     pub fn register_client(&self, client: Client) {
         let token = client.api_token.clone();
         let id = client.client_id.clone();
+        // Remove old token if client is being re-registered
+        if let Some(old) = self.clients.get(&id) {
+            self.token_to_client.remove(&old.api_token);
+        }
         self.token_to_client.insert(token, id.clone());
         self.clients.insert(id, client);
     }

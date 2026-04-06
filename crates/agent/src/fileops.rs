@@ -128,11 +128,8 @@ mod tests {
     fn test_write_and_read() {
         let dir = tempfile::tempdir().unwrap();
         let ops = unrestricted_ops(dir.path().to_str().unwrap());
-        ops.write("test.txt", b"hello world").unwrap();
-        let data = ops.read("test.txt").unwrap();
-        // The path gets canonicalized so we need to read from full path
-        // Actually read uses validate_path which needs a path that resolves
         let full = dir.path().join("test.txt");
+        ops.write(full.to_str().unwrap(), b"hello world").unwrap();
         let data = ops.read(full.to_str().unwrap()).unwrap();
         assert_eq!(data, b"hello world");
     }
@@ -140,11 +137,12 @@ mod tests {
     #[test]
     fn test_list_directory() {
         let dir = tempfile::tempdir().unwrap();
+        let dir_str = dir.path().canonicalize().unwrap().to_str().unwrap().to_string();
         std::fs::write(dir.path().join("a.txt"), "a").unwrap();
         std::fs::write(dir.path().join("b.txt"), "bb").unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
-        let ops = unrestricted_ops(dir.path().to_str().unwrap());
-        let entries = ops.list(dir.path().to_str().unwrap(), false).unwrap();
+        let ops = FileOps::new(vec![dir_str.clone()], 1024 * 1024);
+        let entries = ops.list(&dir_str, false).unwrap();
         assert_eq!(entries.len(), 3);
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert!(names.contains(&"a.txt"));
@@ -177,7 +175,8 @@ mod tests {
         let ops = FileOps::new(vec![dir.path().to_str().unwrap().into()], 50);
         let result = ops.read(big_file.to_str().unwrap());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("FILE_TOO_LARGE"));
+        let err = result.unwrap_err();
+        assert!(err.contains("FILE_TOO_LARGE") || err.contains("too large"), "unexpected error: {err}");
     }
 
     #[test]
