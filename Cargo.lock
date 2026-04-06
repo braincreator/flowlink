@@ -437,6 +437,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
+name = "flowlink"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "env_logger",
+ "flowlink-agent",
+ "flowlink-core",
+ "flowlink-crypto",
+ "flowlink-relay",
+ "log",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "flowlink-agent"
 version = "0.1.0"
 dependencies = [

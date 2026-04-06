@@ -6,4 +6,5 @@ members = [
     "crates/shield",
     "crates/agent",
     "crates/relay",
+    "crates/cli",
 ]
