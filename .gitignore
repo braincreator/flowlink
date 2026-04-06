@@ -10,3 +10,14 @@ flowlink.json
 relay.json
 !examples/flowlink.json
 !examples/relay.json
+
+# Binaries
+flowlink
+flowlink-relay*
+flowlink-agent*
+relay.test
+*.tar.gz
+dist/
+*.tar.gz
+relay.test
+flowlink-relay-linux-*
