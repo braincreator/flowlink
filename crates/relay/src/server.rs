@@ -826,6 +826,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_device_pair_confirm_and_list() {
+        let state = test_state();
+
+        // 1. Request pairing
+        let pair_body = serde_json::json!({"user_id": "u1"});
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().method("POST").uri("/api/devices/pair")
+            .header("content-type", "application/json")
+            .body(Body::new(serde_json::to_string(&pair_body).unwrap())).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        let code = json["code"].as_str().unwrap().to_string();
+        assert_eq!(code.len(), 6);
+
+        // 2. Confirm pairing with correct code
+        let confirm_body = serde_json::json!({"code": code, "name": "iPhone", "device_type": "ios"});
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().method("POST").uri("/api/devices/confirm")
+            .header("content-type", "application/json")
+            .body(Body::new(serde_json::to_string(&confirm_body).unwrap())).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        assert!(json["token"].is_string());
+        assert!(json["device"]["id"].is_string());
+        let device_id = json["device"]["id"].as_str().unwrap().to_string();
+
+        // 3. List devices
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().uri("/api/devices?user_id=u1")
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 1);
+
+        // 4. Remove device
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().method("DELETE")
+            .uri(&format!("/api/devices/{device_id}"))
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        // 5. Device list should be empty now
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().uri("/api/devices?user_id=u1")
+            .body(Body::empty()).unwrap()).await.unwrap();
+        let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_device_confirm_wrong_code() {
+        let state = test_state();
+        let confirm_body = serde_json::json!({"code": "000000", "name": "X", "device_type": "ios"});
+        let resp = build_router(state).oneshot(HttpRequest::builder().method("POST").uri("/api/devices/confirm")
+            .header("content-type", "application/json")
+            .body(Body::new(serde_json::to_string(&confirm_body).unwrap())).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_device_remove_not_found() {
+        let state = test_state();
+        let resp = build_router(state).oneshot(HttpRequest::builder().method("DELETE")
+            .uri("/api/devices/nonexistent-id")
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn test_404() {
         let app = build_router(test_state());
         let resp = app.oneshot(HttpRequest::builder().uri("/nonexistent").body(Body::empty()).unwrap()).await.unwrap();
