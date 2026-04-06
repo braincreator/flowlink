@@ -16,6 +16,7 @@ use std::sync::Arc;
 // StreamExt comes from futures_util (re-exported via axum)
 
 use crate::approval::{ApprovalDecision, ApprovalQueue};
+use crate::devices::DeviceManager;
 use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;
 use crate::pool::{AgentInfo, AgentPool};
@@ -32,6 +33,7 @@ pub struct AppState {
     pub eventbus: Arc<EventBus>,
     pub handler: Arc<RelayHandler>,
     pub registry: Arc<Registry>,
+    pub device_manager: Arc<DeviceManager>,
 }
 
 // ═══════════════════════════════════════════════
@@ -347,5 +349,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/exec/{agent_id}", post(exec_agent))
         .route("/api/events", get(sse_events))
         .route("/ws", get(ws_upgrade))
+        .route("/mcp", axum::routing::post(crate::mcp::handle_mcp))
+        .route("/api/devices/pair", axum::routing::post(crate::devices::pair_device))
+        .route("/api/devices/confirm", axum::routing::post(crate::devices::confirm_pairing))
+        .route("/api/devices", axum::routing::get(crate::devices::list_devices))
+        .route("/api/devices/{id}", axum::routing::delete(crate::devices::remove_device))
         .with_state(state)
 }

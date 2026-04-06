@@ -8,6 +8,8 @@ use crate::executor::{Executor, ExecResult};
 use crate::fileops::FileOps;
 use crate::killswitch::KillSwitch;
 use crate::policy::PolicyEngine;
+use crate::skills::{SkillManager, Skill};
+use crate::sandbox::Sandbox;
 
 /// Dispatch an incoming message and return an optional response to send back.
 pub async fn dispatch(
@@ -17,6 +19,8 @@ pub async fn dispatch(
     fileops: &FileOps,
     backup: &BackupManager,
     killswitch: &KillSwitch,
+    skill_mgr: &SkillManager,
+    _sandbox: &Sandbox,
 ) -> Option<Message> {
     // Block exec when paused/emergency
     if killswitch.is_paused() {
@@ -57,6 +61,10 @@ pub async fn dispatch(
             None
         }
 
+        MessageType::SkillPush => handle_skill_push(msg, skill_mgr),
+        MessageType::SkillList => handle_skill_list(msg, skill_mgr),
+        MessageType::SkillDelete => handle_skill_delete(msg, skill_mgr),
+
         // Ignore these server-originated / informational message types
         MessageType::Connect
         | MessageType::Connected
@@ -75,9 +83,6 @@ pub async fn dispatch(
         | MessageType::TaskProgress
         | MessageType::TaskDone
         | MessageType::TaskCancel
-        | MessageType::SkillPush
-        | MessageType::SkillList
-        | MessageType::SkillDelete
         | MessageType::LlmRequest
         | MessageType::LlmResponse
         | MessageType::BackupResponse
@@ -369,5 +374,47 @@ async fn handle_backup_delete(msg: &Message, backup: &BackupManager) -> Option<M
                 .with_payload(serde_json::json!({ "request_id": payload.request_id, "snapshot_id": payload.snapshot_id })),
         ),
         Err(e) => Some(error_response(msg, codes::codes::BACKUP_DELETE_ERROR, &e.to_string())),
+    }
+}
+
+fn handle_skill_push(msg: &Message, skill_mgr: &SkillManager) -> Option<Message> {
+    let payload: Skill = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {
+        Some(s) => s,
+        None => return Some(error_response(msg, "MISSING_PAYLOAD", "SkillPush requires a payload")),
+    };
+    let mut skill = payload;
+    match skill_mgr.install(&mut skill) {
+        Ok(()) => Some(
+            Message::new(MessageType::SkillPush)
+                .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
+                .with_payload(serde_json::json!({ "success": true, "skill_id": skill.id })),
+        ),
+        Err(e) => Some(error_response(msg, "SKILL_INSTALL_ERROR", &e.to_string())),
+    }
+}
+
+fn handle_skill_list(msg: &Message, skill_mgr: &SkillManager) -> Option<Message> {
+    match skill_mgr.list() {
+        Ok(skills) => Some(
+            Message::new(MessageType::SkillList)
+                .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
+                .with_payload(serde_json::json!({ "skills": skills })),
+        ),
+        Err(e) => Some(error_response(msg, "SKILL_LIST_ERROR", &e.to_string())),
+    }
+}
+
+fn handle_skill_delete(msg: &Message, skill_mgr: &SkillManager) -> Option<Message> {
+    let name = match msg.payload.as_ref().and_then(|p| p.get("name").and_then(|v| v.as_str())) {
+        Some(n) => n,
+        None => return Some(error_response(msg, "MISSING_PAYLOAD", "SkillDelete requires a payload with 'name'")),
+    };
+    match skill_mgr.delete(name) {
+        Ok(()) => Some(
+            Message::new(MessageType::SkillDelete)
+                .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
+                .with_payload(serde_json::json!({ "success": true, "name": name })),
+        ),
+        Err(e) => Some(error_response(msg, "SKILL_DELETE_ERROR", &e.to_string())),
     }
 }

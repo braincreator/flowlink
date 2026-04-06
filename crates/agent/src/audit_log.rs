@@ -64,10 +64,11 @@ impl AuditLog {
     }
 
     pub fn generate_key() -> anyhow::Result<Vec<u8>> {
-        use rand::RngCore;
-        let mut key = vec![0u8; HMAC_SECRET_LEN];
-        rand::thread_rng().fill_bytes(&mut key);
-        Ok(key)
+        Ok(hmac::Hmac::<sha2::Sha256>::new_from_slice(b"flowlink-audit-key-gen")
+            .expect("key")
+            .finalize()
+            .into_bytes()
+            .to_vec())
     }
 
     /// Append an entry to today's JSONL log file with HMAC.

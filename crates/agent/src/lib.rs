@@ -8,6 +8,8 @@ pub mod approval;
 pub mod dispatch;
 pub mod fileops;
 pub mod backup;
+pub mod skills;
+pub mod sandbox;
 pub mod killswitch;
 pub mod autonomous;
 pub mod remote_llm;
@@ -53,6 +55,16 @@ impl Agent {
             self.config.backup.max_snapshots,
             self.config.backup.retention_days,
         );
+        let skill_mgr = skills::SkillManager::new(
+            &self.config.work_dir,
+        )?;
+        let sandbox = sandbox::Sandbox::new(
+            self.config.sandbox.allowed_dirs.clone(),
+            self.config.sandbox.blocked_patterns.clone(),
+            self.config.sandbox.max_file_size,
+            self.config.sandbox.max_exec_timeout,
+            self.config.sandbox.allow_sudo,
+        );
         let conn = connection::Connection::new(
             self.config.relay_url.clone(),
             self.config.agent_id.clone(),
@@ -62,6 +74,8 @@ impl Agent {
             fileops,
             backup,
             killswitch,
+            skill_mgr,
+            sandbox,
         );
         conn.run().await
     }

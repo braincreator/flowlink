@@ -7,7 +7,11 @@ pub mod ratelimit;
 pub mod audit;
 pub mod registry;
 pub mod llm;
+pub mod middleware;
+pub mod tls;
 pub mod server;
+pub mod mcp;
+pub mod devices;
 
 use std::sync::Arc;
 use log::info;
@@ -19,6 +23,8 @@ use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;
 use crate::pool::AgentPool;
 use crate::registry::Registry;
+use crate::devices::DeviceManager;
+use crate::llm::LlmProxy;
 use crate::server::AppState;
 
 pub struct Relay {
@@ -45,6 +51,7 @@ impl Relay {
 
         let state = AppState {
             pool, approvals, eventbus, handler, registry,
+            device_manager: Arc::new(DeviceManager::new()),
         };
 
         let app = server::build_router(state);

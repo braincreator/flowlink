@@ -2,7 +2,6 @@
 // Port of internal/agent/tls.go
 
 use std::fs;
-use std::path::Path;
 
 /// TLS configuration for mTLS agent↔relay connections.
 pub struct TlsConfig {
@@ -34,28 +33,19 @@ impl TlsConfig {
     }
 
     /// Build a tungstenite connector ready to use.
-    pub fn build_connector(
-        &self,
-    ) -> anyhow::Result<
-        tokio_tungstenite::tungstenite::Connector<tokio_tungstenite::ConnectorStream>,
-    > {
-        use tokio_tungstenite::Connector;
+    pub fn build_connector(&self) -> anyhow::Result<tokio_tungstenite::tungstenite::Connector> {
         let tls = self.build_tls_connector()?;
-        Ok(Connector::NativeTls(tls))
+        Ok(tokio_tungstenite::tungstenite::Connector::NativeTls(tls))
     }
 }
 
 /// Create an insecure TLS connector (dev mode). NOT FOR PRODUCTION.
-pub fn insecure_tls_connector() -> anyhow::Result<
-    tokio_tungstenite::tungstenite::Connector<tokio_tungstenite::ConnectorStream>,
-> {
-    use tokio_tungstenite::Connector;
+pub fn insecure_tls_connector() -> anyhow::Result<tokio_tungstenite::tungstenite::Connector> {
     let tls = native_tls::TlsConnector::builder()
-        .danger_accept_any_hostname(true)
         .danger_accept_invalid_certs(true)
         .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
         .build()?;
-    Ok(Connector::NativeTls(tls))
+    Ok(tokio_tungstenite::tungstenite::Connector::NativeTls(tls))
 }
 
 /// Parse a SHA256 fingerprint string into normalized "sha256:hex" form.
@@ -66,7 +56,6 @@ pub fn parse_fingerprint(fp: &str) -> anyhow::Result<String> {
     } else {
         fp
     };
-    // Validate hex
     for c in hex_part.chars() {
         if !c.is_ascii_hexdigit() {
             anyhow::bail!("invalid hex in fingerprint");

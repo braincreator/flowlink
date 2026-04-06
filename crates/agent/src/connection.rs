@@ -11,6 +11,8 @@ use crate::backup::BackupManager;
 use crate::fileops::FileOps;
 use crate::killswitch::KillSwitch;
 use crate::policy::PolicyEngine;
+use crate::skills::SkillManager;
+use crate::sandbox::Sandbox;
 use std::sync::Arc;
 
 pub struct Connection {
@@ -22,6 +24,8 @@ pub struct Connection {
     fileops: FileOps,
     backup: BackupManager,
     killswitch: Arc<KillSwitch>,
+    skill_mgr: SkillManager,
+    sandbox: Sandbox,
 }
 
 impl Connection {
@@ -34,8 +38,10 @@ impl Connection {
         fileops: FileOps,
         backup: BackupManager,
         killswitch: Arc<KillSwitch>,
+        skill_mgr: SkillManager,
+        sandbox: Sandbox,
     ) -> Self {
-        Self { url, agent_id, token, policy, approval, fileops, backup, killswitch }
+        Self { url, agent_id, token, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox }
     }
 
     /// Connect, authenticate, run message loop with auto-reconnect + exponential backoff.
@@ -120,7 +126,7 @@ impl Connection {
             }
         };
         info!("Received: {:?}", msg.msg_type);
-        crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup, &self.killswitch).await
+        crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup, &self.killswitch, &self.skill_mgr, &self.sandbox).await
     }
 }
 
