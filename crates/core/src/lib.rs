@@ -76,6 +76,11 @@ pub enum MessageType {
     BackupDeleteOk,
     BackupProgress,
 
+    // Device Pairing
+    PairingRequest,
+    PairingConfirm,
+    PairingResponse,
+
     // Shield (NEW in v2)
     ShieldAlert,
     ShieldAlertResponse,
@@ -361,6 +366,28 @@ pub struct BackupProgressPayload {
     pub request_id: String,
     pub progress: u8, // 0-100
     pub message: String,
+}
+
+// ═══════════════════════════════════════════════
+// Device Pairing Payloads
+// ═══════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingRequestPayload {
+    pub agent_id: String,
+    pub device_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingConfirmPayload {
+    pub code: String,
+    pub device_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingResponsePayload {
+    pub token: String,
+    pub device_id: String,
 }
 
 // ═══════════════════════════════════════════════

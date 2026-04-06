@@ -177,7 +177,20 @@ pub async fn confirm_pairing(
     Json(body): Json<ConfirmRequest>,
 ) -> impl IntoResponse {
     match state.device_manager.confirm_pairing(&body.code, &body.name, &body.device_type, body.push_token) {
-        Ok(device) => Json(device).into_response(),
+        Ok(device) => {
+            // Generate auth token and register device as a client
+            let token = uuid::Uuid::new_v4().to_string();
+            state.handler.auth.register_client(crate::auth::Client {
+                client_id: device.id.clone(),
+                api_token: token.clone(),
+                name: device.name.clone(),
+                active: true,
+            });
+            Json(serde_json::json!({
+                "device": device,
+                "token": token,
+            })).into_response()
+        }
         Err(e) => (
             axum::http::StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": e })),

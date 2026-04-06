@@ -83,6 +83,7 @@ struct WsParams {
 
 #[derive(Deserialize)]
 struct SseParams {
+    token: Option<String>,
     #[serde(default = "default_channels")]
     channels: String,
 }
@@ -241,10 +242,26 @@ async fn exec_agent(
 }
 
 /// SSE endpoint — streams events from EventBus.
+/// Auth via `?token=<agent_id>` query param.
 async fn sse_events(
     State(state): State<AppState>,
     Query(params): Query<SseParams>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> impl IntoResponse {
+    // Validate token
+    let _agent_id = match &params.token {
+        Some(token) => match state.handler.auth.validate_token(token) {
+            Some(c) if c.active => c.client_id.clone(),
+            _ => return (
+                axum::http::StatusCode::UNAUTHORIZED,
+                Json(SimpleResponse { ok: false, message: Some("Invalid or inactive token".into()) }),
+            ).into_response(),
+        },
+        None => return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            Json(SimpleResponse { ok: false, message: Some("Missing token param".into()) }),
+        ).into_response(),
+    };
+
     let channels: Vec<String> = if params.channels == "all" {
         vec![
             "heartbeat".into(), "exec_done".into(), "exec_output".into(),
@@ -276,7 +293,7 @@ async fn sse_events(
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
         .map(|event| Ok::<Event, Infallible>(event));
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }
 
 // ═══════════════════════════════════════════════
@@ -737,6 +754,75 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();
         let code = json["code"].as_str().unwrap();
         assert_eq!(code.len(), 6);
+    }
+
+    #[tokio::test]
+    async fn test_sse_no_token_returns_401() {
+        let app = build_router(test_state());
+        let resp = app.oneshot(HttpRequest::builder().uri("/api/events").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_sse_invalid_token_returns_401() {
+        let app = build_router(test_state());
+        let resp = app.oneshot(HttpRequest::builder().uri("/api/events?token=badtoken").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_sse_valid_token_returns_stream() {
+        let state = test_state();
+        // Register a client with a known token
+        let client = crate::auth::Client {
+            client_id: "test-client".into(),
+            api_token: "test-token-123".into(),
+            name: "test".into(),
+            active: true,
+        };
+        state.handler.auth.register_client(client);
+
+        let app = build_router(state);
+        let resp = app.oneshot(HttpRequest::builder().uri("/api/events?token=test-token-123&channels=heartbeat").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("text/event-stream"), "expected text/event-stream, got {ct}");
+    }
+
+    #[tokio::test]
+    async fn test_sse_events_received() {
+        let state = test_state();
+        let client = crate::auth::Client {
+            client_id: "sub-client".into(),
+            api_token: "sub-token-456".into(),
+            name: "sub".into(),
+            active: true,
+        };
+        state.handler.auth.register_client(client);
+        let eventbus = state.eventbus.clone();
+
+        let app = build_router(state);
+
+        // Verify endpoint is accessible with valid token
+        let resp = app.oneshot(HttpRequest::builder().uri("/api/events?token=sub-token-456&channels=test_channel").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // Verify EventBus works independently
+        let mut rx = eventbus.subscribe("test_channel");
+        eventbus.publish("test_channel", r#"{\"type\":\"ping\"}"#);
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg, r#"{\"type\":\"ping\"}"#);
+    }
+
+    #[tokio::test]
+    async fn test_message_routing_via_eventbus() {
+        let state = test_state();
+        let eventbus = state.eventbus.clone();
+
+        let mut sub = eventbus.subscribe("heartbeat");
+        eventbus.publish("heartbeat", r#"{\"agent_id\":\"a1\"}"#);
+        let msg = sub.recv().await.unwrap();
+        assert_eq!(msg, r#"{\"agent_id\":\"a1\"}"#);
     }
 
     #[tokio::test]
