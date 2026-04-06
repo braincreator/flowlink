@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --tg-bg: var(--tg-theme-bg-color, #0a0e1a);
+  --tg-text: var(--tg-theme-text-color, #e1e4ed);
+  --tg-hint: var(--tg-theme-hint-color, #8b8fa3);
+  --tg-button: var(--tg-theme-button-color, #6366f1);
+  --tg-button-text: var(--tg-theme-button-text-color, #ffffff);
+  --tg-danger: #f43f5e;
+  --tg-danger-bg: rgba(244, 63, 94, 0.1);
+  --tg-success: #10b981;
+  --tg-success-bg: rgba(16, 185, 129, 0.1);
+  --tg-warning: #f59e0b;
+  --tg-warning-bg: rgba(245, 158, 11, 0.1);
+  --tg-surface: rgba(255, 255, 255, 0.05);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--tg-bg);
+  color: var(--tg-text);
+  overflow-x: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+#root {
+  padding-bottom: calc(64px + var(--safe-bottom));
+  padding-top: var(--safe-top);
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--tg-surface) 25%, rgba(255,255,255,0.08) 50%, var(--tg-surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+/* Bottom sheet */
+.bottom-sheet-overlay {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+}
+.bottom-sheet {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+  background: var(--tg-bg);
+  border-radius: 16px 16px 0 0;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding-bottom: var(--safe-bottom);
+  transition: transform 200ms ease;
+}
+.bottom-sheet-handle {
+  width: 36px; height: 4px;
+  background: var(--tg-hint);
+  border-radius: 2px;
+  margin: 8px auto;
+}
+
+/* Pull to refresh */
+.ptr-indicator {
+  text-align: center;
+  padding: 12px;
+  color: var(--tg-hint);
+  font-size: 13px;
+}
+
+/* Swipe colors */
+.swipe-approve { background: var(--tg-success-bg); }
+.swipe-reject { background: var(--tg-danger-bg); }
+
+/* Toast */
+.toast {
+  position: fixed; top: calc(16px + var(--safe-top)); left: 50%; transform: translateX(-50%);
+  background: var(--tg-surface); backdrop-filter: blur(12px);
+  padding: 10px 20px; border-radius: 12px; z-index: 60;
+  font-size: 14px; color: var(--tg-text);
+  animation: fadeIn 200ms ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } }
