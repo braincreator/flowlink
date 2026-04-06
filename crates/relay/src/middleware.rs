@@ -183,40 +183,35 @@ pub async fn logging_middleware(req: Request, next: Next) -> Response {
 // ── Helper ──
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
     use axum::body::Body;
-    use axum::http::{Request as HttpRequest, header};
+    use axum::http::{Request as HttpRequest, header, StatusCode};
     use tower::ServiceExt;
 
     fn test_app() -> axum::Router {
-        axum::Router::new()
-            .route("/health", axum::routing::get(|| async { axum::Json(serde_json::json!({"status": "ok"})) }))
-            .route("/protected", axum::routing::get(|| async { "secret" }))
-            .layer(axum::middleware::from_fn(request_id_middleware))
+        axum::Router::new().route("/health", axum::routing::get(|| async { "ok" }))
     }
 
     #[tokio::test]
-    async fn test_request_id_added_to_response() {
-        let app = test_app();
-        let req = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert!(resp.headers().contains_key("x-request-id"));
+    async fn test_request_id_middleware() {
+        let app = test_app().layer(axum::middleware::from_fn(request_id_middleware));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(resp.headers().get("x-request-id").is_some());
     }
 
     #[tokio::test]
     async fn test_request_id_is_uuid() {
-        let app = test_app();
-        let req = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
-        let resp = app.oneshot(req).await.unwrap();
+        let app = test_app().layer(axum::middleware::from_fn(request_id_middleware));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
         let id = resp.headers().get("x-request-id").unwrap().to_str().unwrap();
         assert!(uuid::Uuid::parse_str(id).is_ok());
     }
 
     #[tokio::test]
     async fn test_request_id_different_per_request() {
-        let app = test_app();
+        let app = test_app().layer(axum::middleware::from_fn(request_id_middleware));
         let req1 = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
         let req2 = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
         let id1 = app.clone().oneshot(req1).await.unwrap().headers().get("x-request-id").unwrap().to_str().unwrap().to_string();
@@ -225,40 +220,105 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_auth_passthrough_when_no_clients() {
-        let auth = Arc::new(AuthManager::new());
-        let layer_fn = auth_layer(auth, None, vec![]);
-        let app = axum::Router::new()
-            .route("/health", axum::routing::get(|| async { "ok" }))
-            .layer(axum::middleware::from_fn(move |req, next| {
-                let f = layer_fn.clone();
-                async move { f(req, next).await }
-            }));
-        let req = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), 200);
+    async fn test_auth_simple_passthrough() {
+        let app = test_app().layer(axum::middleware::from_fn(auth_middleware_simple));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
-    async fn test_auth_skip_paths() {
+    async fn test_auth_layer_no_config_passthrough() {
         let auth = Arc::new(AuthManager::new());
-        let layer_fn = auth_layer(auth, Some("static-token".into()), vec!["/health".into()]);
-        let app = axum::Router::new()
-            .route("/health", axum::routing::get(|| async { "ok" }))
-            .layer(axum::middleware::from_fn(move |req, next| {
-                let f = layer_fn.clone();
-                async move { f(req, next).await }
-            }));
-        let req = HttpRequest::builder().uri("/health").body(Body::empty()).unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), 200);
+        let layer = auth_layer(auth, None, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
-    async fn test_auth_rejects_missing_token() {
-        let mut auth = AuthManager::new();
-        auth.register_client(crate::auth::Client { client_id: "c1".into(), api_token: "tok".into(), name: "c1".into(), active: true });
+    async fn test_auth_layer_rejects_missing_token() {
+        let auth = Arc::new(AuthManager::new());
+        auth.register_client(crate::auth::Client {
+            client_id: "c1".into(), api_token: "tok1".into(), name: "c1".into(), active: true,
+        });
+        let layer = auth_layer(auth, None, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
 
+    #[tokio::test]
+    async fn test_auth_layer_accepts_valid_token() {
+        let auth = Arc::new(AuthManager::new());
+        auth.register_client(crate::auth::Client {
+            client_id: "c1".into(), api_token: "tok1".into(), name: "c1".into(), active: true,
+        });
+        let layer = auth_layer(auth, None, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        let req = HttpRequest::builder().uri("/health")
+            .header("Authorization", "Bearer tok1")
+            .body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_auth_layer_invalid_token() {
+        let auth = Arc::new(AuthManager::new());
+        auth.register_client(crate::auth::Client {
+            client_id: "c1".into(), api_token: "secret".into(), name: "c1".into(), active: true,
+        });
+        let layer = auth_layer(auth, None, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        let req = HttpRequest::builder().uri("/health")
+            .header("Authorization", "Bearer wrong")
+            .body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_auth_layer_skip_paths() {
+        let auth = Arc::new(AuthManager::new());
+        auth.register_client(crate::auth::Client {
+            client_id: "c1".into(), api_token: "tok1".into(), name: "c1".into(), active: true,
+        });
+        let layer = auth_layer(auth, None, vec!["/health".into()]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_auth_layer_static_token() {
+        let auth = Arc::new(AuthManager::new());
+        let layer = auth_layer(auth, Some("static-secret".into()), vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        let req = HttpRequest::builder().uri("/health")
+            .header("Authorization", "Bearer static-secret")
+            .body(Body::empty()).unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_logging_middleware() {
+        let app = test_app().layer(axum::middleware::from_fn(logging_middleware));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_subtle_eq() {
+        assert!(subtle_eq(b"abc", b"abc"));
+        assert!(!subtle_eq(b"abc", b"abd"));
+        assert!(!subtle_eq(b"ab", b"abc"));
+    }
+
+    #[test]
+    fn test_cors_layer_wildcard() {
+        let _layer = cors_layer(vec!["*".to_string()]);
+    }
 }
 
 fn json_error(status: StatusCode, code: &str, message: &str) -> Response {

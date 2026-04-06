@@ -68,3 +68,88 @@ impl Executor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flowlink_core::*;
+
+    fn test_payload(cmd: &str) -> ExecRequestPayload {
+        ExecRequestPayload {
+            command: cmd.into(),
+            shell: None,
+            env: None,
+            dir: None,
+            timeout_sec: 10,
+            request_id: "test-1".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_echo_hello() {
+        let payload = test_payload("echo hello");
+        let result = Executor::exec(&payload).await.unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert!(result.stdout.trim().contains("hello"));
+        assert!(!result.timed_out);
+    }
+
+    #[tokio::test]
+    async fn test_failing_command() {
+        let payload = test_payload("false");
+        let result = Executor::exec(&payload).await.unwrap();
+        assert_ne!(result.exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn test_timeout() {
+        let mut payload = test_payload("sleep 60");
+        payload.timeout_sec = 1;
+        let result = Executor::exec(&payload).await.unwrap();
+        assert!(result.timed_out);
+        assert_eq!(result.exit_code, -1);
+        assert!(result.stderr.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn test_env_vars() {
+        let mut env = std::collections::HashMap::new();
+        env.insert("FOO_TEST_VAR".into(), "bar42".into());
+        let mut payload = test_payload("echo $FOO_TEST_VAR");
+        payload.env = Some(env);
+        let result = Executor::exec(&payload).await.unwrap();
+        assert!(result.stdout.trim().contains("bar42"));
+    }
+
+    #[tokio::test]
+    async fn test_stderr_captured() {
+        let payload = test_payload("echo errormsg >&2");
+        let result = Executor::exec(&payload).await.unwrap();
+        assert!(result.stderr.contains("errormsg"));
+    }
+
+    #[tokio::test]
+    async fn test_working_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("marker.txt"), "here").unwrap();
+        let mut payload = test_payload("cat marker.txt");
+        payload.dir = Some(tmp.path().to_str().unwrap().into());
+        let result = Executor::exec(&payload).await.unwrap();
+        assert_eq!(result.stdout.trim(), "here");
+    }
+
+    #[tokio::test]
+    async fn test_request_id_preserved() {
+        let mut payload = test_payload("true");
+        payload.request_id = "unique-123".into();
+        let result = Executor::exec(&payload).await.unwrap();
+        assert_eq!(result.request_id, "unique-123");
+    }
+
+    #[tokio::test]
+    async fn test_duration_ms_nonzero() {
+        let payload = test_payload("echo hi");
+        let result = Executor::exec(&payload).await.unwrap();
+        assert!(result.duration_ms > 0);
+    }
+}

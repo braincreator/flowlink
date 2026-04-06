@@ -175,3 +175,99 @@ fn default_blocked_patterns() -> Vec<String> {
         "> /dev/sda".into(),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flowlink_core::*;
+    use std::collections::HashMap;
+
+    fn test_payload(cmd: &str) -> ExecRequestPayload {
+        ExecRequestPayload {
+            command: cmd.into(),
+            shell: None,
+            env: None,
+            dir: None,
+            timeout_sec: 10,
+            request_id: "test".into(),
+        }
+    }
+
+    #[test]
+    fn test_rm_rf_blocked() {
+        let engine = PolicyEngine::new(false, false);
+        let result = engine.check(&test_payload("rm -rf /"));
+        assert!(result.blocked);
+        assert!(result.reason.contains("rm -rf /"));
+    }
+
+    #[test]
+    fn test_mkfs_blocked() {
+        let engine = PolicyEngine::new(false, false);
+        let result = engine.check(&test_payload("mkfs.ext4 /dev/sda1"));
+        assert!(result.blocked);
+        assert!(result.reason.contains("mkfs."));
+    }
+
+    #[test]
+    fn test_safe_commands_pass() {
+        let engine = PolicyEngine::new(false, false);
+        for cmd in ["ls -la", "echo hello", "cat /tmp/file.txt", "pwd", "whoami"] {
+            let result = engine.check(&test_payload(cmd));
+            assert!(result.allowed, "expected '{}' to be allowed", cmd);
+        }
+    }
+
+    #[test]
+    fn test_read_only_mode() {
+        let engine = PolicyEngine::new(true, false);
+        let result = engine.check(&test_payload("rm -rf /tmp/test"));
+        assert!(result.blocked);
+        assert!(result.reason.contains("read-only"));
+        // Read commands should still pass
+        let r2 = engine.check(&test_payload("cat /tmp/file"));
+        assert!(r2.allowed);
+    }
+
+    #[test]
+    fn test_sudo_blocked() {
+        let engine = PolicyEngine::new(false, false);
+        let result = engine.check(&test_payload("sudo rm -rf /"));
+        assert!(result.blocked);
+        assert!(result.reason.contains("sudo"));
+    }
+
+    #[test]
+    fn test_sudo_allowed() {
+        let engine = PolicyEngine::new(false, true);
+        let result = engine.check(&test_payload("sudo ls"));
+        assert!(result.allowed);
+    }
+
+    #[test]
+    fn test_sandbox_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let engine = PolicyEngine::new(false, false)
+            .with_allowed_dirs(vec![tmp.path().to_str().unwrap().into()]);
+        let result = engine.check(&test_payload(&format!("cat {}/file", tmp.path().display())));
+        assert!(result.allowed);
+        let result2 = engine.check(&test_payload("cat /etc/passwd"));
+        assert!(result2.blocked);
+        assert!(result2.reason.contains("SANDBOX"));
+    }
+
+    #[test]
+    fn test_custom_blacklist() {
+        let engine = PolicyEngine::new(false, false)
+            .with_blocked_patterns(vec!["nmap".into()]);
+        let result = engine.check(&test_payload("nmap -sP 192.168.1.0/24"));
+        assert!(result.blocked);
+    }
+
+    #[test]
+    fn test_empty_command_allowed() {
+        let engine = PolicyEngine::new(false, false);
+        let result = engine.check(&test_payload(""));
+        assert!(result.allowed);
+    }
+}

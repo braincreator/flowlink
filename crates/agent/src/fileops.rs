@@ -115,3 +115,91 @@ fn mode_from_metadata(m: &std::fs::Metadata) -> u32 {
 fn mode_from_metadata(_m: &std::fs::Metadata) -> u32 {
     0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unrestricted_ops(dir: &str) -> FileOps {
+        FileOps::new(vec![dir.into()], 1024 * 1024)
+    }
+
+    #[test]
+    fn test_write_and_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = unrestricted_ops(dir.path().to_str().unwrap());
+        ops.write("test.txt", b"hello world").unwrap();
+        let data = ops.read("test.txt").unwrap();
+        // The path gets canonicalized so we need to read from full path
+        // Actually read uses validate_path which needs a path that resolves
+        let full = dir.path().join("test.txt");
+        let data = ops.read(full.to_str().unwrap()).unwrap();
+        assert_eq!(data, b"hello world");
+    }
+
+    #[test]
+    fn test_list_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "bb").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let ops = unrestricted_ops(dir.path().to_str().unwrap());
+        let entries = ops.list(dir.path().to_str().unwrap(), false).unwrap();
+        assert_eq!(entries.len(), 3);
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"a.txt"));
+        assert!(names.contains(&"b.txt"));
+        assert!(names.contains(&"sub"));
+    }
+
+    #[test]
+    fn test_path_traversal_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = unrestricted_ops(dir.path().to_str().unwrap());
+        let result = ops.read("../../etc/passwd");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_size_limit_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = FileOps::new(vec![dir.path().to_str().unwrap().into()], 10);
+        let result = ops.write("big.txt", b"this is way more than 10 bytes");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("FILE_TOO_LARGE"));
+    }
+
+    #[test]
+    fn test_size_limit_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let big_file = dir.path().join("big.txt");
+        std::fs::write(&big_file, vec![0u8; 100]).unwrap();
+        let ops = FileOps::new(vec![dir.path().to_str().unwrap().into()], 50);
+        let result = ops.read(big_file.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("FILE_TOO_LARGE"));
+    }
+
+    #[test]
+    fn test_allowed_dirs_restriction() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = FileOps::new(vec![dir.path().to_str().unwrap().into()], 1024);
+        // Path outside allowed dirs
+        let result = ops.read("/etc/hosts");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_empty_path_rejected() {
+        let ops = FileOps::new(vec![], 1024);
+        assert!(ops.read("").is_err());
+        assert!(ops.write("", b"x").is_err());
+    }
+
+    #[test]
+    fn test_read_nonexistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = unrestricted_ops(dir.path().to_str().unwrap());
+        assert!(ops.read(dir.path().join("nope.txt").to_str().unwrap()).is_err());
+    }
+}

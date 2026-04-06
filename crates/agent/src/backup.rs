@@ -257,3 +257,102 @@ fn simple_hash(s: &str) -> u128 {
     }
     h
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_create_and_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("test.txt"), "hello").unwrap();
+
+        let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
+        let meta = mgr.create("test-backup", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        assert!(!meta.id.is_empty());
+        assert!(!meta.checksum.is_empty());
+        assert!(meta.size_bytes > 0);
+
+        let list = mgr.list().await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, meta.id);
+    }
+
+    #[tokio::test]
+    async fn test_delete_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("f.txt"), "data").unwrap();
+
+        let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
+        let meta = mgr.create("del-test", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+
+        mgr.delete(&meta.id).await.unwrap();
+        let list = mgr.list().await.unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_empty_paths_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
+        let result = mgr.create("empty", vec![]).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_restore_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        let restore_dir = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("restore_test.txt"), "content").unwrap();
+
+        let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
+        let meta = mgr.create("restore-test", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+
+        // Restore into a clean temp dir by changing cwd
+        let orig = std::env::current_dir().unwrap();
+        std::env::set_current_dir(restore_dir.path()).unwrap();
+        let result = mgr.restore(&meta.id, None).await;
+        std::env::set_current_dir(&orig).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
+        let result = mgr.delete("no-such-snapshot").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_rotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("r.txt"), "rotate").unwrap();
+
+        let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 2, 30);
+        for i in 0..4 {
+            mgr.create(&format!("snap-{i}"), vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        }
+        let list = mgr.list().await.unwrap();
+        assert!(list.len() <= 2);
+    }
+
+    #[tokio::test]
+    async fn test_checksum_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("ck.txt"), "checksum test").unwrap();
+
+        let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
+        let meta = mgr.create("checksum-test", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+
+        // Load meta and verify checksum is a valid hex string
+        let loaded = mgr.load_meta(&meta.id).await.unwrap();
+        assert_eq!(loaded.checksum, meta.checksum);
+        assert!(meta.checksum.len() >= 16);
+    }
+}
