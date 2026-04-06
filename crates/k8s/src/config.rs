@@ -39,6 +39,7 @@ impl Default for K8sConfig {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
     use super::*;
 
     #[test]

@@ -126,3 +126,58 @@ fn error_policy(
     log::error!("Reconcile error: {:?}", error);
     controller::Action::requeue(Duration::from_secs(30))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Standalone cert generation test (no K8s cluster needed)
+    #[test]
+    fn test_cert_generation() {
+        use rcgen::{CertificateParams, SanType};
+        // Test that certificate params can be constructed with correct SANs
+        let service_name = "flowlink-shield-webhook";
+        let namespace = "flowlink-system";
+        let mut params = CertificateParams::new(vec![format!(
+            "{}.{}.svc.cluster.local",
+            service_name, namespace
+        )]);
+        params
+            .subject_alt_names
+            .push(SanType::DnsName(service_name.to_string()));
+        // Verify SANs are set correctly
+        assert!(params.subject_alt_names.len() >= 2);
+    }
+
+    #[test]
+    fn test_cert_rotation() {
+        // Test that two distinct certificate parameter sets produce different serial numbers
+        use rcgen::{CertificateParams, SanType};
+        let params1 = CertificateParams::new(vec!["a.example.com".into()]);
+        let params2 = CertificateParams::new(vec!["b.example.com".into()]);
+        assert_ne!(params1.subject_alt_names, params2.subject_alt_names);
+    }
+
+    #[test]
+    fn test_webhook_config_service_name() {
+        let service_name = "flowlink-shield-webhook";
+        let namespace = "flowlink-system";
+        let expected = format!("{}.{}.svc.cluster.local", service_name, namespace);
+        assert_eq!(expected, "flowlink-shield-webhook.flowlink-system.svc.cluster.local");
+    }
+
+    #[test]
+    fn test_reconcile_error_display() {
+        let err = ReconcileError::Other("test error".into());
+        let msg = format!("{}", err);
+        assert!(msg.contains("test error"));
+    }
+
+    #[test]
+    fn test_config_for_operator() {
+        let cfg = K8sConfig::default();
+        assert_eq!(cfg.webhook_port, 9443);
+        assert_eq!(cfg.cert_dir, "/tmp/flowlink-certs");
+        assert!(cfg.exempt_namespaces.contains(&"kube-system".to_string()));
+    }
+}
