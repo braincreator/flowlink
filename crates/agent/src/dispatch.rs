@@ -141,6 +141,23 @@ async fn handle_exec(
     let policy_result = policy.check(&payload);
     if policy_result.blocked {
         warn!("Command blocked: {}", policy_result.reason);
+        let agent_id = msg.agent_id.as_deref().unwrap_or("");
+        let shield_alert = Message::new(MessageType::ShieldAlert)
+            .with_agent_id(agent_id)
+            .with_payload(ShieldAlertPayload {
+                alert_id: uuid::Uuid::new_v4().to_string(),
+                pid: std::process::id(),
+                uid: unsafe { libc::getuid() },
+                username: whoami_fallback(),
+                command: payload.command.clone(),
+                rule_name: policy_result.reason.clone(),
+                action: "blocked".into(),
+                snapshot: policy_result.snapshot_id.clone(),
+                timestamp: chrono::Utc::now().timestamp(),
+            });
+        // Return the error response; the connection layer will also forward the shield alert
+        // We stash the alert in a thread-local so connection can pick it up
+        SHIELD_ALERT_QUEUE.with(|q| q.borrow_mut().push(shield_alert));
         return Some(error_response(msg, "POLICY_BLOCKED", &policy_result.reason));
     }
 
@@ -299,6 +316,22 @@ fn error_response(msg: &Message, code: &str, message: &str) -> Message {
 }
 
 use crate::backup::BackupManager;
+use std::cell::RefCell;
+use flowlink_core::ShieldAlertPayload;
+
+thread_local! {
+    /// Queue of shield alerts generated during dispatch (picked up by connection layer)
+    pub static SHIELD_ALERT_QUEUE: RefCell<Vec<Message>> = RefCell::new(Vec::new());
+}
+
+/// Drain any shield alerts queued during dispatch. Call from connection layer after dispatch.
+pub fn drain_shield_alerts() -> Vec<Message> {
+    SHIELD_ALERT_QUEUE.with(|q| std::mem::take(&mut *q.borrow_mut()))
+}
+
+fn whoami_fallback() -> String {
+    std::env::var("USER").unwrap_or_else(|_| "unknown".into())
+}
 
 async fn handle_backup_create(msg: &Message, backup: &BackupManager) -> Option<Message> {
     let payload: BackupRequestPayload = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {

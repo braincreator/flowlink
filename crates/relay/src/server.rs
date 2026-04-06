@@ -23,6 +23,7 @@ use crate::llm::{LlmProxy, LlmRequest};
 use crate::middleware::{auth_middleware_simple, rate_limit_middleware, request_id_middleware, logging_middleware, cors_layer};
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
+use flowlink_core::ShieldAlertPayload;
 
 // ═══════════════════════════════════════════════
 // Shared State
@@ -37,6 +38,7 @@ pub struct AppState {
     pub registry: Arc<Registry>,
     pub device_manager: Arc<DeviceManager>,
     pub llm_proxy: Option<Arc<LlmProxy>>,
+    pub shield_alerts: Arc<ShieldAlertManager>,
 }
 
 // ═══════════════════════════════════════════════
@@ -85,6 +87,85 @@ struct SseParams {
 }
 
 fn default_channels() -> String { "all".into() }
+
+// ═══════════════════════════════════════════════
+// Shield Alert Manager
+// ═══════════════════════════════════════════════
+
+use dashmap::DashMap;
+
+/// Tracks active shield alerts and manages resolution.
+/// Shared state accessible from WS handler and HTTP routes.
+pub struct ShieldAlertManager {
+    alerts: DashMap<String, ShieldAlertEntry>,
+    stats: std::sync::atomic::AtomicU64, // total received
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ShieldAlertEntry {
+    pub alert_id: String,
+    pub pid: u32,
+    pub uid: u32,
+    pub username: String,
+    pub command: String,
+    pub rule_name: String,
+    pub action: String,
+    pub snapshot: Option<String>,
+    pub timestamp: i64,
+    pub agent_id: Option<String>,
+    pub resolved: bool,
+    pub approved: Option<bool>,
+}
+
+impl ShieldAlertManager {
+    pub fn new() -> Self {
+        Self {
+            alerts: DashMap::new(),
+            stats: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Record an incoming shield alert from an agent or shield guard.
+    pub fn add(&self, entry: ShieldAlertEntry) {
+        self.stats.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.alerts.insert(entry.alert_id.clone(), entry);
+    }
+
+    /// Resolve an alert by PID (approve or reject).
+    pub fn resolve_by_pid(&self, pid: u32, approved: bool) -> bool {
+        for mut entry in self.alerts.iter_mut() {
+            if entry.value().pid == pid && !entry.value().resolved {
+                entry.value_mut().resolved = true;
+                entry.value_mut().approved = Some(approved);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// List all active (unresolved) alerts.
+    pub fn list_active(&self) -> Vec<ShieldAlertEntry> {
+        self.alerts.iter()
+            .filter(|e| !e.value().resolved)
+            .map(|e| e.value().clone())
+            .collect()
+    }
+
+    /// List all alerts (including resolved).
+    pub fn list_all(&self) -> Vec<ShieldAlertEntry> {
+        self.alerts.iter()
+            .map(|e| e.value().clone())
+            .collect()
+    }
+
+    /// Get stats.
+    pub fn stats(&self) -> (u64, u64, u64) {
+        let total = self.stats.load(std::sync::atomic::Ordering::Relaxed);
+        let pending: u64 = self.alerts.iter().filter(|e| !e.value().resolved).count() as u64;
+        let resolved = total - pending;
+        (total, pending, resolved)
+    }
+}
 
 // ═══════════════════════════════════════════════
 // Handlers
@@ -297,6 +378,26 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
                             }
                             flowlink_core::MessageType::ShieldAlert => {
                                 eventbus.publish("shield_alert", &text_str);
+                                // Store in shield alert manager
+                                if let Some(payload) = msg.payload.clone() {
+                                    if let Ok(alert) = serde_json::from_value::<ShieldAlertPayload>(payload) {
+                                        let entry = ShieldAlertEntry {
+                                            alert_id: alert.alert_id,
+                                            pid: alert.pid,
+                                            uid: alert.uid,
+                                            username: alert.username,
+                                            command: alert.command,
+                                            rule_name: alert.rule_name,
+                                            action: alert.action,
+                                            snapshot: alert.snapshot,
+                                            timestamp: alert.timestamp,
+                                            agent_id: Some(aid.clone()),
+                                            resolved: false,
+                                            approved: None,
+                                        };
+                                        state.shield_alerts.add(entry);
+                                    }
+                                }
                             }
                             flowlink_core::MessageType::SysInfo => {
                                 eventbus.publish("sysinfo", &text_str);
@@ -335,6 +436,101 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
     pool.unregister(&aid);
     state.handler.remove_sender(&aid);
     eventbus.publish("agent_disconnect", &serde_json::to_string(&serde_json::json!({"agent_id": aid})).unwrap_or_default());
+}
+
+// ═══════════════════════════════════════════════
+// Shield Alert Routes
+// ═══════════════════════════════════════════════
+
+async fn shield_list_alerts(State(state): State<AppState>) -> Json<Vec<ShieldAlertEntry>> {
+    Json(state.shield_alerts.list_active())
+}
+
+async fn shield_approve(
+    State(state): State<AppState>,
+    Path(pid): Path<u32>,
+) -> Json<SimpleResponse> {
+    let ok = state.shield_alerts.resolve_by_pid(pid, true);
+    Json(SimpleResponse {
+        ok,
+        message: if ok { Some(format!("PID {} approved", pid)) } else { Some("No active alert for this PID".into()) },
+    })
+}
+
+async fn shield_reject(
+    State(state): State<AppState>,
+    Path(pid): Path<u32>,
+) -> Json<SimpleResponse> {
+    let ok = state.shield_alerts.resolve_by_pid(pid, false);
+    Json(SimpleResponse {
+        ok,
+        message: if ok { Some(format!("PID {} rejected", pid)) } else { Some("No active alert for this PID".into()) },
+    })
+}
+
+async fn shield_stats(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let (total, pending, resolved) = state.shield_alerts.stats();
+    Json(serde_json::json!({
+        "total_received": total,
+        "pending": pending,
+        "resolved": resolved,
+    }))
+}
+
+/// Receive a shield alert from an external source (e.g., standalone Shield Guard).
+#[derive(Deserialize, serde::Serialize)]
+struct IngestAlertBody {
+    alert_id: Option<String>,
+    pid: u32,
+    uid: Option<u32>,
+    username: Option<String>,
+    command: String,
+    rule_name: String,
+    action: String,
+    snapshot: Option<String>,
+    timestamp: Option<i64>,
+    agent_id: Option<String>,
+}
+
+async fn shield_ingest_alert(
+    State(state): State<AppState>,
+    Json(body): Json<IngestAlertBody>,
+) -> Json<SimpleResponse> {
+    let entry = ShieldAlertEntry {
+        alert_id: body.alert_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        pid: body.pid,
+        uid: body.uid.unwrap_or(0),
+        username: body.username.clone().unwrap_or_default(),
+        command: body.command.clone(),
+        rule_name: body.rule_name.clone(),
+        action: body.action.clone(),
+        snapshot: body.snapshot.clone(),
+        timestamp: body.timestamp.unwrap_or_else(|| chrono::Utc::now().timestamp()),
+        agent_id: body.agent_id.clone(),
+        resolved: false,
+        approved: None,
+    };
+    state.shield_alerts.add(entry);
+    state.eventbus.publish("shield_alert", &serde_json::to_string(&body).unwrap_or_default());
+    Json(SimpleResponse { ok: true, message: Some("Alert recorded".into()) })
+}
+
+/// Receive resolution notification from Shield Guard.
+#[derive(Deserialize, serde::Serialize)]
+struct ResolveAlertBody {
+    pid: u32,
+    approved: bool,
+}
+
+async fn shield_resolve(
+    State(state): State<AppState>,
+    Json(body): Json<ResolveAlertBody>,
+) -> Json<SimpleResponse> {
+    let ok = state.shield_alerts.resolve_by_pid(body.pid, body.approved);
+    Json(SimpleResponse {
+        ok,
+        message: if ok { Some("Resolved".into()) } else { Some("No active alert for this PID".into()) },
+    })
 }
 
 // ═══════════════════════════════════════════════
@@ -406,6 +602,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/llm", post(llm_chat))
         .route("/api/llm/backends", get(llm_backends))
         .route("/api/llm/health", get(llm_health))
+        // Shield alert routes
+        .route("/api/shield/alerts", get(shield_list_alerts))
+        .route("/api/shield/approve/{pid}", post(shield_approve))
+        .route("/api/shield/reject/{pid}", post(shield_reject))
+        .route("/api/shield/stats", get(shield_stats))
+        .route("/api/shield/ingest", post(shield_ingest_alert))
+        .route("/api/shield/resolve", post(shield_resolve))
         .with_state(state)
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))

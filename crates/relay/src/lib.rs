@@ -62,6 +62,7 @@ impl Relay {
             pool, approvals, eventbus, handler, registry,
             device_manager: Arc::new(DeviceManager::new()),
             llm_proxy,
+            shield_alerts: Arc::new(server::ShieldAlertManager::new()),
         };
 
         let app = server::build_router(state);

@@ -8,6 +8,7 @@ mod notifier;
 mod guard;
 mod ebpf;
 mod server;
+mod relay_client;
 
 pub use engine::{AnalysisEngine, Command, AnalysisResult, Threat, ThreatLevel};
 pub use interceptor::{ProcessInfo, sigstop, sigcont, sigkill};
@@ -17,6 +18,7 @@ pub use notifier::Notifier;
 pub use guard::{ShieldGuard, ShieldGuardConfig, InterceptResult, ShieldStats, ApprovalRequest};
 pub use ebpf::{ProcessMonitor, SimulatedMonitor};
 pub use server::shield_router;
+pub use relay_client::RelayClient;
 
 use std::sync::Arc;
 use anyhow::Result;

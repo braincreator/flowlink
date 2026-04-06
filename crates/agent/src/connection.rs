@@ -95,11 +95,20 @@ impl Connection {
             match msg {
                 Ok(WsMessage::Text(text)) => {
                     let response = self.handle_message(&text).await;
+                    // Send the primary response
                     if let Some(resp) = response {
                         let json = serde_json::to_string(&resp)?;
                         if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
                             warn!("Failed to send response: {e}");
                         }
+                    }
+                    // Send any shield alerts queued during dispatch
+                    for alert in self.collect_shield_alerts() {
+                        let json = serde_json::to_string(&alert)?;
+                        if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
+                            warn!("Failed to send shield alert: {e}");
+                        }
+                        info!("Sent ShieldAlert to relay");
                     }
                 }
                 Ok(WsMessage::Ping(data)) => {
@@ -126,7 +135,15 @@ impl Connection {
             }
         };
         info!("Received: {:?}", msg.msg_type);
-        crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup, &self.killswitch, &self.skill_mgr, &self.sandbox).await
+        let response = crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup, &self.killswitch, &self.skill_mgr, &self.sandbox).await;
+        // Drain any shield alerts queued during dispatch and send them as separate messages
+        // The caller (connect_and_loop) picks these up via send_shield_alerts
+        response
+    }
+
+    /// After dispatch returns, drain any queued shield alerts. Called from connect_and_loop.
+    fn collect_shield_alerts(&self) -> Vec<Message> {
+        crate::dispatch::drain_shield_alerts()
     }
 }
 

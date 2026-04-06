@@ -12,6 +12,7 @@ use crate::interceptor::{ProcessInfo, sigstop, sigcont, sigkill};
 use crate::snapshot::{SnapshotBackend, create_snapshot};
 use crate::audit::{AuditLog, AuditEntry};
 use crate::notifier::Notifier;
+use crate::relay_client::RelayClient;
 
 /// Guard configuration
 #[derive(Debug, Clone)]
@@ -101,6 +102,7 @@ pub struct ShieldGuard {
     approval_tx: mpsc::Sender<ApprovalResponse>,
     approval_rx: Arc<RwLock<Option<mpsc::Receiver<ApprovalResponse>>>>,
     stats: Arc<RwLock<ShieldStats>>,
+    relay_client: Option<RelayClient>,
 }
 
 impl ShieldGuard {
@@ -110,6 +112,17 @@ impl ShieldGuard {
         audit: Arc<RwLock<AuditLog>>,
         notifier: Notifier,
         config: ShieldGuardConfig,
+    ) -> Self {
+        Self::with_relay(engine, snapshot_backend, audit, notifier, config, None)
+    }
+
+    pub fn with_relay(
+        engine: AnalysisEngine,
+        snapshot_backend: SnapshotBackend,
+        audit: Arc<RwLock<AuditLog>>,
+        notifier: Notifier,
+        config: ShieldGuardConfig,
+        relay_client: Option<RelayClient>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
         Self {
@@ -122,6 +135,7 @@ impl ShieldGuard {
             approval_tx: tx,
             approval_rx: Arc::new(RwLock::new(Some(rx))),
             stats: Arc::new(RwLock::new(ShieldStats::default())),
+            relay_client,
         }
     }
 
@@ -224,6 +238,23 @@ impl ShieldGuard {
             ).await;
         }
 
+        // Step 4b: Report to relay (non-blocking)
+        if let Some(ref relay) = self.relay_client {
+            let alert_id = threat.id.clone();
+            let cmd = proc_info.full_command();
+            let username = proc_info.username();
+            let rule = threat.name.clone();
+            let snap = snapshot.clone();
+            let relay = relay.clone();
+            tokio::spawn(async move {
+                let _ = relay.report_interception(
+                    &alert_id, pid, proc_info.uid,
+                    &username, &cmd, &rule, "intercepted",
+                    snap.as_deref(),
+                ).await;
+            });
+        }
+
         // Step 5: Auto-kill critical threats
         if self.config.auto_kill_critical && matches!(threat.level, ThreatLevel::Critical) {
             info!("💀 Auto-killing critical threat PID {}", pid);
@@ -306,6 +337,14 @@ impl ShieldGuard {
                     let mut stats = self.stats.write().await;
                     stats.blocked += 1;
                 }
+            }
+
+            // Report resolution to relay (non-blocking)
+            if let Some(ref relay) = self.relay_client {
+                let relay = relay.clone();
+                tokio::spawn(async move {
+                    let _ = relay.report_resolution(pid, approved).await;
+                });
             }
 
             // Update pending count
