@@ -1,0 +1,19 @@
+# RBAC Configuration Example
+# Copy to rbac.yaml and customize.
+
+users:
+  - username: admin
+    roles: [Admin]
+    metadata:
+      email: admin@example.com
+
+  - username: operator1
+    roles: [Operator]
+    allowed_paths: ["/home/app", "/var/log/app"]
+
+  - username: agent-prod
+    roles: [Agent]
+    denied_commands: ["sudo *", "rm -rf *"]
+
+  - username: viewer-readonly
+    roles: [Viewer]

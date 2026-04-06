@@ -184,14 +184,14 @@ mod tests {
         let yaml = r#"
 users:
   - username: admin
-    roles: [admin]
+    roles: [Admin]
     metadata:
       email: admin@example.com
   - username: op1
-    roles: [operator]
+    roles: [Operator]
     allowed_paths: ["/home/app"]
   - username: ag1
-    roles: [agent]
+    roles: [Agent]
     denied_commands: ["sudo *"]
 "#;
         #[derive(Deserialize)]
@@ -210,6 +210,7 @@ users:
         assert_eq!(cfg.users.len(), 3);
         assert_eq!(cfg.users[0].username, "admin");
         assert_eq!(cfg.users[0].roles, vec![Role::Admin]);
-        assert_eq!(cfg.users[1].allowed_paths.as_deref(), Some(["/home/app"].as_slice()));
+        let paths = cfg.users[1].allowed_paths.as_ref().unwrap();
+        assert_eq!(paths, &["/home/app".to_string()]);
     }
 }

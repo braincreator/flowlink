@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use crate::auth::AuthManager;
 use crate::ratelimit::RateLimiter;
+use crate::rbac_manager::RbacManager;
 
 // ── Extensions ──
 
@@ -21,6 +22,9 @@ pub struct RequestId(pub String);
 
 #[derive(Clone)]
 pub struct ClientId(pub String);
+
+#[derive(Clone)]
+pub struct UserRoles(pub Vec<flowlink_core::rbac::Role>);
 
 // ── Auth Middleware (simple, dev-mode passthrough) ──
 
@@ -77,6 +81,56 @@ pub fn auth_layer(
 
             json_error(StatusCode::UNAUTHORIZED, "token_invalid", "Invalid token")
         })
+    }
+}
+
+/// RBAC middleware layer — validates token via RbacManager, stores roles in extensions.
+/// If RbacManager has no users configured, passes through (dev mode).
+pub fn rbac_layer(
+    rbac: Arc<RbacManager>,
+    skip_paths: Vec<String>,
+) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> + Clone {
+    move |req: Request, next: Next| {
+        let rbac = rbac.clone();
+        let skip_paths = skip_paths.clone();
+        Box::pin(async move {
+            let path = req.uri().path().to_string();
+
+            if skip_paths.iter().any(|p| path == *p || path.starts_with(&format!("{}/", p))) {
+                return next.run(req).await;
+            }
+
+            // Dev mode: no users configured
+            if rbac.list_users().is_empty() {
+                return next.run(req).await;
+            }
+
+            let auth_header = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+            let token = match auth_header {
+                None => return json_error(StatusCode::UNAUTHORIZED, "token_missing", "Missing Authorization header"),
+                Some(h) => h.strip_prefix("Bearer ").unwrap_or(h),
+            };
+
+            match rbac.validate_token(token) {
+                Some(tok) => {
+                    let mut req = req;
+                    req.extensions_mut().insert(UserRoles(tok.roles));
+                    next.run(req).await
+                }
+                None => json_error(StatusCode::UNAUTHORIZED, "token_invalid", "Invalid or expired RBAC token"),
+            }
+        })
+    }
+}
+
+/// Helper: check if the current request has a specific RBAC permission.
+pub fn require_permission(
+    roles: &Option<UserRoles>,
+    permission: &flowlink_core::rbac::Permission,
+) -> bool {
+    match roles {
+        None => true, // dev mode (no RBAC)
+        Some(UserRoles(rs)) => rs.iter().any(|r| r.permissions().contains(permission)),
     }
 }
 
@@ -318,6 +372,44 @@ mod tests {
     #[test]
     fn test_cors_layer_wildcard() {
         let _layer = cors_layer(vec!["*".to_string()]);
+    }
+
+    // ── RBAC middleware tests ──
+
+    #[tokio::test]
+    async fn test_rbac_layer_dev_mode_passthrough() {
+        let rbac = Arc::new(RbacManager::new());
+        let layer = rbac_layer(rbac, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_rbac_layer_skip_paths() {
+        let rbac = Arc::new(RbacManager::new());
+        let user = flowlink_core::rbac::RbacUser {
+            id: "u1".into(), username: "a".into(), roles: vec![flowlink_core::rbac::Role::Admin],
+            allowed_paths: None, denied_commands: None, metadata: std::collections::HashMap::new(),
+        };
+        rbac.add_user(user).unwrap();
+        let layer = rbac_layer(rbac, vec!["/health".into()]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_require_permission_dev_mode() {
+        assert!(require_permission(&None, &flowlink_core::rbac::Permission::UserManage));
+    }
+
+    #[test]
+    fn test_require_permission_viewer_denied() {
+        let roles = UserRoles(vec![flowlink_core::rbac::Role::Viewer]);
+        assert!(require_permission(&Some(roles), &flowlink_core::rbac::Permission::MetricsView));
+        let roles2 = UserRoles(vec![flowlink_core::rbac::Role::Viewer]);
+        assert!(!require_permission(&Some(roles2), &flowlink_core::rbac::Permission::CommandExecute));
     }
 }
 

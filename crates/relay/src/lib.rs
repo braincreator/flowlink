@@ -12,6 +12,7 @@ pub mod tls;
 pub mod server;
 pub mod mcp;
 pub mod devices;
+pub mod rbac_manager;
 pub mod metrics;
 
 use std::sync::Arc;

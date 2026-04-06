@@ -629,7 +629,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/shield/stats", get(shield_stats))
         .route("/api/shield/ingest", post(shield_ingest_alert))
         .route("/api/shield/resolve", post(shield_resolve))
-        .route("/metrics", axum::routing::get(Metrics::handler))
+        .route("/metrics", axum::routing::get(crate::metrics::metrics_handler))
         .with_state(state)
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))
