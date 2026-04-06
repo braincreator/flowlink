@@ -8,10 +8,16 @@ pub mod approval;
 pub mod dispatch;
 pub mod fileops;
 pub mod backup;
+pub mod killswitch;
+pub mod autonomous;
+pub mod remote_llm;
+pub mod audit_log;
+pub mod tls;
 
 use flowlink_core::config::AgentConfig;
 
 use crate::approval::{ApprovalManager, ApprovalMode};
+use crate::killswitch::KillSwitch;
 use crate::policy::PolicyEngine;
 
 pub struct Agent {
@@ -24,6 +30,9 @@ impl Agent {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
+        let killswitch = std::sync::Arc::new(KillSwitch::new());
+        killswitch.start_monitor();
+
         let policy = PolicyEngine::new(self.config.read_only, self.config.sandbox.allow_sudo)
             .with_allowed_dirs(self.config.sandbox.allowed_dirs.clone())
             .with_blocked_patterns(self.config.sandbox.blocked_patterns.clone());
@@ -52,6 +61,7 @@ impl Agent {
             approval,
             fileops,
             backup,
+            killswitch,
         );
         conn.run().await
     }

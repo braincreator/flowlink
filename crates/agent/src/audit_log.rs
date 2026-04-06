@@ -1,0 +1,181 @@
+// Audit log with HMAC integrity — port of internal/audit/hmac.go + internal/agent/audit.go
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufRead, Write};
+use std::path::PathBuf;
+
+type HmacSha256 = Hmac<Sha256>;
+
+const HMAC_FIELD: &str = "hmac";
+const HMAC_SECRET_LEN: usize = 32;
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct AuditEntry {
+    pub id: String,
+    pub timestamp: String,
+    pub agent_id: String,
+    pub action: String,
+    pub command: Option<String>,
+    pub path: Option<String>,
+    pub risk_level: String,
+    pub result: String,
+    pub duration_ms: Option<i64>,
+    pub error: Option<String>,
+    /// HMAC-SHA256 signature (computed from all other fields).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hmac: Option<String>,
+}
+
+pub struct AuditLog {
+    log_dir: PathBuf,
+    hmac_key: Vec<u8>,
+}
+
+impl AuditLog {
+    pub fn new(log_dir: String, hmac_key: Vec<u8>) -> anyhow::Result<Self> {
+        fs::create_dir_all(&log_dir)?;
+        Ok(Self {
+            log_dir: PathBuf::from(log_dir),
+            hmac_key,
+        })
+    }
+
+    /// Load or generate HMAC key from file.
+    pub fn load_or_generate_key(key_path: Option<&str>) -> anyhow::Result<Vec<u8>> {
+        let path = key_path
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs_home().join(".flowlink").join("audit.key"));
+
+        if let Ok(data) = fs::read(&path) {
+            if data.len() >= HMAC_SECRET_LEN {
+                return Ok(data[..HMAC_SECRET_LEN].to_vec());
+            }
+        }
+
+        // Generate new key
+        let key = Self::generate_key()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, &key)?;
+        Ok(key)
+    }
+
+    pub fn generate_key() -> anyhow::Result<Vec<u8>> {
+        use rand::RngCore;
+        let mut key = vec![0u8; HMAC_SECRET_LEN];
+        rand::thread_rng().fill_bytes(&mut key);
+        Ok(key)
+    }
+
+    /// Append an entry to today's JSONL log file with HMAC.
+    pub fn log(&self, entry: &AuditEntry) -> anyhow::Result<()> {
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let filepath = self.log_dir.join(format!("audit-{}.jsonl", today));
+
+        // Compute HMAC from all fields except "hmac"
+        let signature = sign_entry(entry, &self.hmac_key);
+
+        let mut entry_with_hmac = entry.clone();
+        entry_with_hmac.hmac = Some(signature);
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&filepath)?;
+        let line = serde_json::to_string(&entry_with_hmac)?;
+        writeln!(file, "{}", line)?;
+        file.sync_all()?;
+
+        Ok(())
+    }
+
+    /// Verify HMAC integrity of all entries in today's log.
+    /// Returns Ok(true) if all entries are valid, Ok(false) if any are tampered.
+    pub fn verify(&self) -> anyhow::Result<bool> {
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let filepath = self.log_dir.join(format!("audit-{}.jsonl", today));
+
+        if !filepath.exists() {
+            return Ok(true);
+        }
+
+        let file = File::open(&filepath)?;
+        let reader = std::io::BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let mut entry: AuditEntry = serde_json::from_str(line)?;
+
+            let stored_hmac = entry.hmac.take().unwrap_or_default();
+            let expected = sign_entry(&entry, &self.hmac_key);
+
+            if !hmac_constant_eq(&stored_hmac, &expected) {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+}
+
+/// Compute HMAC-SHA256 of an entry's JSON representation (without the hmac field).
+fn sign_entry(entry: &AuditEntry, secret: &[u8]) -> String {
+    let mut map = serde_json::to_value(entry)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    map.remove(HMAC_FIELD);
+
+    let json_bytes = serde_json::to_vec(&map).unwrap_or_default();
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC key error");
+    mac.update(&json_bytes);
+    hex_encode(mac.finalize().into_bytes().as_slice())
+}
+
+/// Constant-time HMAC comparison.
+fn hmac_constant_eq(a: &str, b: &str) -> bool {
+    use hmac::Mac;
+    // Simple constant-time comparison via subtle or manual
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    if a_bytes.len() != b_bytes.len() {
+        return false;
+    }
+    let mut result = 0u8;
+    for (x, y) in a_bytes.iter().zip(b_bytes.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+fn dirs_home() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+}
+
+/// Verify a single raw JSON map entry (for generic use).
+pub fn verify_entry(entry: &mut BTreeMap<String, serde_json::Value>, secret: &[u8]) -> bool {
+    let stored = entry.remove(HMAC_FIELD).and_then(|v| v.as_str().map(String::from));
+    match stored {
+        Some(s) => {
+            let json_bytes = serde_json::to_vec(entry).unwrap_or_default();
+            let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC key error");
+            mac.update(&json_bytes);
+            let expected = hex_encode(mac.finalize().into_bytes().as_slice());
+            hmac_constant_eq(&s, &expected)
+        }
+        None => false,
+    }
+}

@@ -6,6 +6,7 @@ use serde::Deserialize;
 use crate::approval::ApprovalManager;
 use crate::executor::{Executor, ExecResult};
 use crate::fileops::FileOps;
+use crate::killswitch::KillSwitch;
 use crate::policy::PolicyEngine;
 
 /// Dispatch an incoming message and return an optional response to send back.
@@ -15,7 +16,18 @@ pub async fn dispatch(
     approval: &ApprovalManager,
     fileops: &FileOps,
     backup: &BackupManager,
+    killswitch: &KillSwitch,
 ) -> Option<Message> {
+    // Block exec when paused/emergency
+    if killswitch.is_paused() {
+        return Some({
+            let mut msg = Message::new(MessageType::Error)
+                .with_agent_id(msg.agent_id.as_deref().unwrap_or(""));
+            msg.error = Some("agent paused or emergency stop".into());
+            msg
+        });
+    }
+
     match &msg.msg_type {
         MessageType::ExecRequest => handle_exec(msg, policy, approval).await,
 
