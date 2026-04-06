@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub ppid: u32,

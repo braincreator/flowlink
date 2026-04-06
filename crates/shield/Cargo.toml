@@ -5,16 +5,25 @@ edition = "2021"
 description = "FlowLink Shield — eBPF-powered 3-level command guardian"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 log = "0.4"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 reqwest = { version = "0.12", features = ["json"] }
 libc = "0.2"
 tree-sitter = "0.24"
 tree-sitter-bash = "0.23"
+axum = "0.8"
+dashmap = "6"
+
+[features]
+ebpf = ["aya"]
+
+[dependencies.aya]
+version = "0.12"
+optional = true
