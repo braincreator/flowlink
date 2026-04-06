@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Shield, ShieldAlert, ShieldCheck, ShieldX, Bird, FileCode, BarChart3 } from 'lucide-react';
+import { Shield as ShieldIcon, ShieldAlert, ShieldCheck, ShieldX, Bird, FileCode, BarChart3 } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Badge, RiskGauge } from '../components/Layout';
 import { mockAlerts, mockInterceptionsOverTime, mockTopDangerousCommands, mockCanaries, mockPolicies, mockDashboardStats } from '../api/client';

@@ -27,7 +27,7 @@ export function StatCard({ label, value, trend, sparkline, icon, color = 'accent
   );
 }
 
-export function Badge({ children, variant = 'default' }: { children: ReactNode; variant?: 'default' | 'green' | 'red' | 'amber' | 'blue' | 'purple' }) {
+export function Badge({ children, variant = 'default', className = '' }: { children: ReactNode; variant?: 'default' | 'green' | 'red' | 'amber' | 'blue' | 'purple'; className?: string }) {
   const styles: Record<string, string> = {
     default: 'bg-surface3 text-dim',
     green: 'bg-emerald-500/15 text-emerald-400',
@@ -36,7 +36,7 @@ export function Badge({ children, variant = 'default' }: { children: ReactNode; 
     blue: 'bg-blue-500/15 text-blue-400',
     purple: 'bg-indigo-500/15 text-indigo-400',
   };
-  return <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${styles[variant]}`}>{children}</span>;
+  return <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${styles[variant]} ${className}`}>{children}</span>;
 }
 
 export function DataTable<T extends Record<string, any>>({ columns, data, onRowClick, emptyText = 'No data', searchPlaceholder }: {
