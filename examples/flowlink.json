@@ -1,0 +1,42 @@
+{
+  "agent_id": "my-agent-001",
+  "token": "your-secret-token-here",
+  "relay_url": "wss://relay.example.com",
+  "heartbeat_sec": 30,
+  "label": "production-server",
+  "work_dir": "/home/user/workspace",
+  "read_only": false,
+  "use_relay_llm": false,
+  "sandbox": {
+    "allowed_dirs": ["/home/user/workspace", "/tmp"],
+    "blocked_patterns": [],
+    "max_file_size": 104857600,
+    "max_exec_timeout": 300,
+    "allow_sudo": false
+  },
+  "approval": {
+    "mode": "auto",
+    "soft_ask_notify": true,
+    "hard_ask_timeout_sec": 3600,
+    "max_retries": 3
+  },
+  "backup": {
+    "enabled": true,
+    "max_snapshots": 50,
+    "max_total_size": 5368709120,
+    "retention_days": 7,
+    "backup_dir": "~/.flowlink/backups",
+    "compression": "gzip"
+  },
+  "shield": {
+    "enabled": true,
+    "enable_ast": true,
+    "enable_interpreter": true,
+    "audit_log": "/var/log/flowlink-shield.jsonl",
+    "auto_deny_timeout": 60
+  },
+  "tls": {
+    "insecure": false,
+    "cert_pinning": false
+  }
+}

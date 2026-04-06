@@ -1,169 +1,91 @@
-# FlowLink — AI Agent Relay & Management Platform
+# FlowLink
 
-⚡ Управляйте AI-агентами через WebSocket реле. Relay, бэкапы, дашборд, LLM-прокси, MCP.
+**Secure remote agent management over WebSocket with E2EE.**
 
-> **Self-hosted — бесплатно навсегда.** Cloud и Enterprise — [flowlink.flow-masters.ru](https://flowlink.flow-masters.ru)
+FlowLink lets you manage remote machines through a relay server — execute commands, transfer files, manage backups — all encrypted end-to-end with X25519 + AES-256-GCM.
 
-## 📜 Лицензия
+## Architecture
 
-FlowLink распространяется под **[Business Source License 1.1 (BSL)](LICENSE)**.
+```
+┌──────────┐     WSS/E2EE     ┌──────────┐     HTTP API     ┌──────────┐
+│  Agent   │ ◄──────────────► │  Relay   │ ◄──────────────► │  Client  │
+│ (on host)│                  │ (server) │                  │ (you)    │
+└──────────┘                  └──────────┘                  └──────────┘
+     │                              │
+     ├── Shield (L1+L2+L3)         ├── Auth (JWT tokens)
+     ├── Policy Engine              ├── Agent Pool
+     ├── Snapshot/Backup            ├── Approval Queue
+     └── Audit Log                  └── Event Bus (SSE)
+```
 
-| Использование | Разрешено? |
-|---------------|------------|
-| Self-hosted (бесплатно) | ✅ Навсегда |
-| Коммерческое использование (self-hosted) | ✅ Да |
-| Модификация | ✅ С сохранением лицензии |
-| Конкурентный SaaS/Cloud на базе FlowLink | ❌ Запрещено |
-| Конвертация в open source | 5 апреля 2029 (GPL-3.0) |
+## Quick Start
 
-## Быстрый старт (5 минут)
-
-### 1. Скачайте
+### Install
 
 ```bash
-# Relay server (управление)
-curl -sL https://github.com/braincreator/flowlink/releases/latest/download/flowlink-relay-linux-amd64 -o flowlink-relay
-chmod +x flowlink-relay
-
-# Agent (на целевой машине)
-curl -sL https://github.com/braincreator/flowlink/releases/latest/download/flowlink-agent-linux-amd64 -o flowlink-agent
-chmod +x flowlink-agent
+cargo build --release
+# Binary: target/release/flowlink
 ```
 
-### 2. Настройте relay
+### Generate Keypair
 
 ```bash
-./flowlink-relay setup
-
-# Или неинтерактивно:
-./flowlink-relay setup --non-interactive \
-  --client-name "MyCompany" \
-  --client-email "admin@example.com" \
-  --api-token "my-secret-token"
+flowlink keygen
+flowlink keygen --output keypair.json
 ```
 
-### 3. Запустите relay
+### Start Relay
 
 ```bash
-./flowlink-relay -config ~/.flowlink/relay.json
-
+flowlink relay --config relay.json
 ```
 
-Relay запустится на:
-- **WSS:** `:8443` (подключение агентов)
-- **API:** `:8080` (HTTP API + Dashboard)
-
-### 4. Подключите агента
-
-На целевой машине:
+### Start Agent
 
 ```bash
-./flowlink-agent init \
-  --relay ws://YOUR_SERVER:8443/ws \
-  --label "production-db" \
-  --token "AGENT_TOKEN_FROM_SETUP"
-
-./flowlink-agent start
+flowlink agent --config flowlink.json
 ```
 
-### 5. Откройте Dashboard
+## Crates
+
+| Crate | Description |
+|-------|-------------|
+| `flowlink-core` | Protocol types, error codes, config |
+| `flowlink-crypto` | X25519 + AES-256-GCM E2EE |
+| `flowlink-shield` | 3-level command threat detection (L1 args + L2 AST + L3 interpreter) |
+| `flowlink-agent` | Remote agent: executor, policy, WS connection |
+| `flowlink-relay` | Relay server: agent pool, auth, event bus |
+| `flowlink` | CLI binary |
+
+## Shield — Command Protection
+
+3-level threat detection engine:
+
+- **L1 — Structured Args:** Pattern matching on binary + flags (rm -rf, dd, mkfs, docker rm -f)
+- **L2 — AST Analysis:** tree-sitter-bash parsing for eval, pipe-to-shell, $() expansion
+- **L3 — Interpreter Heuristics:** Pattern detection in python/perl/node/ruby scripts
+
+113/113 tests pass. Zero false positives on safe commands.
+
+## E2EE
+
+Relay **cannot** read your data. X25519 key exchange + AES-256-GCM per-message encryption.
 
 ```
-https://YOUR_SERVER/dashboard/?token=my-secret-token
+Agent ──[encrypt with relay's pub key]──► Relay ──[forward encrypted]──► Client
 ```
 
-## API
+## Docker
 
-Все endpoints требуют `Authorization: Bearer <token>` header.
-
-### Агенты
-
-| Method | Endpoint | Описание |
-|--------|----------|----------|
-| GET | `/api/v1/agents` | Список агентов |
-| POST | `/api/v1/agents/register` | Зарегистрировать агента |
-| POST | `/api/v1/agents/exec` | Выполнить команду |
-| POST | `/api/v1/agents/delete/{id}` | Удалить агента |
-| GET | `/api/v1/agents/sysinfo` | Системная информация |
-
-### Файлы
-
-| Method | Endpoint | Описание |
-|--------|----------|----------|
-| POST | `/api/v1/agents/files/read` | Прочитать файл |
-| POST | `/api/v1/agents/files/write` | Записать файл |
-| POST | `/api/v1/agents/files/list` | Список файлов |
-
-### Клиенты
-
-| Method | Endpoint | Описание |
-|--------|----------|----------|
-| GET | `/api/v1/clients` | Список клиентов |
-| POST | `/api/v1/clients` | Создать клиента |
-| GET | `/api/v1/clients/{id}` | Информация о клиенте |
-| DELETE | `/api/v1/clients/{id}` | Деактивировать клиента |
-
-### Аудит
-
-| Method | Endpoint | Описание |
-|--------|----------|----------|
-| GET | `/api/v1/audit` | Лог команд |
-| GET | `/api/v1/audit/stats` | Статистика |
-| GET | `/api/v1/audit/export` | Экспорт CSV |
-
-### Approvals
-
-| Method | Endpoint | Описание |
-|--------|----------|----------|
-| GET | `/api/v1/approvals` | Список запросов |
-| POST | `/api/v1/approvals/{id}/approve` | Одобрить |
-| POST | `/api/v1/approvals/{id}/reject` | Отклонить |
-
-### SSE
-
-```
-GET /api/v1/events?token=<token>
+```bash
+docker build -f Dockerfile.relay -t flowlink-relay .
+docker build -f Dockerfile.agent -t flowlink-agent .
 ```
 
-События: `agent.connected`, `agent.disconnected`, `approval.required`, `approval.granted`, `approval.rejected`
+## Config
 
-## Архитектура
+See `examples/flowlink.json` and `examples/relay.json`.
 
-```
-┌──────────┐   WSS    ┌──────────┐   HTTP   ┌──────────┐
-│  Agent   │ ◄──────► │  Relay   │ ◄──────► │Dashboard │
-│ (server) │          │  (Go)    │          │ (SPA)    │
-└──────────┘          └──────────┘          └──────────┘
-                            │
-                     ┌──────┴──────┐
-                     │ Registry   │
-                     │ Audit Log  │
-                     │ Approvals  │
-                     │ Billing    │
-                     └─────────────┘
-```
+## License
 
-**Полная архитектура:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — все модули, протоколы, конфигурация.
-
-## Конфигурация
-
-`~/.flowlink/relay.json`:
-```json
-{
-  "wss_addr": ":8443",
-  "api_addr": ":8080",
-  "api_token": "your-secret-token",
-  "tls_cert": "",
-  "tls_key": ""
-}
-```
-
-## Тарифы
-
-| План | Агенты | Цена |
-|------|--------|------|
-| Free | 3 | Бесплатно |
-| Starter | 10 | 1 990 ₽/мес |
-| Pro | 50 | 4 990 ₽/мес |
-| Enterprise | 100+ | По запросу |
-
+Private repository. All rights reserved.

@@ -1,0 +1,33 @@
+# Multi-stage build for FlowLink Agent
+FROM rust:1.85-bookworm AS builder
+
+WORKDIR /flowlink
+
+# Cache deps
+COPY Cargo.toml Cargo.lock ./
+COPY crates/core/Cargo.toml crates/core/Cargo.toml
+COPY crates/crypto/Cargo.toml crates/crypto/Cargo.toml
+COPY crates/shield/Cargo.toml crates/shield/Cargo.toml
+COPY crates/agent/Cargo.toml crates/agent/Cargo.toml
+COPY crates/relay/Cargo.toml crates/relay/Cargo.toml
+COPY crates/cli/Cargo.toml crates/cli/Cargo.toml
+
+RUN mkdir -p crates/core/src && echo "" > crates/core/src/lib.rs \
+ && mkdir -p crates/crypto/src && echo "" > crates/crypto/src/lib.rs \
+ && mkdir -p crates/shield/src && echo "" > crates/shield/src/lib.rs \
+ && mkdir -p crates/agent/src && echo "" > crates/agent/src/lib.rs \
+ && mkdir -p crates/relay/src && echo "" > crates/relay/src/lib.rs \
+ && mkdir -p crates/cli/src && echo "fn main(){}" > crates/cli/src/main.rs
+
+RUN cargo build --release -p flowlink 2>/dev/null || true
+
+COPY crates/ crates/
+RUN cargo build --release -p flowlink
+
+# Runtime
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /flowlink/target/release/flowlink /usr/local/bin/
+
+ENTRYPOINT ["flowlink", "agent"]
