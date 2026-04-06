@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: flowlink-webhook
+  namespace: flowlink-system
+  labels:
+    app.kubernetes.io/name: flowlink-operator
+spec:
+  ports:
+    - port: 443
+      targetPort: 9443
+      name: webhook
+    - port: 8080
+      targetPort: 8080
+      name: health
+  selector:
+    app.kubernetes.io/name: flowlink-operator

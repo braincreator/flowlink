@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flowlink-system
+  labels:
+    app.kubernetes.io/part-of: flowlink-shield
+    app.kubernetes.io/managed-by: flowlink-operator

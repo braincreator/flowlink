@@ -1,0 +1,58 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: flowlink-shield-mutating
+  labels:
+    app.kubernetes.io/name: flowlink-shield
+    app.kubernetes.io/component: webhook
+webhooks:
+  - name: shield-mutate.shield.flowlink.ai
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    timeoutSeconds: 5
+    reinvocationPolicy: Never
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE]
+        resources: ["pods"]
+    clientConfig:
+      service:
+        name: flowlink-webhook
+        namespace: flowlink-system
+        path: /mutate
+      caBundle: Cg==  # Replace with actual CA bundle after cert generation
+    objectSelector:
+      matchExpressions:
+        - key: shield.flowlink.ai/inject
+          operator: NotIn
+          values: ["disabled"]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: flowlink-shield-validating
+  labels:
+    app.kubernetes.io/name: flowlink-shield
+    app.kubernetes.io/component: webhook
+webhooks:
+  - name: shield-validate.shield.flowlink.ai
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    timeoutSeconds: 5
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: [CREATE, UPDATE]
+        resources: ["pods"]
+    clientConfig:
+      service:
+        name: flowlink-webhook
+        namespace: flowlink-system
+        path: /validate
+      caBundle: Cg==  # Replace with actual CA bundle after cert generation
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kube-system", "kube-public", "kube-node-lease", "flowlink-system"]

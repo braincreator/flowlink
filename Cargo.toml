@@ -7,4 +7,5 @@ members = [
     "crates/agent",
     "crates/relay",
     "crates/cli",
+    "crates/k8s",
 ]

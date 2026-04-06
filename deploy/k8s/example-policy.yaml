@@ -1,0 +1,22 @@
+apiVersion: shield.flowlink.ai/v1alpha1
+kind: FlowLinkShieldPolicy
+metadata:
+  name: default-policy
+  namespace: default
+spec:
+  enabled: true
+  mode: Enforce
+  relayUrl: "http://flowlink-relay.flowlink-system:8080"
+  sidecarImage: "ghcr.io/flowlink/shield:latest"
+  admissionWebhook: true
+  watchNamespaces: []
+  rules:
+    - name: deny-privileged
+      action: deny
+      patterns: ["*"]
+    - name: allow-shell
+      action: allow
+      patterns: ["sh", "bash", "ash"]
+    - name: deny-package-managers
+      action: ask
+      patterns: ["apt", "yum", "apk", "pip", "npm", "cargo"]
