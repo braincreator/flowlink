@@ -4,6 +4,7 @@ const ru = {
         sessions: 'Сессии', backups: 'Резервные копии', policies: 'Политики', devices: 'Устройства',
         rbac: 'Управление доступом', metrics: 'Метрики', settings: 'Настройки', terminal: 'Терминал',
         billing: 'Тарифы', llm: 'LLM Прокси', mcp: 'MCP Инструменты', onboarding: 'Начало работы',
+        terminal_soc: 'Оперативный центр', terminal_relay: 'Консоль релея',
     },
     dashboard: {
         title: 'Дашборд', agents_online: 'Всего агентов', active_alerts: 'Активные тревоги',
@@ -123,6 +124,19 @@ const ru = {
         connected: 'Подключён', disconnected: 'Отключён',
         terminal_agent: 'Терминал: {{hostname}}', log_viewer: 'Просмотр логов',
         waiting_connection: 'Ожидание подключения...',
+    },
+    terminal_soc: {
+        title: 'Оперативный центр терминалов', operations_center: 'Оперативный центр',
+        relay_console: 'Консоль релея', remote_terminal: 'Удалённый терминал',
+        add_feed: 'Добавить', layout: 'Макет',
+        grid_1x1: '1×1', grid_2x2: '2×2', grid_3x2: '3×2', grid_3x3: '3×3',
+        focus_mode: 'Фокус', connected: 'Подключён', disconnected: 'Отключён',
+        idle: 'Бездействие', active: 'Активен', session_duration: 'Длительность сессии',
+        command_count: 'Команды', alerts_count: 'Тревоги',
+        expand: 'Развернуть', detach: 'Убрать', search_agents: 'Поиск агентов',
+        add_to_grid: 'Добавить в сетку', no_feeds: 'Нет терминальных лент',
+        no_feeds_desc: 'Добавьте агента для мониторинга его терминальной сессии',
+        other_feeds: 'Другие ленты',
     },
     billing: {
         title: 'Тарифы', plan: 'Бесплатный тариф', usage: 'Использование', agents_count: 'Агентов подключено',

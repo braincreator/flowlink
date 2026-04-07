@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard, Bot, Shield, FileText, MonitorPlay, HardDrive,
-  FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare
+  FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare, Radio
 } from 'lucide-react';
 
 const navItems = [
@@ -23,6 +23,8 @@ const navItems = [
   { to: '/billing', icon: CreditCard, labelKey: 'nav.billing' },
   { to: '/onboarding', icon: GraduationCap, labelKey: 'nav.onboarding' },
   { to: '/terminal', icon: TerminalSquare, labelKey: 'nav.terminal' },
+  { to: '/terminal/soc', icon: LayoutDashboard, labelKey: 'nav.terminal_soc' },
+  { to: '/terminal/relay', icon: Radio, labelKey: 'nav.terminal_relay' },
 ];
 
 const titleKeys: Record<string, string> = {};

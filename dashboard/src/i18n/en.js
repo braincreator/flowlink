@@ -4,6 +4,7 @@ const en = {
         sessions: 'Sessions', backups: 'Backups', policies: 'Policies', devices: 'Devices',
         rbac: 'RBAC', metrics: 'Metrics', settings: 'Settings', terminal: 'Terminal',
         billing: 'Billing', llm: 'LLM Proxy', mcp: 'MCP Tools', onboarding: 'Onboarding',
+        terminal_soc: 'Operations Center', terminal_relay: 'Relay Console',
     },
     dashboard: {
         title: 'Dashboard', agents_online: 'Total Agents', active_alerts: 'Active Alerts',
@@ -123,6 +124,19 @@ const en = {
         connected: 'Connected', disconnected: 'Disconnected',
         terminal_agent: 'Terminal: {{hostname}}', log_viewer: 'Log Viewer',
         waiting_connection: 'Waiting for connection...',
+    },
+    terminal_soc: {
+        title: 'Terminal Operations Center', operations_center: 'Operations Center',
+        relay_console: 'Relay Console', remote_terminal: 'Remote Terminal',
+        add_feed: 'Add Feed', layout: 'Layout',
+        grid_1x1: '1×1', grid_2x2: '2×2', grid_3x2: '3×2', grid_3x3: '3×3',
+        focus_mode: 'Focus Mode', connected: 'Connected', disconnected: 'Disconnected',
+        idle: 'Idle', active: 'Active', session_duration: 'Session Duration',
+        command_count: 'Commands', alerts_count: 'Alerts',
+        expand: 'Expand', detach: 'Remove', search_agents: 'Search Agents',
+        add_to_grid: 'Add to Grid', no_feeds: 'No terminal feeds',
+        no_feeds_desc: 'Add an agent to start monitoring its terminal session',
+        other_feeds: 'Other Feeds',
     },
     billing: {
         title: 'Billing', plan: 'Free Plan', usage: 'Usage', agents_count: 'Agents Connected',

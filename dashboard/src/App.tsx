@@ -17,6 +17,9 @@ import Billing from './pages/Billing';
 import LLM from './pages/LLM';
 import MCP from './pages/MCP';
 import TerminalPage from './pages/Terminal';
+import TerminalSOC from './pages/TerminalSOC';
+import TerminalRelay from './pages/TerminalRelay';
+import TerminalAgent from './pages/TerminalAgent';
 import { NotificationProvider } from './hooks/useNotifications';
 
 export default function App() {
@@ -42,6 +45,9 @@ export default function App() {
           <Route path="llm" element={<LLM />} />
           <Route path="mcp" element={<MCP />} />
           <Route path="terminal" element={<TerminalPage />} />
+          <Route path="terminal/soc" element={<TerminalSOC />} />
+          <Route path="terminal/relay" element={<TerminalRelay />} />
+          <Route path="terminal/agent/:id" element={<TerminalAgent />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

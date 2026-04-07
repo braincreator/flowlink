@@ -2,7 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useEffect, createContext, useContext } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { LayoutDashboard, Bot, Shield, FileText, MonitorPlay, HardDrive, FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare } from 'lucide-react';
+import { LayoutDashboard, Bot, Shield, FileText, MonitorPlay, HardDrive, FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare, Radio } from 'lucide-react';
 const navItems = [
     { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
     { to: '/agents', icon: Bot, labelKey: 'nav.agents' },
@@ -20,6 +20,8 @@ const navItems = [
     { to: '/billing', icon: CreditCard, labelKey: 'nav.billing' },
     { to: '/onboarding', icon: GraduationCap, labelKey: 'nav.onboarding' },
     { to: '/terminal', icon: TerminalSquare, labelKey: 'nav.terminal' },
+    { to: '/terminal/soc', icon: LayoutDashboard, labelKey: 'nav.terminal_soc' },
+    { to: '/terminal/relay', icon: Radio, labelKey: 'nav.terminal_relay' },
 ];
 const titleKeys = {};
 navItems.forEach(n => { if (n.to !== '/')
