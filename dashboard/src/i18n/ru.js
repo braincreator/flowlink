@@ -53,6 +53,10 @@ const ru = {
         session: 'Сессия', user: 'Пользователь', origin: 'Источник', terminal: 'Терминал',
         session_replay: 'Повтор сессии', replay_placeholder: 'Заглушка повтора сессии',
         asciinema_integration: 'точка интеграции asciinema-player', search_sessions: 'Поиск сессий...',
+        record_session: 'Записать сессию', recording: 'Запись...', record_feed: 'Записать трансляцию',
+        speed: 'Скорость', format: 'Формат', download: 'Скачать', share_telegram: 'Поделиться в Telegram',
+        preview: 'Предпросмотр', live_record: 'Запись в реальном времени', stop_recording: 'Остановить запись',
+        recording_duration: 'Длительность', theme: 'Тема', cancel: 'Отмена',
     },
     backups: {
         title: 'Резервные копии', restore: 'Восстановить', confirm_restore: 'Восстановить копию',

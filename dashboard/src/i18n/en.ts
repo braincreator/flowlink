@@ -53,6 +53,10 @@ const en = {
     session: 'Session', user: 'User', origin: 'Origin', terminal: 'Terminal',
     session_replay: 'Session Replay', replay_placeholder: 'Session replay placeholder',
     asciinema_integration: 'asciinema-player integration point', search_sessions: 'Search sessions...',
+    record_session: 'Record Session', recording: 'Recording...', record_feed: 'Record Feed',
+    speed: 'Speed', format: 'Format', download: 'Download', share_telegram: 'Share to Telegram',
+    preview: 'Preview', live_record: 'Live Record', stop_recording: 'Stop Recording',
+    recording_duration: 'Duration', theme: 'Theme', cancel: 'Cancel',
   },
   backups: {
     title: 'Backups', restore: 'Restore', confirm_restore: 'Restore Backup',

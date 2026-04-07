@@ -5,10 +5,12 @@ import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContai
 import { Badge, RiskGauge, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi, useSSE } from '../hooks/useApi';
 import { api } from '../api/client';
+import SessionRecorder from '../components/SessionRecorder';
 
 export default function Shield() {
   const { t } = useTranslation();
   const [tab, setTab] = useState<'alerts' | 'canaries' | 'policies'>('alerts');
+  const [replayAlert, setReplayAlert] = useState<any>(null);
 
   const { connected: sseConnected } = useSSE();
 
@@ -53,6 +55,7 @@ export default function Shield() {
   if (loading && !alerts && !stats) return <LoadingSkeleton lines={8} />;
 
   return (
+    <>
     <div className="space-y-6 fade-in">
       {alertsError && !alerts && (
         <div className="flex flex-col items-center py-16 text-center">
@@ -125,6 +128,9 @@ export default function Shield() {
                   <div className="flex gap-2">
                     <button onClick={() => resolve(alert.alert_id, true)} className="rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/30">{t('shield.approve')}</button>
                     <button onClick={() => resolve(alert.alert_id, false)} className="rounded-lg bg-rose-500/20 px-3 py-1.5 text-xs font-medium text-rose-400 transition-colors hover:bg-rose-500/30">{t('shield.reject')}</button>
+                    {alert.castData && (
+                      <button onClick={() => setReplayAlert(alert)} className="rounded-lg bg-[var(--color-accent)]/15 px-3 py-1.5 text-xs font-medium text-[var(--color-accent-light)] transition-colors hover:bg-[var(--color-accent)]/25">🎬 {t('sessions.record_session')}</button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -209,5 +215,12 @@ export default function Shield() {
         </div>
       </div>
     </div>
+
+    <SessionRecorder
+      open={!!replayAlert}
+      onClose={() => setReplayAlert(null)}
+      session={replayAlert ? { id: replayAlert.alert_id, hostname: replayAlert.agent_id, castData: replayAlert.castData, commands_count: 1 } : null}
+    />
+    </>
   );
 }

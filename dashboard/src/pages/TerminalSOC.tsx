@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { LayoutGrid, Plus, Search, Radio, Monitor, Settings } from 'lucide-react';
@@ -6,6 +6,7 @@ import TerminalGrid, { type GridLayout, GRID_MAX } from '../components/TerminalG
 import TerminalFeed from '../components/TerminalFeedCard';
 import TerminalMinimap from '../components/TerminalMinimap';
 import TerminalSettingsPanel from '../components/terminal/TerminalSettings';
+import { useLiveRecorder } from '../hooks/useLiveRecorder';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
 import type { FeedState } from '../hooks/useTerminalStream';
@@ -33,6 +34,8 @@ export default function TerminalSOC() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [search, setSearch] = useState('');
+  const feedContainerRef = useRef<HTMLDivElement>(null);
+  const { startRecording: startFeedRec, stopRecording: stopFeedRec, recording: feedRecActive, duration: feedRecDur } = useLiveRecorder(feedContainerRef);
 
   useEffect(() => { localStorage.setItem('flowlink_soc_layout', layout); }, [layout]);
   useEffect(() => { localStorage.setItem('flowlink_soc_feeds', JSON.stringify(feedIds)); }, [feedIds]);
@@ -149,8 +152,18 @@ export default function TerminalSOC() {
               >
                 ✕ {t('common.close')}
               </button>
+              {feedRecActive ? (
+                <button onClick={() => stopFeedRec()} className="flex items-center gap-1.5 rounded-lg bg-rose-500/15 px-2.5 py-1 text-xs text-rose-400">
+                  <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                  {Math.floor(feedRecDur / 60)}:{(feedRecDur % 60).toString().padStart(2, '0')} ⏹
+                </button>
+              ) : (
+                <button onClick={() => startFeedRec()} className="px-2 py-1 rounded text-[10px] text-rose-400 hover:bg-rose-500/10 transition-colors">
+                  ⏺ {t('sessions.record_feed')}
+                </button>
+              )}
             </div>
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0" ref={feedContainerRef}>
               <TerminalFeed agentId={expandedFeed.agentId} interactive />
             </div>
             <TerminalMinimap feeds={feeds} activeId={expandedId} onClick={setExpandedId} />

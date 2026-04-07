@@ -5,10 +5,13 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import { Badge, DataTable, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
+import SessionPlayer from '../components/SessionPlayer';
+import SessionRecorder from '../components/SessionRecorder';
 
 export default function Sessions() {
   const { t } = useTranslation();
   const [replaySession, setReplaySession] = useState<any>(null);
+  const [recordSession, setRecordSession] = useState<any>(null);
 
   const { data, loading, error, refresh } = useApi<any[]>(
     () => api.getSessions(),
@@ -81,21 +84,36 @@ export default function Sessions() {
               {r.status}
             </Badge>
           )},
-          { key: 'replay', label: '', render: (r: any) => r.status === 'ended' ? (
-            <button onClick={(e) => { e.stopPropagation(); setReplaySession(r); }} className="flex items-center gap-1 rounded-lg bg-[var(--color-accent)]/15 px-2.5 py-1 text-xs font-medium text-[var(--color-accent-light)] hover:bg-[var(--color-accent)]/25 transition-colors">
-              <Play size={12} /> {t('sessions.replay')}
-            </button>
+          { key: 'actions', label: '', render: (r: any) => r.status === 'ended' ? (
+            <div className="flex items-center gap-1.5">
+              <button onClick={(e) => { e.stopPropagation(); setReplaySession(r); }} className="flex items-center gap-1 rounded-lg bg-[var(--color-accent)]/15 px-2.5 py-1 text-xs font-medium text-[var(--color-accent-light)] hover:bg-[var(--color-accent)]/25 transition-colors">
+                <Play size={12} /> {t('sessions.replay')}
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); setRecordSession(r); }} className="flex items-center gap-1 rounded-lg bg-rose-500/15 px-2.5 py-1 text-xs font-medium text-rose-400 hover:bg-rose-500/25 transition-colors">
+                ⏺ {t('sessions.record_session')}
+              </button>
+            </div>
           ) : null },
         ]}
         data={sessions} searchPlaceholder={t('sessions.search_sessions')}
       />
 
-      <Modal open={!!replaySession} onClose={() => setReplaySession(null)} title={`${t('sessions.session_replay')} — ${replaySession?.id}`}>
-        <div className="rounded-xl bg-[#0d0e14] p-4 font-mono text-sm min-h-[300px]">
-          <div className="text-[var(--color-dim)]">{t('sessions.replay_placeholder')}</div>
-          <div className="mt-2 text-xs text-[var(--color-dim)]">{t('sessions.asciinema_integration')}</div>
-        </div>
+      <Modal open={!!replaySession} onClose={() => setReplaySession(null)} title={`${t('sessions.session_replay')} — ${replaySession?.id?.slice(0, 8)}`}>
+        {replaySession?.castData ? (
+          <SessionPlayer castData={replaySession.castData} autoPlay />
+        ) : (
+          <div className="rounded-xl bg-[#0d0e14] p-4 font-mono text-sm min-h-[300px]">
+            <div className="text-[var(--color-dim)]">{t('sessions.replay_placeholder')}</div>
+            <div className="mt-2 text-xs text-[var(--color-dim)]">{t('sessions.asciinema_integration')}</div>
+          </div>
+        )}
       </Modal>
+
+      <SessionRecorder
+        open={!!recordSession}
+        onClose={() => setRecordSession(null)}
+        session={recordSession}
+      />
     </div>
   );
 }

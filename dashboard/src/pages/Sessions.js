@@ -6,9 +6,12 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import { Badge, DataTable, Modal, LoadingSkeleton } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
+import SessionPlayer from '../components/SessionPlayer';
+import SessionRecorder from '../components/SessionRecorder';
 export default function Sessions() {
     const { t } = useTranslation();
     const [replaySession, setReplaySession] = useState(null);
+    const [recordSession, setRecordSession] = useState(null);
     const { data, loading, error, refresh } = useApi(() => api.getSessions(), { pollMs: 15000 });
     const sessions = data || [];
     const activeSessions = sessions.filter((s) => s.status === 'active');
@@ -27,6 +30,6 @@ export default function Sessions() {
                     { key: 'commands_count', label: t('sessions.commands_count'), render: (r) => r.commands_count ?? '—' },
                     { key: 'duration_ms', label: t('sessions.duration'), render: (r) => r.duration_ms ? _jsxs("span", { className: "text-xs", children: [Math.round(r.duration_ms / 60000), "m"] }) : _jsx("span", { className: "text-[var(--color-dim)]", children: "\u2014" }) },
                     { key: 'status', label: t('agents.status'), render: (r) => (_jsxs(Badge, { variant: r.status === 'active' ? 'green' : 'default', children: [_jsx("span", { className: `inline-block h-1.5 w-1.5 rounded-full ${r.status === 'active' ? 'bg-emerald-400 pulse-dot' : ''}` }), r.status] })) },
-                    { key: 'replay', label: '', render: (r) => r.status === 'ended' ? (_jsxs("button", { onClick: (e) => { e.stopPropagation(); setReplaySession(r); }, className: "flex items-center gap-1 rounded-lg bg-[var(--color-accent)]/15 px-2.5 py-1 text-xs font-medium text-[var(--color-accent-light)] hover:bg-[var(--color-accent)]/25 transition-colors", children: [_jsx(Play, { size: 12 }), " ", t('sessions.replay')] })) : null },
-                ], data: sessions, searchPlaceholder: t('sessions.search_sessions') }), _jsx(Modal, { open: !!replaySession, onClose: () => setReplaySession(null), title: `${t('sessions.session_replay')} — ${replaySession?.id}`, children: _jsxs("div", { className: "rounded-xl bg-[#0d0e14] p-4 font-mono text-sm min-h-[300px]", children: [_jsx("div", { className: "text-[var(--color-dim)]", children: t('sessions.replay_placeholder') }), _jsx("div", { className: "mt-2 text-xs text-[var(--color-dim)]", children: t('sessions.asciinema_integration') })] }) })] }));
+                    { key: 'actions', label: '', render: (r) => r.status === 'ended' ? (_jsxs("div", { className: "flex items-center gap-1.5", children: [_jsxs("button", { onClick: (e) => { e.stopPropagation(); setReplaySession(r); }, className: "flex items-center gap-1 rounded-lg bg-[var(--color-accent)]/15 px-2.5 py-1 text-xs font-medium text-[var(--color-accent-light)] hover:bg-[var(--color-accent)]/25 transition-colors", children: [_jsx(Play, { size: 12 }), " ", t('sessions.replay')] }), _jsxs("button", { onClick: (e) => { e.stopPropagation(); setRecordSession(r); }, className: "flex items-center gap-1 rounded-lg bg-rose-500/15 px-2.5 py-1 text-xs font-medium text-rose-400 hover:bg-rose-500/25 transition-colors", children: ["\u23FA ", t('sessions.record_session')] })] })) : null },
+                ], data: sessions, searchPlaceholder: t('sessions.search_sessions') }), _jsx(Modal, { open: !!replaySession, onClose: () => setReplaySession(null), title: `${t('sessions.session_replay')} — ${replaySession?.id?.slice(0, 8)}`, children: replaySession?.castData ? (_jsx(SessionPlayer, { castData: replaySession.castData, autoPlay: true })) : (_jsxs("div", { className: "rounded-xl bg-[#0d0e14] p-4 font-mono text-sm min-h-[300px]", children: [_jsx("div", { className: "text-[var(--color-dim)]", children: t('sessions.replay_placeholder') }), _jsx("div", { className: "mt-2 text-xs text-[var(--color-dim)]", children: t('sessions.asciinema_integration') })] })) }), _jsx(SessionRecorder, { open: !!recordSession, onClose: () => setRecordSession(null), session: recordSession })] }));
 }
