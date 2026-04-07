@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, Download } from 'lucide-react';
 import { Badge, DataTable, LoadingSkeleton } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
@@ -15,6 +16,7 @@ const actionBadge: Record<string, 'green' | 'red' | 'amber' | 'blue' | 'default'
 };
 
 export default function Audit() {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('all');
 
@@ -60,27 +62,27 @@ export default function Audit() {
       {error && !events && (
         <div className="flex flex-col items-center py-16 text-center">
           <div className="text-4xl mb-4 opacity-40">⚠️</div>
-          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
-          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Total Events</div>
+          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">{t('audit.total_events')}</div>
           <div className="mt-1 text-2xl font-bold">{(auditStats as any)?.total || eventList.length}</div>
         </div>
         <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Allowed</div>
+          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">{t('audit.approved')}</div>
           <div className="mt-1 text-2xl font-bold text-emerald-400">{(auditStats as any)?.allowed || allowed}</div>
         </div>
         <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4">
-          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Denied</div>
+          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">{t('audit.denied')}</div>
           <div className="mt-1 text-2xl font-bold text-rose-400">{(auditStats as any)?.denied || denied}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Deny Rate</div>
+          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">{t('audit.denied_ratio')}</div>
           <div className="mt-1 text-2xl font-bold">{allowed + denied > 0 ? ((denied / (allowed + denied)) * 100).toFixed(1) : '0'}%</div>
         </div>
       </div>
@@ -88,12 +90,12 @@ export default function Audit() {
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-dim)]" />
-          <input type="text" placeholder="Search commands, users..." value={search} onChange={e => setSearch(e.target.value)}
+          <input type="text" placeholder={t('audit.search')} value={search} onChange={e => setSearch(e.target.value)}
             className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] py-2.5 pl-9 pr-3 text-sm placeholder-[var(--color-dim)] focus:border-[var(--color-accent)] focus:outline-none" />
         </div>
         <select value={filterType} onChange={e => { setFilterType(e.target.value); setTimeout(refresh, 0); }}
           className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
-          <option value="all">All Events</option>
+          <option value="all">{t('audit.all')}</option>
           {types.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
         </select>
         <div className="flex gap-2">
@@ -111,8 +113,8 @@ export default function Audit() {
 
       <DataTable
         columns={[
-          { key: 'timestamp_iso', label: 'Time', render: (r: any) => <span className="text-xs text-[var(--color-dim)] whitespace-nowrap">{new Date(r.timestamp_iso).toLocaleString()}</span> },
-          { key: 'event_type', label: 'Event', render: (r: any) => (
+          { key: 'timestamp_iso', label: t('audit.timestamp'), render: (r: any) => <span className="text-xs text-[var(--color-dim)] whitespace-nowrap">{new Date(r.timestamp_iso).toLocaleString()}</span> },
+          { key: 'event_type', label: t('audit.event'), render: (r: any) => (
             <span className="flex items-center gap-1.5">
               <span>{eventTypeIcons[r.event_type] || '•'}</span>
               <Badge variant={r.event_type === 'command_intercepted' ? 'red' : r.event_type === 'canary_triggered' ? 'amber' : 'default'}>
@@ -120,13 +122,13 @@ export default function Audit() {
               </Badge>
             </span>
           )},
-          { key: 'agent_id', label: 'Agent', render: (r: any) => <span className="text-xs font-mono">{r.agent_id}</span> },
-          { key: 'user', label: 'User' },
-          { key: 'command', label: 'Command', render: (r: any) => r.command ? <code className="rounded bg-[var(--color-surface3)] px-1.5 py-0.5 text-xs">{r.command}</code> : <span className="text-[var(--color-dim)]">—</span> },
-          { key: 'risk_score', label: 'Risk', render: (r: any) => r.risk_score != null ? <span className={`font-mono text-xs font-bold ${r.risk_score >= 70 ? 'text-rose-400' : r.risk_score >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>{r.risk_score}</span> : <span className="text-[var(--color-dim)]">—</span> },
-          { key: 'result', label: 'Result', render: (r: any) => <Badge variant={actionBadge[r.result || ''] || 'default'}>{r.result || '—'}</Badge> },
+          { key: 'agent_id', label: t('audit.agent'), render: (r: any) => <span className="text-xs font-mono">{r.agent_id}</span> },
+          { key: 'user', label: t('audit.user') },
+          { key: 'command', label: t('audit.command'), render: (r: any) => r.command ? <code className="rounded bg-[var(--color-surface3)] px-1.5 py-0.5 text-xs">{r.command}</code> : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'risk_score', label: t('audit.risk'), render: (r: any) => r.risk_score != null ? <span className={`font-mono text-xs font-bold ${r.risk_score >= 70 ? 'text-rose-400' : r.risk_score >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>{r.risk_score}</span> : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'result', label: t('audit.result'), render: (r: any) => <Badge variant={actionBadge[r.result || ''] || 'default'}>{r.result || '—'}</Badge> },
         ]}
-        data={filtered} emptyText="No matching audit events"
+        data={filtered} emptyText={t('audit.no_events')}
       />
     </div>
   );

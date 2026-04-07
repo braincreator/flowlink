@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Upload, Download, Play, FileCode } from 'lucide-react';
 import { Badge, Modal, YamlEditor, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
@@ -31,6 +32,7 @@ rules:
 `;
 
 export default function Policies() {
+  const { t } = useTranslation();
   const [yaml, setYaml] = useState(DEFAULT_YAML);
   const [addOpen, setAddOpen] = useState(false);
   const [testOpen, setTestOpen] = useState(false);
@@ -61,36 +63,36 @@ export default function Policies() {
       {error && !data && (
         <div className="flex flex-col items-center py-16 text-center">
           <div className="text-4xl mb-4 opacity-40">⚠️</div>
-          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
-          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>
         </div>
       )}
 
       <div className="flex flex-wrap gap-3">
         <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)]">
-          <Plus size={16} /> Add Rule
+          <Plus size={16} /> {t('policies.add_rule')}
         </button>
         <button onClick={() => setTestOpen(true)} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-          <Play size={16} /> Test Rule
+          <Play size={16} /> {t('policies.test_rule')}
         </button>
         <button className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-          <Upload size={16} /> Import YAML
+          <Upload size={16} /> {t('policies.import')}
         </button>
         <button className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-          <Download size={16} /> Export YAML
+          <Download size={16} /> {t('policies.export')}
         </button>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-          <h3 className="mb-3 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Policy Editor</h3>
+          <h3 className="mb-3 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('policies.editor')}</h3>
           <YamlEditor value={yaml} onChange={setYaml} />
         </div>
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Active Rules ({policies.length})</h3>
+          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t("policies.active_rules")} ({policies.length})</h3>
           {policies.length === 0 ? (
-            <EmptyState icon={<FileCode size={48} />} title="No policies configured" description="Add rules via the editor or API" />
+            <EmptyState icon={<FileCode size={48} />} title={t('policies.no_rules')} description={t("policies.add_rules_desc")} />
           ) : policies.map((p: any, i: number) => (
             <div key={i} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 transition-all hover:border-[var(--color-accent)]/30">
               <div className="flex items-center justify-between mb-2">
@@ -100,7 +102,7 @@ export default function Policies() {
                 </div>
                 <Badge variant={p.action === 'deny' ? 'red' : p.action === 'intercept' ? 'amber' : p.action === 'allow' ? 'green' : 'blue'}>{p.action}</Badge>
               </div>
-              <div className="text-xs text-[var(--color-dim)] mb-1">Priority: {p.priority} · {p.enabled ? '✅ Enabled' : '❌ Disabled'}</div>
+              <div className="text-xs text-[var(--color-dim)] mb-1">{t('policies.priority')}: {p.priority} · {p.enabled ? `✅ ${t('shield.enabled')}` : `❌ ${t('shield.disabled')}`}</div>
               <div className="rounded-lg bg-[var(--color-bg)] p-2 font-mono text-[10px] text-[var(--color-dim)]">
                 {Object.entries(p.conditions || {}).map(([k, v]) => <div key={k}><span className="text-[var(--color-accent-light)]">{k}</span>: {String(v)}</div>)}
               </div>
@@ -109,34 +111,34 @@ export default function Policies() {
         </div>
       </div>
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Policy Rule" actions={
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title={t('policies.add_rule')} actions={
         <>
-          <button onClick={() => setAddOpen(false)} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">Cancel</button>
-          <button onClick={() => setAddOpen(false)} className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm text-white">Add Rule</button>
+          <button onClick={() => setAddOpen(false)} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">{t('common.cancel')}</button>
+          <button onClick={() => setAddOpen(false)} className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm text-white">{t('policies.add_rule')}</button>
         </>
       }>
         <div className="space-y-3">
-          <div><label className="mb-1 block text-sm text-[var(--color-dim)]">Rule Name</label>
+          <div><label className="mb-1 block text-sm text-[var(--color-dim)]">{t("policies.rule_name")}</label>
             <input type="text" placeholder="e.g. Block curl pipe bash" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none" /></div>
-          <div><label className="mb-1 block text-sm text-[var(--color-dim)]">Action</label>
+          <div><label className="mb-1 block text-sm text-[var(--color-dim)]">{t("policies.action")}</label>
             <select className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
               <option>deny</option><option>intercept</option><option>alert</option><option>allow</option>
             </select></div>
-          <div><label className="mb-1 block text-sm text-[var(--color-dim)]">Priority</label>
+          <div><label className="mb-1 block text-sm text-[var(--color-dim)]">{t("policies.priority")}</label>
             <input type="number" defaultValue={50} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none" /></div>
-          <div><label className="mb-1 block text-sm text-[var(--color-dim)]">Command Pattern (regex)</label>
+          <div><label className="mb-1 block text-sm text-[var(--color-dim)]">{t("policies.command_pattern")}</label>
             <input type="text" placeholder="curl.*\\|.*bash" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" /></div>
         </div>
       </Modal>
 
-      <Modal open={testOpen} onClose={() => { setTestOpen(false); setTestResult(null); }} title="Test Rule Match" actions={
+      <Modal open={testOpen} onClose={() => { setTestOpen(false); setTestResult(null); }} title={t('policies.test_rule')} actions={
         <>
-          <button onClick={() => { setTestOpen(false); setTestResult(null); }} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">Close</button>
-          <button onClick={runTest} className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm text-white">Test</button>
+          <button onClick={() => { setTestOpen(false); setTestResult(null); }} className="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm">{t('common.close')}</button>
+          <button onClick={runTest} className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm text-white">{t('policies.test_rule')}</button>
         </>
       }>
         <div>
-          <label className="mb-1 block text-sm text-[var(--color-dim)]">Enter command to test</label>
+          <label className="mb-1 block text-sm text-[var(--color-dim)]">{t("policies.enter_command_test")}</label>
           <input type="text" value={testCmd} onChange={e => setTestCmd(e.target.value)} placeholder="e.g. rm -rf /tmp/old"
             className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none"
             onKeyDown={e => e.key === 'Enter' && runTest()} />

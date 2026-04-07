@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Zap } from 'lucide-react';
 import { api } from '../api/client';
 
 export default function Login() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
@@ -19,7 +21,7 @@ export default function Login() {
       await api.getHealth();
       navigate('/');
     } catch {
-      setError('Invalid token or relay unreachable');
+      setError(t('common.error'));
       api.setToken(null);
     } finally {
       setLoading(false);
@@ -38,12 +40,12 @@ export default function Login() {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-600 text-lg font-bold text-white"><Zap /></div>
           <span className="text-xl font-bold"><span className="text-[var(--color-accent-light)]">Flow</span><span className="text-[var(--color-text)]">Link</span></span>
         </div>
-        <h2 className="mb-1 text-center text-lg font-semibold">Sign in</h2>
-        <p className="mb-6 text-center text-sm text-[var(--color-dim)]">Enter your API token or connect to relay</p>
+        <h2 className="mb-1 text-center text-lg font-semibold">{t("common.sign_in")}</h2>
+        <p className="mb-6 text-center text-sm text-[var(--color-dim)]">{t("onboarding.relay_endpoint")}</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1.5 block text-sm text-[var(--color-dim)]">API Token</label>
+            <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("common.api_token")}</label>
             <input
               type="password" value={token} onChange={e => setToken(e.target.value)}
               placeholder="fl_token_..." autoFocus
@@ -53,13 +55,13 @@ export default function Login() {
           {error && <div className="rounded-lg bg-rose-500/10 border border-rose-500/20 px-3 py-2 text-sm text-rose-400">{error}</div>}
           <button type="submit" disabled={loading}
             className="w-full rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)] disabled:opacity-50">
-            {loading ? 'Connecting...' : 'Connect'}
+            {loading ? t('common.loading') : t('common.connect')}
           </button>
         </form>
 
         <button onClick={handleSkip}
           className="mt-3 w-full rounded-xl border border-[var(--color-border)] py-2.5 text-sm font-medium text-[var(--color-dim)] transition-colors hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)]">
-          Skip — use mock data
+          {t("common.skip_mock")}
         </button>
       </div>
     </div>

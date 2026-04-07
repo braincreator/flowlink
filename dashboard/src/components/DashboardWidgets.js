@@ -1,5 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { GripVertical } from 'lucide-react';
 const STORAGE_KEY = 'flowlink_widget_layout';
 function getStoredOrder() {
@@ -15,6 +16,7 @@ function saveOrder(order) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(order));
 }
 export function DashboardWidgets({ widgets }) {
+    const { t } = useTranslation();
     const [customizing, setCustomizing] = useState(false);
     const [order, setOrder] = useState(() => {
         const stored = getStoredOrder();
@@ -75,7 +77,7 @@ export function DashboardWidgets({ widgets }) {
     return (_jsxs("div", { children: [_jsxs("div", { className: "flex items-center gap-3 mb-4", children: [_jsxs("button", { onClick: () => { if (customizing)
                             saveOrder(order); setCustomizing(!customizing); }, className: `flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all ${customizing
                             ? 'bg-[var(--color-accent)] text-white'
-                            : 'border border-[var(--color-border)] hover:bg-[var(--color-surface2)]'}`, children: [_jsx(GripVertical, { size: 16 }), customizing ? 'Done' : 'Customize'] }), customizing && (_jsx("button", { onClick: resetLayout, className: "text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors", children: "Reset Layout" }))] }), _jsx("div", { className: "grid gap-4", style: { gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }, children: order.map(id => {
+                            : 'border border-[var(--color-border)] hover:bg-[var(--color-surface2)]'}`, children: [_jsx(GripVertical, { size: 16 }), customizing ? t('common.done') : t('dashboard.customize')] }), customizing && (_jsx("button", { onClick: resetLayout, className: "text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors", children: t('dashboard.reset_layout') }))] }), _jsx("div", { className: "grid gap-4", style: { gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }, children: order.map(id => {
                     const widget = widgetMap[id];
                     if (!widget)
                         return null;

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Trash2, Download } from 'lucide-react';
 import TerminalComponent from './Terminal';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -13,6 +14,7 @@ interface TerminalPanelProps {
 }
 
 export default function TerminalPanel({ open, onClose, agent, mode = 'shell' }: TerminalPanelProps) {
+  const { t } = useTranslation();
   const [output, setOutput] = useState<string[]>([]);
   const termRef = useRef<any>(null);
 
@@ -77,15 +79,15 @@ export default function TerminalPanel({ open, onClose, agent, mode = 'shell' }: 
         <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2">
           {mode === 'shell' && (
             <span className={`text-xs font-medium ${connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : 'text-rose-400'}`}>
-              {connected ? '● Connected' : reconnecting ? '◐ Reconnecting...' : '○ Disconnected'}
+              {connected ? t('terminal.connected') : reconnecting ? t('terminal.reconnecting') : t('terminal.disconnected')}
             </span>
           )}
           <div className="ml-auto flex items-center gap-1">
             <button onClick={handleClear} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">
-              <Trash2 size={12} /> Clear
+              <Trash2 size={12} /> {t('terminal.clear')}
             </button>
             <button onClick={handleDownload} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">
-              <Download size={12} /> Download
+              <Download size={12} /> {t('common.download')}
             </button>
           </div>
         </div>

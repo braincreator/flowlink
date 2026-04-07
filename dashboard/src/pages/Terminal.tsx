@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Terminal as TerminalIcon, ChevronDown } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { TerminalSquare, ChevronDown } from 'lucide-react';
 import TerminalComponent from '../components/Terminal';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
 
 export default function TerminalPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: agents } = useApi(() => api.getAgents(), { pollMs: 30000 });
   const agentList = (agents || []) as any[];
@@ -36,7 +38,6 @@ export default function TerminalPage() {
 
   const termRef = useRef<any>(null);
 
-  // Log viewer
   useEffect(() => {
     if (mode === 'logs') {
       api.getAuditEvents({ limit: 50 }).then((events: any[]) => {
@@ -72,9 +73,8 @@ export default function TerminalPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] -m-6 fade-in">
-      {/* Toolbar */}
       <div className="flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
-        <TerminalIcon size={18} className="text-[var(--color-accent)]" />
+        <TerminalSquare size={18} className="text-[var(--color-accent)]" />
 
         <select
           value={selectedAgent}
@@ -84,35 +84,34 @@ export default function TerminalPage() {
           {onlineAgents.map(a => (
             <option key={a.id} value={a.id}>{a.hostname}</option>
           ))}
-          {onlineAgents.length === 0 && <option value="">No online agents</option>}
+          {onlineAgents.length === 0 && <option value="">{t('common.no_online_agents')}</option>}
         </select>
 
         <div className="flex rounded-lg border border-[var(--color-border)] overflow-hidden">
           <button
             onClick={() => setMode('shell')}
             className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'shell' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-dim)] hover:bg-[var(--color-surface2)]'}`}
-          >Shell</button>
+          >{t('terminal.shell_mode')}</button>
           <button
             onClick={() => setMode('logs')}
             className={`px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'logs' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-dim)] hover:bg-[var(--color-surface2)]'}`}
-          >Logs</button>
+          >{t('terminal.logs_mode')}</button>
         </div>
 
         {mode === 'shell' && (
           <span className={`text-xs font-medium ${connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : 'text-rose-400'}`}>
-            {connected ? '● Connected' : reconnecting ? '◐ Reconnecting...' : '○ Disconnected'}
+            {connected ? t('terminal.connected') : reconnecting ? t('terminal.reconnecting') : t('terminal.disconnected')}
           </span>
         )}
 
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={handleClear} className="rounded-md px-2.5 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">Clear</button>
+          <button onClick={handleClear} className="rounded-md px-2.5 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">{t('terminal.clear')}</button>
           {mode === 'logs' && (
-            <button onClick={handleDownload} className="rounded-md px-2.5 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">Download Log</button>
+            <button onClick={handleDownload} className="rounded-md px-2.5 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">{t('terminal.download')}</button>
           )}
         </div>
       </div>
 
-      {/* Terminal area */}
       <div className="flex-1 bg-[#0a0e1a] overflow-hidden">
         {mode === 'shell' ? (
           <TerminalComponent onData={handleData} />
@@ -121,7 +120,7 @@ export default function TerminalPage() {
             {logLines.map((line, i) => (
               <div key={i} className="whitespace-pre-wrap">{line}</div>
             ))}
-            {logLines.length === 0 && <div className="text-[var(--color-dim)]">Loading logs...</div>}
+            {logLines.length === 0 && <div className="text-[var(--color-dim)]">{t("common.loading_logs")}</div>}
           </div>
         )}
       </div>

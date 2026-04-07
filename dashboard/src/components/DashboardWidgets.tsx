@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { GripVertical } from 'lucide-react';
 
 export interface WidgetDef {
@@ -27,6 +28,7 @@ function saveOrder(order: string[]) {
 }
 
 export function DashboardWidgets({ widgets }: DashboardWidgetsProps) {
+  const { t } = useTranslation();
   const [customizing, setCustomizing] = useState(false);
   const [order, setOrder] = useState<string[]>(() => {
     const stored = getStoredOrder();
@@ -100,11 +102,11 @@ export function DashboardWidgets({ widgets }: DashboardWidgetsProps) {
           }`}
         >
           <GripVertical size={16} />
-          {customizing ? 'Done' : 'Customize'}
+          {customizing ? t('common.done') : t('dashboard.customize')}
         </button>
         {customizing && (
           <button onClick={resetLayout} className="text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
-            Reset Layout
+            {t('dashboard.reset_layout')}
           </button>
         )}
       </div>

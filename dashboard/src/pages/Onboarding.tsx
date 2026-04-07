@@ -1,27 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Shield, Check, Copy, Loader2, ArrowRight, ArrowLeft, Zap, Eye, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { api } from '../api/client';
 
-const STEPS = ['Welcome', 'Connect Relay', 'Deploy Agent', 'Create Policy', 'Complete'];
-
-interface PolicyTemplate {
-  id: string;
-  name: string;
-  desc: string;
-  icon: React.ReactNode;
-  config: any;
-}
-
-const TEMPLATES: PolicyTemplate[] = [
-  { id: 'strict', name: 'Strict', desc: 'Block all L3 commands, approve L2. Maximum protection.', icon: <ShieldAlert size={20} />, config: { l3: 'block', l2: 'approve', l1: 'allow' } },
-  { id: 'balanced', name: 'Balanced', desc: 'Block L3, approve L2. Good default for most setups.', icon: <Shield size={20} />, config: { l3: 'block', l2: 'approve', l1: 'allow' } },
-  { id: 'monitoring', name: 'Monitoring', desc: 'Log everything, block nothing. Observe before deciding.', icon: <Eye size={20} />, config: { l3: 'log', l2: 'log', l1: 'log' } },
-];
-
-const INSTALL_CMD = 'curl -fsSL https://flowlink.sh/install.sh | bash -s -- --relay RELAY_URL --token TOKEN';
-
 export default function Onboarding() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [relayUrl, setRelayUrl] = useState('http://localhost:8080');
@@ -36,6 +20,22 @@ export default function Onboarding() {
   const [dontShow, setDontShow] = useState(false);
   const [confetti, setConfetti] = useState(false);
 
+  const STEPS = [
+    t('nav.dashboard'),
+    t('onboarding.connect_relay'),
+    t('onboarding.deploy_agent'),
+    t('onboarding.create_policy'),
+    t('common.done'),
+  ];
+
+  const TEMPLATES = [
+    { id: 'strict', name: t('policies.strict'), desc: t('onboarding.strict_desc'), icon: <ShieldAlert size={20} />, config: { l3: 'block', l2: 'approve', l1: 'allow' } },
+    { id: 'balanced', name: t('policies.balanced'), desc: t('onboarding.balanced_desc'), icon: <Shield size={20} />, config: { l3: 'block', l2: 'approve', l1: 'allow' } },
+    { id: 'monitoring', name: t('policies.monitoring'), desc: t('onboarding.monitoring_desc'), icon: <Eye size={20} />, config: { l3: 'log', l2: 'log', l1: 'log' } },
+  ];
+
+  const INSTALL_CMD = 'curl -fsSL https://flowlink.sh/install.sh | bash -s -- --relay RELAY_URL --token TOKEN';
+
   useEffect(() => {
     if (confetti) {
       const timer = setTimeout(() => setConfetti(false), 3000);
@@ -47,12 +47,10 @@ export default function Onboarding() {
     setTesting(true);
     setConnError('');
     try {
-      const oldBase = (api as any).getApiBase?.();
-      // We'll just try the health endpoint
       await api.getHealth();
       setConnected(true);
     } catch (e: any) {
-      setConnError(e.message || 'Connection failed. Make sure the relay is running and accessible.');
+      setConnError(e.message || t('onboarding.connection_failed'));
     } finally {
       setTesting(false);
     }
@@ -82,7 +80,7 @@ export default function Onboarding() {
   const savePolicy = async () => {
     setSaving(true);
     try {
-      const tpl = TEMPLATES.find(t => t.id === selectedTemplate);
+      const tpl = TEMPLATES.find(tp => tp.id === selectedTemplate);
       if (tpl) {
         await api.registerAgent({ policy_template: tpl.id, ...tpl.config });
       }
@@ -99,7 +97,6 @@ export default function Onboarding() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--color-bg)] p-6">
-      {/* Confetti */}
       {confetti && (
         <div className="pointer-events-none fixed inset-0 z-50">
           {Array.from({ length: 50 }).map((_, i) => (
@@ -127,7 +124,6 @@ export default function Onboarding() {
       )}
 
       <div className="w-full max-w-lg">
-        {/* Progress */}
         <div className="mb-8 flex items-center justify-center gap-2">
           {STEPS.map((s, i) => (
             <div key={s} className="flex items-center gap-2">
@@ -145,31 +141,25 @@ export default function Onboarding() {
           ))}
         </div>
 
-        {/* Card */}
         <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-2xl">
-          {/* Step 0: Welcome */}
           {step === 0 && (
             <div className="text-center">
               <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 text-4xl shadow-lg shadow-indigo-500/30">
                 <Shield />
               </div>
-              <h2 className="text-2xl font-bold mb-3">Welcome to FlowLink Shield</h2>
-              <p className="text-[var(--color-dim)] mb-8 leading-relaxed">
-                Real-time command monitoring and policy enforcement for your infrastructure agents.
-                Let's get you set up in a few minutes.
-              </p>
+              <h2 className="text-2xl font-bold mb-3">{t('onboarding.welcome')}</h2>
+              <p className="text-[var(--color-dim)] mb-8 leading-relaxed">{t('onboarding.welcome_desc')}</p>
               <button onClick={() => setStep(1)}
                 className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-6 py-3 text-sm font-semibold text-white transition-all hover:bg-[var(--color-accent-light)] hover:shadow-lg hover:shadow-indigo-500/20">
-                Get Started <ArrowRight size={16} />
+                {t('onboarding.get_started')} <ArrowRight size={16} />
               </button>
             </div>
           )}
 
-          {/* Step 1: Connect Relay */}
           {step === 1 && (
             <div>
-              <h2 className="text-xl font-bold mb-2">Connect to Relay</h2>
-              <p className="text-sm text-[var(--color-dim)] mb-6">Enter your FlowLink relay endpoint URL.</p>
+              <h2 className="text-xl font-bold mb-2">{t('onboarding.connect_relay')}</h2>
+              <p className="text-sm text-[var(--color-dim)] mb-6">{t('onboarding.relay_endpoint')}</p>
               <input
                 type="text" value={relayUrl} onChange={e => { setRelayUrl(e.target.value); setConnected(false); setConnError(''); }}
                 placeholder="http://localhost:8080"
@@ -178,32 +168,31 @@ export default function Onboarding() {
               {connError && <p className="mt-2 text-sm text-[var(--color-red)]">{connError}</p>}
               {connected && (
                 <div className="mt-3 flex items-center gap-2 text-sm text-[var(--color-green)]">
-                  <Check size={16} /> Connected successfully
+                  <Check size={16} /> {t('onboarding.connection_ok')}
                 </div>
               )}
               <div className="mt-6 flex justify-between">
                 <button onClick={() => setStep(0)} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-                  <ArrowLeft size={16} /> Back
+                  <ArrowLeft size={16} /> {t('common.back')}
                 </button>
                 <button onClick={testConnection} disabled={testing || !relayUrl}
                   className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[var(--color-accent-light)] disabled:opacity-50">
                   {testing ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-                  {connected ? 'Connected ✓' : 'Test Connection'}
+                  {connected ? `${t('onboarding.connection_ok')} ✓` : t('onboarding.test_connection')}
                 </button>
               </div>
               {connected && (
                 <button onClick={() => setStep(2)} className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--color-green)] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:opacity-90">
-                  Next: Deploy Agent <ArrowRight size={16} />
+                  {t('common.next')}: {t('onboarding.deploy_agent')} <ArrowRight size={16} />
                 </button>
               )}
             </div>
           )}
 
-          {/* Step 2: Deploy Agent */}
           {step === 2 && (
             <div>
-              <h2 className="text-xl font-bold mb-2">Deploy Agent</h2>
-              <p className="text-sm text-[var(--color-dim)] mb-6">Run this command on the server you want to monitor.</p>
+              <h2 className="text-xl font-bold mb-2">{t('onboarding.deploy_agent')}</h2>
+              <p className="text-sm text-[var(--color-dim)] mb-6">{t('onboarding.install_command')}</p>
               <div className="relative rounded-xl border border-[var(--color-border)] bg-[#0d0e14] p-4">
                 <button onClick={() => { navigator.clipboard.writeText(INSTALL_CMD.replace('RELAY_URL', relayUrl)); }}
                   className="absolute top-2 right-2 rounded-md bg-[var(--color-surface2)] px-2 py-1 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
@@ -215,32 +204,31 @@ export default function Onboarding() {
               </div>
               {polling && !agentFound && (
                 <div className="mt-4 flex items-center gap-3 text-sm text-[var(--color-dim)]">
-                  <Loader2 size={16} className="animate-spin" /> Waiting for agent to connect...
+                  <Loader2 size={16} className="animate-spin" /> {t('onboarding.waiting_agent')}
                 </div>
               )}
               {agentFound && (
                 <div className="mt-4 flex items-center gap-2 text-sm text-[var(--color-green)]">
-                  <Check size={16} /> Agent detected!
+                  <Check size={16} /> {t('onboarding.agent_connected')}
                 </div>
               )}
               <div className="mt-6 flex justify-between">
                 <button onClick={() => setStep(1)} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-                  <ArrowLeft size={16} /> Back
+                  <ArrowLeft size={16} /> {t('common.back')}
                 </button>
                 {agentFound && (
                   <button onClick={() => setStep(3)} className="flex items-center gap-2 rounded-xl bg-[var(--color-green)] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:opacity-90">
-                    Next: Create Policy <ArrowRight size={16} />
+                    {t('common.next')}: {t('onboarding.create_policy')} <ArrowRight size={16} />
                   </button>
                 )}
               </div>
             </div>
           )}
 
-          {/* Step 3: Policy */}
           {step === 3 && (
             <div>
-              <h2 className="text-xl font-bold mb-2">Create Policy</h2>
-              <p className="text-sm text-[var(--color-dim)] mb-6">Choose a security policy template to get started.</p>
+              <h2 className="text-xl font-bold mb-2">{t('onboarding.create_policy')}</h2>
+              <p className="text-sm text-[var(--color-dim)] mb-6">{t("policies.choose_template")}</p>
               <div className="space-y-3">
                 {TEMPLATES.map(tpl => (
                   <button key={tpl.id} onClick={() => setSelectedTemplate(tpl.id)}
@@ -264,7 +252,7 @@ export default function Onboarding() {
               </div>
               <div className="mt-6 flex justify-between">
                 <button onClick={() => setStep(2)} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-                  <ArrowLeft size={16} /> Back
+                  <ArrowLeft size={16} /> {t('common.back')}
                 </button>
                 <button onClick={savePolicy} disabled={saving}
                   className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[var(--color-accent-light)]">
@@ -275,26 +263,25 @@ export default function Onboarding() {
             </div>
           )}
 
-          {/* Step 4: Complete */}
           {step === 4 && (
             <div className="text-center">
               <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 text-4xl shadow-lg shadow-emerald-500/30">
                 <Check />
               </div>
-              <h2 className="text-2xl font-bold mb-3">You're all set!</h2>
-              <p className="text-[var(--color-dim)] mb-8">Your FlowLink Shield is configured and ready to protect your infrastructure.</p>
+              <h2 className="text-2xl font-bold mb-3">{t('onboarding.complete')}</h2>
+              <p className="text-[var(--color-dim)] mb-8">{t('onboarding.complete_desc')}</p>
               <div className="flex justify-center gap-3 mb-8">
-                <button onClick={() => navigate('/')} className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-light)]">Dashboard</button>
-                <button onClick={() => navigate('/agents')} className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-surface2)]">Agents</button>
-                <button onClick={() => navigate('/policies')} className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-surface2)]">Policies</button>
+                <button onClick={() => navigate('/')} className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-light)]">{t('nav.dashboard')}</button>
+                <button onClick={() => navigate('/agents')} className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-surface2)]">{t('nav.agents')}</button>
+                <button onClick={() => navigate('/policies')} className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-surface2)]">{t('nav.policies')}</button>
               </div>
               <label className="flex items-center justify-center gap-2 text-sm text-[var(--color-dim)] cursor-pointer">
                 <input type="checkbox" checked={dontShow} onChange={e => setDontShow(e.target.checked)}
                   className="rounded border-[var(--color-border)]" />
-                Don't show this wizard again
+                {t('onboarding.dont_show')}
               </label>
               <button onClick={finish} className="mt-6 w-full rounded-xl bg-[var(--color-accent)] px-6 py-3 text-sm font-semibold text-white transition-all hover:bg-[var(--color-accent-light)]">
-                Go to Dashboard
+                {t('onboarding.go_dashboard')}
               </button>
             </div>
           )}

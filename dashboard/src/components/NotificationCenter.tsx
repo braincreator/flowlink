@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Check, CheckCheck, Trash2, X, AlertTriangle, Bot, Shield, AlertCircle, Info } from 'lucide-react';
 import { useNotifications, type Notification } from '../hooks/useNotifications';
@@ -23,6 +24,7 @@ const typeColors: Record<string, string> = {
 };
 
 export default function NotificationCenter() {
+  const { t } = useTranslation();
   const { notifications, unread, addNotification, markAllRead, markRead, clearAll } = useNotifications();
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -87,14 +89,14 @@ export default function NotificationCenter() {
         <div className="absolute right-0 top-full mt-2 w-80 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl z-50 fade-in">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-            <h3 className="text-sm font-semibold">Notifications</h3>
+            <h3 className="text-sm font-semibold">{t('settings.notifications')}</h3>
             <div className="flex items-center gap-1">
               {unread > 0 && (
-                <button onClick={markAllRead} className="rounded-md p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-emerald-400 transition-colors" title="Mark all read">
+                <button onClick={markAllRead} className="rounded-md p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-emerald-400 transition-colors" title={t('common.mark_all_read')}>
                   <CheckCheck size={14} />
                 </button>
               )}
-              <button onClick={clearAll} className="rounded-md p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-rose-400 transition-colors" title="Clear all">
+              <button onClick={clearAll} className="rounded-md p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-rose-400 transition-colors" title={t('common.clear_all')}>
                 <Trash2 size={14} />
               </button>
             </div>
@@ -105,7 +107,7 @@ export default function NotificationCenter() {
             {recent.length === 0 ? (
               <div className="flex flex-col items-center py-8 text-center">
                 <Bell size={24} className="mb-2 text-[var(--color-dim)] opacity-40" />
-                <p className="text-sm text-[var(--color-dim)]">No notifications</p>
+                <p className="text-sm text-[var(--color-dim)]">{t('common.no_notifications')}</p>
               </div>
             ) : recent.map(n => {
               const Icon = typeIcons[n.type] || Info;

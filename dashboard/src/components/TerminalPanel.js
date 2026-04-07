@@ -1,10 +1,12 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Trash2, Download } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { SlidePanel } from './Layout';
 import { api } from '../api/client';
 export default function TerminalPanel({ open, onClose, agent, mode = 'shell' }) {
+    const { t } = useTranslation();
     const [output, setOutput] = useState([]);
     const termRef = useRef(null);
     const wsUrl = agent && mode === 'shell'
@@ -56,7 +58,7 @@ export default function TerminalPanel({ open, onClose, agent, mode = 'shell' }) 
         a.click();
         URL.revokeObjectURL(url);
     }, [output, mode, agent]);
-    return (_jsx(SlidePanel, { open: open, onClose: onClose, title: mode === 'shell' ? `Terminal: ${agent?.hostname || ''}` : 'Log Viewer', width: "w-[640px]", children: _jsxs("div", { className: "flex flex-col h-full -m-6", children: [_jsxs("div", { className: "flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2", children: [mode === 'shell' && (_jsx("span", { className: `text-xs font-medium ${connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : 'text-rose-400'}`, children: connected ? '● Connected' : reconnecting ? '◐ Reconnecting...' : '○ Disconnected' })), _jsxs("div", { className: "ml-auto flex items-center gap-1", children: [_jsxs("button", { onClick: handleClear, className: "flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Trash2, { size: 12 }), " Clear"] }), _jsxs("button", { onClick: handleDownload, className: "flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Download, { size: 12 }), " Download"] })] })] }), _jsx("div", { className: "flex-1 bg-[#0a0e1a]", style: { height: 'calc(100vh - 140px)' }, children: _jsx(TerminalWrapper, { output: output, onData: handleData, termRef: termRef }) })] }) }));
+    return (_jsx(SlidePanel, { open: open, onClose: onClose, title: mode === 'shell' ? `Terminal: ${agent?.hostname || ''}` : 'Log Viewer', width: "w-[640px]", children: _jsxs("div", { className: "flex flex-col h-full -m-6", children: [_jsxs("div", { className: "flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2", children: [mode === 'shell' && (_jsx("span", { className: `text-xs font-medium ${connected ? 'text-emerald-400' : reconnecting ? 'text-amber-400' : 'text-rose-400'}`, children: connected ? t('terminal.connected') : reconnecting ? t('terminal.reconnecting') : t('terminal.disconnected') })), _jsxs("div", { className: "ml-auto flex items-center gap-1", children: [_jsxs("button", { onClick: handleClear, className: "flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Trash2, { size: 12 }), " ", t('terminal.clear')] }), _jsxs("button", { onClick: handleDownload, className: "flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors", children: [_jsx(Download, { size: 12 }), " ", t('common.download')] })] })] }), _jsx("div", { className: "flex-1 bg-[#0a0e1a]", style: { height: 'calc(100vh - 140px)' }, children: _jsx(TerminalWrapper, { output: output, onData: handleData, termRef: termRef }) })] }) }));
 }
 // Inline wrapper that feeds output to xterm
 function TerminalWrapper({ output, onData, termRef }) {

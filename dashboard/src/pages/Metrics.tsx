@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Activity, Cpu, MemoryStick, CheckCircle, XCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { BarChart3, Cpu, MemoryStick, CheckCircle, XCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Badge, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
 
 export default function Metrics() {
+  const { t } = useTranslation();
   const { data: agents, loading: agentsLoading, error: agentsError, refresh: refreshAgents } = useApi(
     () => api.getAgents(),
     { pollMs: 15000 }
@@ -39,9 +41,9 @@ export default function Metrics() {
       {error && !agents && !promText && (
         <div className="flex flex-col items-center py-16 text-center">
           <div className="text-4xl mb-4 opacity-40">⚠️</div>
-          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
-          <button onClick={() => { refreshAgents(); refreshMetrics(); refreshHealth(); }} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
+          <button onClick={() => { refreshAgents(); refreshMetrics(); refreshHealth(); }} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>
         </div>
       )}
 
@@ -49,27 +51,27 @@ export default function Metrics() {
         <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           {healthStatus ? <CheckCircle size={20} className="text-emerald-400" /> : <XCircle size={20} className="text-amber-400" />}
           <div>
-            <div className="font-medium">Relay</div>
-            <div className="text-xs text-[var(--color-dim)]">{info.version ? `${info.version} · Connected` : 'Checking...'}</div>
+            <div className="font-medium">{t('metrics.relay')}</div>
+            <div className="text-xs text-[var(--color-dim)]">{info.version ? `${info.version} · Connected` : t('metrics.checking')}</div>
           </div>
-          <Badge variant={healthStatus ? 'green' : 'amber'} className="ml-auto">{healthStatus ? 'healthy' : 'offline'}</Badge>
+          <Badge variant={healthStatus ? 'green' : 'amber'} className="ml-auto">{healthStatus ? t('metrics.healthy') : t('metrics.offline')}</Badge>
         </div>
         <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           <CheckCircle size={20} className="text-emerald-400" />
           <div>
-            <div className="font-medium">SSE</div>
-            <div className="text-xs text-[var(--color-dim)]">Real-time events</div>
+            <div className="font-medium">{t('metrics.sse')}</div>
+            <div className="text-xs text-[var(--color-dim)]">{t('metrics.real_time_events')}</div>
           </div>
-          <Badge variant="green" className="ml-auto">ready</Badge>
+          <Badge variant="green" className="ml-auto">{t('metrics.ready')}</Badge>
         </div>
         <div className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
           {agentList.length > 0 && agentList.filter((a: any) => a.status === 'online').length === agentList.length ? <CheckCircle size={20} className="text-emerald-400" /> : <XCircle size={20} className="text-amber-400" />}
           <div>
-            <div className="font-medium">Agents</div>
+            <div className="font-medium">{t('metrics.agents')}</div>
             <div className="text-xs text-[var(--color-dim)]">{agentList.filter((a: any) => a.status === 'online').length}/{agentList.length} online</div>
           </div>
           <Badge variant={agentList.length > 0 && agentList.filter((a: any) => a.status === 'online').length === agentList.length ? 'green' : 'amber'} className="ml-auto">
-            {agentList.length > 0 && agentList.filter((a: any) => a.status === 'online').length === agentList.length ? 'healthy' : 'degraded'}
+            {agentList.length > 0 && agentList.filter((a: any) => a.status === 'online').length === agentList.length ? t('metrics.healthy') : t('metrics.degraded')}
           </Badge>
         </div>
       </div>
@@ -78,7 +80,7 @@ export default function Metrics() {
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 mb-4">
             <Cpu size={16} className="text-[var(--color-accent)]" />
-            <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">CPU Usage</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('metrics.cpu')}</h3>
             <span className="ml-auto text-lg font-bold">{info.cpu_usage ?? 0}%</span>
           </div>
           <ResponsiveContainer width="100%" height={160}>
@@ -89,12 +91,12 @@ export default function Metrics() {
               <Line type="monotone" dataKey="cpu" stroke="#6366f1" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
-          <div className="flex items-center justify-center py-4 text-sm text-[var(--color-dim)] opacity-60">No time-series data available</div>
+          <div className="flex items-center justify-center py-4 text-sm text-[var(--color-dim)] opacity-60">{t('common.no_time_series_short')}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 mb-4">
             <MemoryStick size={16} className="text-emerald-400" />
-            <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Memory Usage</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('metrics.memory')}</h3>
             <span className="ml-auto text-lg font-bold">{info.memory_usage ?? 0}%</span>
           </div>
           <ResponsiveContainer width="100%" height={160}>
@@ -105,14 +107,14 @@ export default function Metrics() {
               <Line type="monotone" dataKey="mem" stroke="#10b981" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
-          <div className="flex items-center justify-center py-4 text-sm text-[var(--color-dim)] opacity-60">No time-series data available</div>
+          <div className="flex items-center justify-center py-4 text-sm text-[var(--color-dim)] opacity-60">{t('common.no_time_series_short')}</div>
         </div>
       </div>
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Agent Resources</h3>
+        <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('metrics.agent_resources')}</h3>
         {agentList.filter((a: any) => a.status === 'online').length === 0 ? (
-          <EmptyState icon={<Cpu size={48} />} title="No online agents" description="Agent resource data will appear here" />
+          <EmptyState icon={<Cpu size={48} />} title={t('common.no_online_agents')} description="{t('metrics.agent_resource_desc')}" />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             {agentList.filter((a: any) => a.status === 'online').map((a: any) => (
@@ -144,14 +146,14 @@ export default function Metrics() {
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <div className="flex items-center gap-2 mb-4">
-          <Activity size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Prometheus Metrics</h3>
+          <BarChart3 size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('metrics.prometheus')}</h3>
         </div>
         {metricsError && !promText ? (
           <div className="flex items-center justify-center py-8 text-sm text-[var(--color-dim)] opacity-60">{metricsError}</div>
         ) : (
           <pre className="rounded-xl bg-[#0d0e14] p-4 font-mono text-xs leading-relaxed text-[var(--color-dim)] overflow-x-auto max-h-96 overflow-y-auto">
-            {promText || 'No metrics data available'}
+            {promText || t('metrics.no_metrics')}
           </pre>
         )}
       </div>

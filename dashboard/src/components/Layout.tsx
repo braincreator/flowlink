@@ -1,4 +1,6 @@
-import { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import { X, Copy, Check, AlertTriangle } from 'lucide-react';
 import type { ToastMessage } from '../types';
 
 export function StatCard({ label, value, trend, sparkline, icon, color = 'accent' }: {
@@ -39,7 +41,7 @@ export function Badge({ children, variant = 'default', className = '' }: { child
   return <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${styles[variant]} ${className}`}>{children}</span>;
 }
 
-export function DataTable<T extends Record<string, any>>({ columns, data, onRowClick, emptyText = 'No data', searchPlaceholder }: {
+export function DataTable<T extends Record<string, any>>({ columns, data, onRowClick, emptyText, searchPlaceholder }: {
   columns: { key: string; label: string; render?: (row: T) => ReactNode; className?: string }[];
   data: T[]; onRowClick?: (row: T) => void; emptyText?: string; searchPlaceholder?: string;
 }) {
@@ -47,6 +49,7 @@ export function DataTable<T extends Record<string, any>>({ columns, data, onRowC
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(0);
+  const { t } = useTranslation();
   const pageSize = 10;
 
   const filtered = data.filter(row =>
@@ -110,21 +113,19 @@ export function DataTable<T extends Record<string, any>>({ columns, data, onRowC
       </div>
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-between text-sm text-[var(--color-dim)]">
-          <span>{filtered.length} results</span>
+          <span>{filtered.length} {t('common.results')}</span>
           <div className="flex gap-2">
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs hover:bg-[var(--color-surface2)] disabled:opacity-30 transition-colors">Prev</button>
+              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs hover:bg-[var(--color-surface2)] disabled:opacity-30 transition-colors">{t('common.prev')}</button>
             <span className="flex items-center px-2">{page + 1} / {totalPages}</span>
             <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs hover:bg-[var(--color-surface2)] disabled:opacity-30 transition-colors">Next</button>
+              className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs hover:bg-[var(--color-surface2)] disabled:opacity-30 transition-colors">{t('common.next')}</button>
           </div>
         </div>
       )}
     </div>
   );
 }
-
-import { useState } from 'react';
 
 export function Modal({ open, onClose, title, children, actions }: {
   open: boolean; onClose: () => void; title: string; children: ReactNode;
@@ -137,7 +138,7 @@ export function Modal({ open, onClose, title, children, actions }: {
       <div className="relative w-full max-w-lg rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl fade-in" onClick={e => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <button onClick={onClose} className="rounded-lg p-1 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">✕</button>
+          <button onClick={onClose} className="rounded-lg p-1 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"><X size={16} /></button>
         </div>
         <div className="space-y-4">{children}</div>
         {actions && <div className="mt-6 flex justify-end gap-3">{actions}</div>}
@@ -156,7 +157,7 @@ export function SlidePanel({ open, onClose, title, children, width = 'w-[480px]'
       <div className={`absolute right-0 top-0 bottom-0 ${width} overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl slide-in-right`} onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-4">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">✕</button>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"><X size={16} /></button>
         </div>
         <div className="p-6">{children}</div>
       </div>
@@ -184,23 +185,25 @@ export function RiskGauge({ score, size = 100 }: { score: number; size?: number 
 
 export function TerminalOutput({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation();
   const copy = () => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); };
   return (
     <div className="relative rounded-xl border border-[var(--color-border)] bg-[#0d0e14] p-4 font-mono text-sm">
-      <button onClick={copy} className="absolute top-2 right-2 rounded-md bg-[var(--color-surface2)] px-2 py-1 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
-        {copied ? '✓ Copied' : 'Copy'}
+      <button onClick={copy} className="absolute top-2 right-2 flex items-center gap-1 rounded-md bg-[var(--color-surface2)] px-2 py-1 text-xs text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors">
+        {copied ? <><Check size={12} /> {t('common.copied')}</> : <><Copy size={12} /> {t('common.copy')}</>}
       </button>
       <pre className="whitespace-pre-wrap break-all text-[var(--color-text)] max-h-80 overflow-auto">{text}</pre>
     </div>
   );
 }
 
-export function EmptyState({ icon, title, description }: { icon: ReactNode; title: string; description?: string }) {
+export function EmptyState({ icon, title, description, action }: { icon: ReactNode; title: string; description?: string; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="mb-4 text-4xl opacity-40">{icon}</div>
+      <div className="mb-4 opacity-30">{icon}</div>
       <h3 className="text-lg font-semibold text-[var(--color-dim)]">{title}</h3>
       {description && <p className="mt-2 max-w-sm text-sm text-[var(--color-dim)] opacity-70">{description}</p>}
+      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }
@@ -216,7 +219,7 @@ export function LoadingSkeleton({ lines = 3 }: { lines?: number }) {
 }
 
 export function Toast({ toasts, onRemove }: { toasts: ToastMessage[]; onRemove: (id: string) => void }) {
-  const icons: Record<string, string> = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
+  const icons: Record<string, ReactNode> = { success: <Check size={14} className="text-emerald-400" />, error: <X size={14} className="text-rose-400" />, info: <AlertTriangle size={14} className="text-blue-400" />, warning: <AlertTriangle size={14} className="text-amber-400" /> };
   const colors: Record<string, string> = {
     success: 'border-emerald-500/40 bg-emerald-500/10',
     error: 'border-rose-500/40 bg-rose-500/10',
@@ -225,14 +228,14 @@ export function Toast({ toasts, onRemove }: { toasts: ToastMessage[]; onRemove: 
   };
   return (
     <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2">
-      {toasts.map(t => (
-        <div key={t.id} className={`flex items-center gap-3 rounded-xl border px-4 py-3 shadow-lg fade-in ${colors[t.type]}`}>
-          <span className="text-lg">{icons[t.type]}</span>
+      {toasts.map(toast => (
+        <div key={toast.id} className={`flex items-center gap-3 rounded-xl border px-4 py-3 shadow-lg fade-in ${colors[toast.type]}`}>
+          {icons[toast.type]}
           <div>
-            <div className="text-sm font-medium">{t.title}</div>
-            {t.message && <div className="text-xs text-[var(--color-dim)]">{t.message}</div>}
+            <div className="text-sm font-medium">{toast.title}</div>
+            {toast.message && <div className="text-xs text-[var(--color-dim)]">{toast.message}</div>}
           </div>
-          <button onClick={() => onRemove(t.id)} className="ml-2 text-[var(--color-dim)] hover:text-[var(--color-text)]">✕</button>
+          <button onClick={() => onRemove(toast.id)} className="ml-2 text-[var(--color-dim)] hover:text-[var(--color-text)]"><X size={14} /></button>
         </div>
       ))}
     </div>

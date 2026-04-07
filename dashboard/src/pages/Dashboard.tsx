@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Shield, Bot, AlertTriangle, Activity, Clock, Terminal } from 'lucide-react';
+import { Shield, Bot, AlertTriangle, Activity, Clock, TerminalSquare } from 'lucide-react';
 import { StatCard, Badge, LoadingSkeleton } from '../components/Layout';
 import { DashboardWidgets, type WidgetDef } from '../components/DashboardWidgets';
 import { useApi, useSSE } from '../hooks/useApi';
@@ -10,6 +11,7 @@ import { api } from '../api/client';
 const PIE_COLORS = ['#f43f5e', '#f59e0b', '#6366f1'];
 
 export default function Dashboard() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: agents, loading: agentsLoading, error: agentsError, refresh: refreshAgents } = useApi(
     () => api.getAgents(),
@@ -54,43 +56,43 @@ export default function Dashboard() {
 
   const widgets: WidgetDef[] = [
     {
-      id: 'stat-cards', title: 'Statistics', defaultOrder: 0,
+      id: 'stat-cards', title: t('dashboard.statistics'), defaultOrder: 0,
       render: () => (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Total Agents" value={`${onlineAgents}/${totalAgents}`} trend={{ value: 12, label: 'this week' }} icon={<Bot size={24} />} color="accent" />
-          <StatCard label="Active Alerts" value={pendingAlerts.length} trend={{ value: -8, label: 'vs yesterday' }} icon={<AlertTriangle size={24} />} color="red" />
-          <StatCard label="Commands Today" value={((s as any).commands_today || 0).toLocaleString()} trend={{ value: 5, label: 'vs yesterday' }} icon={<Activity size={24} />} color="green" />
-          <StatCard label="Uptime" value={`${(s as any).uptime_pct || 0}%`} icon={<Clock size={24} />} color="blue" />
+          <StatCard label={t('dashboard.agents_online')} value={`${onlineAgents}/${totalAgents}`} trend={{ value: 12, label: t('dashboard.this_week') }} icon={<Bot size={24} />} color="accent" />
+          <StatCard label={t('dashboard.active_alerts')} value={pendingAlerts.length} trend={{ value: -8, label: t('dashboard.vs_yesterday') }} icon={<AlertTriangle size={24} />} color="red" />
+          <StatCard label={t('dashboard.commands_today')} value={((s as any).commands_today || 0).toLocaleString()} trend={{ value: 5, label: 'vs yesterday' }} icon={<Activity size={24} />} color="green" />
+          <StatCard label={t('dashboard.uptime')} value={`${(s as any).uptime_pct || 0}%`} icon={<Clock size={24} />} color="blue" />
         </div>
       ),
     },
     {
-      id: 'quick-actions', title: 'Quick Actions', defaultOrder: 1,
+      id: 'quick-actions', title: t('dashboard.quick_actions'), defaultOrder: 1,
       render: () => (
         <div>
-          <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Quick Actions</h3>
+          <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('dashboard.quick_actions')}</h3>
           <div className="flex flex-wrap gap-3">
             <button onClick={() => navigate('/shield')} className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)] hover:shadow-lg hover:shadow-indigo-500/20">
-              <Shield size={16} /> Approve Pending ({pendingAlerts.length})
+              <Shield size={16} /> {t('dashboard.approve_pending')} ({pendingAlerts.length})
             </button>
             <button onClick={() => navigate('/shield')} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-              <AlertTriangle size={16} /> View Alerts
+              <AlertTriangle size={16} /> {t('dashboard.view_alerts')}
             </button>
             <button onClick={() => navigate('/agents')} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-              <Bot size={16} /> Deploy Agent
+              <Bot size={16} /> {t('dashboard.deploy_agent')}
             </button>
             <button onClick={() => navigate('/terminal')} className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
-              <Terminal size={16} /> Open Terminal
+              <TerminalSquare size={16} /> {t('nav.terminal')}
             </button>
           </div>
         </div>
       ),
     },
     {
-      id: 'commands-chart', title: 'Commands (24h)', defaultOrder: 2, colSpan: 2,
+      id: 'commands-chart', title: t('dashboard.commands_24h'), defaultOrder: 2, colSpan: 2,
       render: () => (
         <div>
-          <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Commands — Last 24h</h3>
+          <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('dashboard.last_24h')}</h3>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={[]}>
               <defs><linearGradient id="cmdGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} /><stop offset="100%" stopColor="#6366f1" stopOpacity={0} /></linearGradient></defs>
@@ -100,15 +102,15 @@ export default function Dashboard() {
               <Area type="monotone" dataKey="commands" stroke="#6366f1" fill="url(#cmdGrad)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
-          <div className="flex items-center justify-center py-8 text-sm text-[var(--color-dim)] opacity-60">No time-series data available yet</div>
+          <div className="flex items-center justify-center py-8 text-sm text-[var(--color-dim)] opacity-60">{t('common.no_time_series')}</div>
         </div>
       ),
     },
     {
-      id: 'risk-pie', title: 'Shield Status', defaultOrder: 3,
+      id: 'risk-pie', title: t('dashboard.shield_status'), defaultOrder: 3,
       render: () => (
         <div>
-          <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Shield Status</h3>
+          <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('dashboard.shield_status')}</h3>
           <div className="flex items-center justify-center">
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
@@ -128,12 +130,12 @@ export default function Dashboard() {
       ),
     },
     {
-      id: 'activity-feed', title: 'Recent Activity', defaultOrder: 4,
+      id: 'activity-feed', title: t('dashboard.activity_feed'), defaultOrder: 4,
       render: () => (
         <div>
-          <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Recent Activity {sseConnected && <span className="ml-2 text-emerald-400">● Live</span>}</h3>
+          <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('dashboard.activity_feed')} {sseConnected && <span className="ml-2 text-emerald-400">● Live</span>}</h3>
           {recentEvents.length === 0 ? (
-            <div className="flex items-center justify-center py-12 text-sm text-[var(--color-dim)] opacity-60">No recent activity</div>
+            <div className="flex items-center justify-center py-12 text-sm text-[var(--color-dim)] opacity-60">{t('common.no_recent_activity')}</div>
           ) : (
             <div className="space-y-2 max-h-[360px] overflow-y-auto">
               {recentEvents.map((ev: any, i: number) => {
@@ -171,9 +173,9 @@ export default function Dashboard() {
       {error && !agents && !shieldStats && (
         <div className="flex flex-col items-center py-16 text-center">
           <div className="text-4xl mb-4 opacity-40">⚠️</div>
-          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
-          <button onClick={() => { refreshAgents(); refreshShield(); refreshAlerts(); }} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
+          <button onClick={() => { refreshAgents(); refreshShield(); refreshAlerts(); }} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>
         </div>
       )}
 

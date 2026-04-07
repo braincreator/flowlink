@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Badge, DataTable, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
@@ -6,6 +7,7 @@ import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
 
 export default function Sessions() {
+  const { t } = useTranslation();
   const [replaySession, setReplaySession] = useState<any>(null);
 
   const { data, loading, error, refresh } = useApi<any[]>(
@@ -27,31 +29,31 @@ export default function Sessions() {
       {error && !data && (
         <div className="flex flex-col items-center py-16 text-center">
           <div className="text-4xl mb-4 opacity-40">⚠️</div>
-          <h3 className="text-lg font-semibold text-[var(--color-dim)]">Unable to connect to relay</h3>
+          <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
-          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">Retry</button>
+          <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>
         </div>
       )}
 
       <div className="grid grid-cols-3 gap-4">
         <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Active Now</div>
+          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">{t('sessions.active')}</div>
           <div className="mt-1 text-2xl font-bold text-emerald-400">{activeSessions.length}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Total Today</div>
+          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">{t('sessions.total_today')}</div>
           <div className="mt-1 text-2xl font-bold">{sessions.length}</div>
         </div>
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">Avg Commands</div>
+          <div className="text-xs uppercase tracking-wider text-[var(--color-dim)]">{t('sessions.avg_commands')}</div>
           <div className="mt-1 text-2xl font-bold">{sessions.length > 0 ? Math.round(sessions.reduce((a: number, s: any) => a + (s.commands_count || 0), 0) / sessions.length) : 0}</div>
         </div>
       </div>
 
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Session Duration (min)</h3>
+        <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('sessions.duration')}</h3>
         {durationData.length === 0 ? (
-          <div className="flex items-center justify-center py-8 text-sm text-[var(--color-dim)] opacity-60">No session data available</div>
+          <div className="flex items-center justify-center py-8 text-sm text-[var(--color-dim)] opacity-60">{t('sessions.no_sessions')}</div>
         ) : (
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={durationData}>
@@ -66,14 +68,14 @@ export default function Sessions() {
 
       <DataTable
         columns={[
-          { key: 'id', label: 'Session', render: (r: any) => <span className="font-mono text-xs">{r.id}</span> },
-          { key: 'user', label: 'User', render: (r: any) => r.user || '—' },
-          { key: 'agent_id', label: 'Agent', render: (r: any) => <span className="font-mono text-xs text-[var(--color-dim)]">{r.agent_id}</span> },
-          { key: 'origin', label: 'Origin', render: (r: any) => r.origin ? <span className="font-mono text-xs">{r.origin}</span> : <span className="text-[var(--color-dim)]">—</span> },
-          { key: 'terminal', label: 'Terminal', render: (r: any) => r.terminal ? <span className="text-xs text-[var(--color-dim)]">{r.terminal}</span> : <span className="text-[var(--color-dim)]">—</span> },
-          { key: 'commands_count', label: 'Commands', render: (r: any) => r.commands_count ?? '—' },
-          { key: 'duration_ms', label: 'Duration', render: (r: any) => r.duration_ms ? <span className="text-xs">{Math.round(r.duration_ms / 60000)}m</span> : <span className="text-[var(--color-dim)]">—</span> },
-          { key: 'status', label: 'Status', render: (r: any) => (
+          { key: 'id', label: t('sessions.session'), render: (r: any) => <span className="font-mono text-xs">{r.id}</span> },
+          { key: 'user', label: t('sessions.user'), render: (r: any) => r.user || '—' },
+          { key: 'agent_id', label: t('audit.agent'), render: (r: any) => <span className="font-mono text-xs text-[var(--color-dim)]">{r.agent_id}</span> },
+          { key: 'origin', label: t('sessions.origin'), render: (r: any) => r.origin ? <span className="font-mono text-xs">{r.origin}</span> : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'terminal', label: t('sessions.terminal'), render: (r: any) => r.terminal ? <span className="text-xs text-[var(--color-dim)]">{r.terminal}</span> : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'commands_count', label: t('sessions.commands_count'), render: (r: any) => r.commands_count ?? '—' },
+          { key: 'duration_ms', label: t('sessions.duration'), render: (r: any) => r.duration_ms ? <span className="text-xs">{Math.round(r.duration_ms / 60000)}m</span> : <span className="text-[var(--color-dim)]">—</span> },
+          { key: 'status', label: t('agents.status'), render: (r: any) => (
             <Badge variant={r.status === 'active' ? 'green' : 'default'}>
               <span className={`inline-block h-1.5 w-1.5 rounded-full ${r.status === 'active' ? 'bg-emerald-400 pulse-dot' : ''}`} />
               {r.status}
@@ -81,17 +83,17 @@ export default function Sessions() {
           )},
           { key: 'replay', label: '', render: (r: any) => r.status === 'ended' ? (
             <button onClick={(e) => { e.stopPropagation(); setReplaySession(r); }} className="flex items-center gap-1 rounded-lg bg-[var(--color-accent)]/15 px-2.5 py-1 text-xs font-medium text-[var(--color-accent-light)] hover:bg-[var(--color-accent)]/25 transition-colors">
-              <Play size={12} /> Replay
+              <Play size={12} /> {t('sessions.replay')}
             </button>
           ) : null },
         ]}
-        data={sessions} searchPlaceholder="Search sessions..."
+        data={sessions} searchPlaceholder={t('sessions.search_sessions')}
       />
 
-      <Modal open={!!replaySession} onClose={() => setReplaySession(null)} title={`Session Replay — ${replaySession?.id}`}>
+      <Modal open={!!replaySession} onClose={() => setReplaySession(null)} title={`${t('sessions.session_replay')} — ${replaySession?.id}`}>
         <div className="rounded-xl bg-[#0d0e14] p-4 font-mono text-sm min-h-[300px]">
-          <div className="text-[var(--color-dim)]">Session replay placeholder</div>
-          <div className="mt-2 text-xs text-[var(--color-dim)]">asciinema-player integration point</div>
+          <div className="text-[var(--color-dim)]">{t('sessions.replay_placeholder')}</div>
+          <div className="mt-2 text-xs text-[var(--color-dim)]">{t('sessions.asciinema_integration')}</div>
         </div>
       </Modal>
     </div>
