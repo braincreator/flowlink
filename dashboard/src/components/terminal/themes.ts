@@ -1,0 +1,295 @@
+export interface TerminalTheme {
+  id: string;
+  name: string;
+  description: string;
+  colors: {
+    background: string;
+    foreground: string;
+    cursor: string;
+    cursorAccent: string;
+    selectionBackground: string;
+    black: string;
+    red: string;
+    green: string;
+    yellow: string;
+    blue: string;
+    magenta: string;
+    cyan: string;
+    white: string;
+    brightBlack: string;
+    brightRed: string;
+    brightGreen: string;
+    brightYellow: string;
+    brightBlue: string;
+    brightMagenta: string;
+    brightCyan: string;
+    brightWhite: string;
+  };
+}
+
+export const themes: TerminalTheme[] = [
+  {
+    id: 'flowlink-dark',
+    name: 'FlowLink Dark',
+    description: 'Default dashboard theme',
+    colors: {
+      background: '#0a0e1a', foreground: '#e1e4ed', cursor: '#6366f1', cursorAccent: '#0a0e1a',
+      selectionBackground: '#6366f13d',
+      black: '#3b3d57', red: '#f43f5e', green: '#34d399', yellow: '#fbbf24',
+      blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e1e4ed',
+      brightBlack: '#6b7194', brightRed: '#fb7185', brightGreen: '#6ee7b7', brightYellow: '#fde68a',
+      brightBlue: '#93c5fd', brightMagenta: '#d8b4fe', brightCyan: '#67e8f9', brightWhite: '#f1f5f9',
+    },
+  },
+  {
+    id: 'monokai-pro',
+    name: 'Monokai Pro',
+    description: 'Classic developer favorite',
+    colors: {
+      background: '#2d2a2e', foreground: '#fcfcfa', cursor: '#f9d849', cursorAccent: '#2d2a2e',
+      selectionBackground: '#49424a',
+      black: '#403e41', red: '#ff6188', green: '#a9dc76', yellow: '#ffd866',
+      blue: '#78dce8', magenta: '#ab9df2', cyan: '#78dce8', white: '#fcfcfa',
+      brightBlack: '#727072', brightRed: '#ff6188', brightGreen: '#a9dc76', brightYellow: '#ffd866',
+      brightBlue: '#78dce8', brightMagenta: '#ab9df2', brightCyan: '#78dce8', brightWhite: '#fcfcfa',
+    },
+  },
+  {
+    id: 'dracula',
+    name: 'Dracula',
+    description: 'Popular dark theme',
+    colors: {
+      background: '#282a36', foreground: '#f8f8f2', cursor: '#f8f8f2', cursorAccent: '#282a36',
+      selectionBackground: '#44475a',
+      black: '#21222c', red: '#ff5555', green: '#50fa7b', yellow: '#f1fa8c',
+      blue: '#bd93f9', magenta: '#ff79c6', cyan: '#8be9fd', white: '#f8f8f2',
+      brightBlack: '#6272a4', brightRed: '#ff6e6e', brightGreen: '#69ff94', brightYellow: '#ffffa5',
+      brightBlue: '#d6acff', brightMagenta: '#ff92df', brightCyan: '#a4ffff', brightWhite: '#ffffff',
+    },
+  },
+  {
+    id: 'nord',
+    name: 'Nord',
+    description: 'Arctic blue tones',
+    colors: {
+      background: '#2e3440', foreground: '#d8dee9', cursor: '#88c0d0', cursorAccent: '#2e3440',
+      selectionBackground: '#434c5e',
+      black: '#3b4252', red: '#bf616a', green: '#a3be8c', yellow: '#ebcb8b',
+      blue: '#81a1c1', magenta: '#b48ead', cyan: '#88c0d0', white: '#e5e9f0',
+      brightBlack: '#4c566a', brightRed: '#d08770', brightGreen: '#8fbcbb', brightYellow: '#ebcb8b',
+      brightBlue: '#81a1c1', brightMagenta: '#b48ead', brightCyan: '#8fbcbb', brightWhite: '#eceff4',
+    },
+  },
+  {
+    id: 'solarized-dark',
+    name: 'Solarized Dark',
+    description: 'Warm earth tones',
+    colors: {
+      background: '#002b36', foreground: '#839496', cursor: '#93a1a1', cursorAccent: '#002b36',
+      selectionBackground: '#073642',
+      black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900',
+      blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+      brightBlack: '#586e75', brightRed: '#cb4b16', brightGreen: '#859900', brightYellow: '#b58900',
+      brightBlue: '#268bd2', brightMagenta: '#d33682', brightCyan: '#2aa198', brightWhite: '#fdf6e3',
+    },
+  },
+  {
+    id: 'tokyo-night',
+    name: 'Tokyo Night',
+    description: 'Modern neon aesthetic',
+    colors: {
+      background: '#1a1b26', foreground: '#a9b1d6', cursor: '#c0caf5', cursorAccent: '#1a1b26',
+      selectionBackground: '#283457',
+      black: '#15161e', red: '#f7768e', green: '#9ece6a', yellow: '#e0af68',
+      blue: '#7aa2f7', magenta: '#ad8ee6', cyan: '#449dab', white: '#a9b1d6',
+      brightBlack: '#414868', brightRed: '#f7768e', brightGreen: '#9ece6a', brightYellow: '#e0af68',
+      brightBlue: '#7aa2f7', brightMagenta: '#bb9af7', brightCyan: '#7dcfff', brightWhite: '#c0caf5',
+    },
+  },
+  {
+    id: 'catppuccin-mocha',
+    name: 'Catppuccin Mocha',
+    description: 'Soothing pastel dark',
+    colors: {
+      background: '#1e1e2e', foreground: '#cdd6f4', cursor: '#f5e0dc', cursorAccent: '#1e1e2e',
+      selectionBackground: '#45475a',
+      black: '#45475a', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af',
+      blue: '#89b4fa', magenta: '#f5c2e7', cyan: '#94e2d5', white: '#bac2de',
+      brightBlack: '#585b70', brightRed: '#f38ba8', brightGreen: '#a6e3a1', brightYellow: '#f9e2af',
+      brightBlue: '#89b4fa', brightMagenta: '#f5c2e7', brightCyan: '#94e2d5', brightWhite: '#a6adc8',
+    },
+  },
+  {
+    id: 'gruvbox-dark',
+    name: 'Gruvbox Dark',
+    description: 'Retro warm palette',
+    colors: {
+      background: '#282828', foreground: '#ebdbb2', cursor: '#ebdbb2', cursorAccent: '#282828',
+      selectionBackground: '#504945',
+      black: '#282828', red: '#cc241d', green: '#98971a', yellow: '#d79921',
+      blue: '#458588', magenta: '#b16286', cyan: '#689d6a', white: '#a89984',
+      brightBlack: '#928374', brightRed: '#fb4934', brightGreen: '#b8bb26', brightYellow: '#fabd2f',
+      brightBlue: '#83a598', brightMagenta: '#d3869b', brightCyan: '#8ec07c', brightWhite: '#ebdbb2',
+    },
+  },
+  {
+    id: 'one-dark-pro',
+    name: 'One Dark Pro',
+    description: 'VS Code inspired',
+    colors: {
+      background: '#282c34', foreground: '#abb2bf', cursor: '#528bff', cursorAccent: '#282c34',
+      selectionBackground: '#3e4451',
+      black: '#282c34', red: '#e06c75', green: '#98c379', yellow: '#e5c07b',
+      blue: '#61afef', magenta: '#c678dd', cyan: '#56b6c2', white: '#abb2bf',
+      brightBlack: '#5c6370', brightRed: '#e06c75', brightGreen: '#98c379', brightYellow: '#e5c07b',
+      brightBlue: '#61afef', brightMagenta: '#c678dd', brightCyan: '#56b6c2', brightWhite: '#ffffff',
+    },
+  },
+  {
+    id: 'github-dark',
+    name: 'GitHub Dark',
+    description: 'Clean and modern',
+    colors: {
+      background: '#0d1117', foreground: '#e6edf3', cursor: '#e6edf3', cursorAccent: '#0d1117',
+      selectionBackground: '#264f78',
+      black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
+      blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39d353', white: '#e6edf3',
+      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341',
+      brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d364', brightWhite: '#ffffff',
+    },
+  },
+  {
+    id: 'light',
+    name: 'Light',
+    description: 'For bright environments',
+    colors: {
+      background: '#fafafa', foreground: '#24292e', cursor: '#24292e', cursorAccent: '#fafafa',
+      selectionBackground: '#b3d7ff',
+      black: '#24292e', red: '#d73a49', green: '#28a745', yellow: '#dbab09',
+      blue: '#0366d6', magenta: '#5a32a3', cyan: '#0598bc', white: '#6a737d',
+      brightBlack: '#586069', brightRed: '#cb2431', brightGreen: '#22863a', brightYellow: '#b08800',
+      brightBlue: '#005cc5', brightMagenta: '#6f42c1', brightCyan: '#3192aa', brightWhite: '#24292e',
+    },
+  },
+  {
+    id: 'solarized-light',
+    name: 'Solarized Light',
+    description: 'Warm light tones',
+    colors: {
+      background: '#fdf6e3', foreground: '#657b83', cursor: '#586e75', cursorAccent: '#fdf6e3',
+      selectionBackground: '#eee8d5',
+      black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900',
+      blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+      brightBlack: '#586e75', brightRed: '#cb4b16', brightGreen: '#859900', brightYellow: '#b58900',
+      brightBlue: '#268bd2', brightMagenta: '#d33682', brightCyan: '#2aa198', brightWhite: '#fdf6e3',
+    },
+  },
+  {
+    id: 'alabaster',
+    name: 'Alabaster',
+    description: 'Clean minimal light',
+    colors: {
+      background: '#f7f7f7', foreground: '#434343', cursor: '#434343', cursorAccent: '#f7f7f7',
+      selectionBackground: '#d1d1d1',
+      black: '#434343', red: '#a5222d', green: '#3e8f3e', yellow: '#b58900',
+      blue: '#2f6fa7', magenta: '#7b3f9e', cyan: '#2d8f8f', white: '#999999',
+      brightBlack: '#666666', brightRed: '#c0392b', brightGreen: '#27ae60', brightYellow: '#d4a017',
+      brightBlue: '#2980b9', brightMagenta: '#8e44ad', brightCyan: '#16a085', brightWhite: '#434343',
+    },
+  },
+  {
+    id: 'rose-pine',
+    name: 'Rosé Pine',
+    description: 'Elegant muted warmth',
+    colors: {
+      background: '#191724', foreground: '#e0def4', cursor: '#e0def4', cursorAccent: '#191724',
+      selectionBackground: '#26233a',
+      black: '#26233a', red: '#eb6f92', green: '#31748f', yellow: '#f6c177',
+      blue: '#9ccfd8', magenta: '#c4a7e7', cyan: '#ebbcba', white: '#6e6a86',
+      brightBlack: '#524f67', brightRed: '#eb6f92', brightGreen: '#31748f', brightYellow: '#f6c177',
+      brightBlue: '#9ccfd8', brightMagenta: '#c4a7e7', brightCyan: '#9ccfd8', brightWhite: '#e0def4',
+    },
+  },
+  {
+    id: 'kanagawa',
+    name: 'Kanagawa',
+    description: 'Japanese wave-inspired',
+    colors: {
+      background: '#1f1f28', foreground: '#dcdfd7', cursor: '#c0caf5', cursorAccent: '#1f1f28',
+      selectionBackground: '#2a2a3a',
+      black: '#16161d', red: '#c34043', green: '#76946a', yellow: '#e6c384',
+      blue: '#7e9cd8', magenta: '#957fb8', cyan: '#6a9589', white: '#a89984',
+      brightBlack: '#54546d', brightRed: '#c34043', brightGreen: '#76946a', brightYellow: '#e6c384',
+      brightBlue: '#7e9cd8', brightMagenta: '#b48ead', brightCyan: '#7aa89f', brightWhite: '#dcdfd7',
+    },
+  },
+  {
+    id: 'everforest-dark',
+    name: 'Everforest',
+    description: 'Calming forest tones',
+    colors: {
+      background: '#2d353b', foreground: '#d3c6aa', cursor: '#d3c6aa', cursorAccent: '#2d353b',
+      selectionBackground: '#3d484e',
+      black: '#475258', red: '#e67e80', green: '#a7c080', yellow: '#dbbc7f',
+      blue: '#7fbbb3', magenta: '#b6bbc4', cyan: '#83c092', white: '#d3c6aa',
+      brightBlack: '#475258', brightRed: '#e67e80', brightGreen: '#a7c080', brightYellow: '#dbbc7f',
+      brightBlue: '#7daea3', brightMagenta: '#b6bbc4', brightCyan: '#83c092', brightWhite: '#d3c6aa',
+    },
+  },
+  {
+    id: 'matrix',
+    name: 'Matrix',
+    description: 'Green phosphor CRT',
+    colors: {
+      background: '#0a0f0a', foreground: '#00ff41', cursor: '#00ff41', cursorAccent: '#0a0f0a',
+      selectionBackground: '#003b00',
+      black: '#003b00', red: '#00ff41', green: '#00ff41', yellow: '#00ff41',
+      blue: '#00aa33', magenta: '#00ff41', cyan: '#00ff41', white: '#00cc33',
+      brightBlack: '#005500', brightRed: '#00ff41', brightGreen: '#00ff41', brightYellow: '#00ff41',
+      brightBlue: '#00cc33', brightMagenta: '#00ff41', brightCyan: '#00ff41', brightWhite: '#00ff41',
+    },
+  },
+  {
+    id: 'papercolor-light',
+    name: 'PaperColor Light',
+    description: 'Paper-like warmth',
+    colors: {
+      background: '#eeeeee', foreground: '#444444', cursor: '#444444', cursorAccent: '#eeeeee',
+      selectionBackground: '#d0d0d0',
+      black: '#444444', red: '#b7372b', green: '#4e8f4e', yellow: '#c5a022',
+      blue: '#2f6fa7', magenta: '#7b3f9e', cyan: '#2d8f8f', white: '#999999',
+      brightBlack: '#666666', brightRed: '#d44d42', brightGreen: '#5a9e5a', brightYellow: '#d4a017',
+      brightBlue: '#2980b9', brightMagenta: '#8e44ad', brightCyan: '#16a085', brightWhite: '#444444',
+    },
+  },
+];
+
+export function getTheme(id: string): TerminalTheme {
+  return themes.find(t => t.id === id) || themes[0];
+}
+
+export function toXtermTheme(theme: TerminalTheme) {
+  return {
+    background: theme.colors.background,
+    foreground: theme.colors.foreground,
+    cursor: theme.colors.cursor,
+    cursorAccent: theme.colors.cursorAccent,
+    selectionBackground: theme.colors.selectionBackground,
+    black: theme.colors.black,
+    red: theme.colors.red,
+    green: theme.colors.green,
+    yellow: theme.colors.yellow,
+    blue: theme.colors.blue,
+    magenta: theme.colors.magenta,
+    cyan: theme.colors.cyan,
+    white: theme.colors.white,
+    brightBlack: theme.colors.brightBlack,
+    brightRed: theme.colors.brightRed,
+    brightGreen: theme.colors.brightGreen,
+    brightYellow: theme.colors.brightYellow,
+    brightBlue: theme.colors.brightBlue,
+    brightMagenta: theme.colors.brightMagenta,
+    brightCyan: theme.colors.brightCyan,
+    brightWhite: theme.colors.brightWhite,
+  };
+}

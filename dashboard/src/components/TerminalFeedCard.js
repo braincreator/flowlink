@@ -3,6 +3,8 @@ import { useRef, useEffect, useCallback } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import { getTheme, toXtermTheme } from './terminal/themes';
+import { useTerminalSettings } from '../hooks/useTerminalSettings';
 export default function TerminalFeed({ agentId, interactive = false, onData, onMount, className = '' }) {
     const containerRef = useRef(null);
     const termRef = useRef(null);
@@ -12,23 +14,20 @@ export default function TerminalFeed({ agentId, interactive = false, onData, onM
         if (!containerRef.current)
             return;
         const container = containerRef.current;
+        const { settings } = useTerminalSettings();
+        const theme = getTheme(settings.themeId);
+        const xtermTheme = toXtermTheme(theme);
+        // Slightly dim background for feed cards
+        xtermTheme.background = theme.colors.background;
+        xtermTheme.cursor = interactive ? theme.colors.cursor : 'transparent';
         const term = new XTerm({
-            theme: {
-                background: '#060a14',
-                foreground: '#c8cdd8',
-                cursor: interactive ? '#6366f1' : 'transparent',
-                selectionBackground: '#6366f13d',
-                black: '#3b3d57', red: '#f43f5e', green: '#34d399', yellow: '#fbbf24',
-                blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e1e4ed',
-                brightBlack: '#6b7194', brightRed: '#fb7185', brightGreen: '#6ee7b7',
-                brightYellow: '#fde68a', brightBlue: '#93c5fd', brightMagenta: '#d8b4fe',
-                brightCyan: '#67e8f9', brightWhite: '#f1f5f9',
-            },
-            fontFamily: '"SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace',
-            fontSize: 12,
-            lineHeight: 1.35,
-            cursorBlink: interactive,
-            scrollback: interactive ? 10000 : 100,
+            theme: xtermTheme,
+            fontFamily: settings.fontFamily,
+            fontSize: settings.fontSize - 2,
+            lineHeight: settings.lineHeight,
+            cursorStyle: settings.cursorStyle,
+            cursorBlink: interactive && settings.cursorBlink,
+            scrollback: interactive ? settings.scrollback : 100,
             allowProposedApi: true,
             disableStdin: !interactive,
         });

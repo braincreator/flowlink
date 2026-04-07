@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Radio } from 'lucide-react';
+import { Radio, Settings } from 'lucide-react';
 import TerminalComponent from '../components/Terminal';
+import TerminalSettingsPanel from '../components/terminal/TerminalSettings';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { api } from '../api/client';
 
@@ -11,6 +12,7 @@ export default function TerminalRelay() {
   const { t } = useTranslation();
   const termRef = useRef<any>(null);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const wsUrl = `${api.getApiBase().replace(/^http/, 'ws')}/api/relay/shell`;
 
@@ -36,6 +38,7 @@ export default function TerminalRelay() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] -m-6 bg-[#060a14]">
+      <TerminalSettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-white/[0.06] bg-white/[0.02] px-4 py-3">
         <Radio size={18} className="text-indigo-400" />
@@ -44,6 +47,9 @@ export default function TerminalRelay() {
           {connected ? t('terminal.connected') : t('terminal.disconnected')}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-md hover:bg-white/10 transition-colors" title="Terminal Settings">
+            <Settings size={14} className="text-white/50" />
+          </button>
           <div className="flex gap-1">
             {RELAY_COMMANDS.map(cmd => (
               <button

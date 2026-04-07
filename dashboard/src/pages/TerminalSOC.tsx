@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { LayoutGrid, Plus, Search, Radio, Monitor } from 'lucide-react';
+import { LayoutGrid, Plus, Search, Radio, Monitor, Settings } from 'lucide-react';
 import TerminalGrid, { type GridLayout, GRID_MAX } from '../components/TerminalGrid';
 import TerminalFeed from '../components/TerminalFeedCard';
 import TerminalMinimap from '../components/TerminalMinimap';
+import TerminalSettingsPanel from '../components/terminal/TerminalSettings';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
 import type { FeedState } from '../hooks/useTerminalStream';
@@ -25,6 +26,7 @@ export default function TerminalSOC() {
   const [layout, setLayout] = useState<GridLayout>(() =>
     (localStorage.getItem('flowlink_soc_layout') as GridLayout) || '2x2'
   );
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [feedIds, setFeedIds] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('flowlink_soc_feeds') || '[]'); } catch { return []; }
   });
@@ -76,6 +78,7 @@ export default function TerminalSOC() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] -m-6 bg-[#060a14]">
+      <TerminalSettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {/* Top bar */}
       <div className="flex items-center gap-3 border-b border-white/[0.06] bg-white/[0.02] px-4 py-3">
         <Radio size={18} className="text-indigo-400" />
@@ -99,6 +102,9 @@ export default function TerminalSOC() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-md hover:bg-white/10 transition-colors" title="Terminal Settings">
+            <Settings size={14} className="text-white/50" />
+          </button>
           <span className="text-[10px] text-white/30">
             🟢 {activeCount} · 🔴 {disconnectedCount} · Σ {feeds.length}
           </span>

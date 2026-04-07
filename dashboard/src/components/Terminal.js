@@ -4,7 +4,10 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { getTheme, toXtermTheme } from './terminal/themes';
+import { useTerminalSettings } from '../hooks/useTerminalSettings';
 export default function Terminal({ className = '', onData, onResize }) {
+    const { settings } = useTerminalSettings();
     const containerRef = useRef(null);
     const termRef = useRef(null);
     const fitRef = useRef(null);
@@ -16,34 +19,15 @@ export default function Terminal({ className = '', onData, onResize }) {
         if (!containerRef.current)
             return;
         const container = containerRef.current;
+        const theme = getTheme(settings.themeId);
         const term = new XTerm({
-            theme: {
-                background: '#0a0e1a',
-                foreground: '#e1e4ed',
-                cursor: '#6366f1',
-                selectionBackground: '#6366f13d',
-                black: '#3b3d57',
-                red: '#f43f5e',
-                green: '#34d399',
-                yellow: '#fbbf24',
-                blue: '#60a5fa',
-                magenta: '#c084fc',
-                cyan: '#22d3ee',
-                white: '#e1e4ed',
-                brightBlack: '#6b7194',
-                brightRed: '#fb7185',
-                brightGreen: '#6ee7b7',
-                brightYellow: '#fde68a',
-                brightBlue: '#93c5fd',
-                brightMagenta: '#d8b4fe',
-                brightCyan: '#67e8f9',
-                brightWhite: '#f1f5f9',
-            },
-            fontFamily: '"SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace',
-            fontSize: 14,
-            lineHeight: 1.4,
-            cursorBlink: true,
-            scrollback: 10000,
+            theme: toXtermTheme(theme),
+            fontFamily: settings.fontFamily,
+            fontSize: settings.fontSize,
+            lineHeight: settings.lineHeight,
+            cursorStyle: settings.cursorStyle,
+            cursorBlink: settings.cursorBlink,
+            scrollback: settings.scrollback,
             allowProposedApi: true,
         });
         const fit = new FitAddon();

@@ -42,40 +42,50 @@ impl Renderer {
         speed: f64,
     ) -> Result<Vec<Frame>> {
         let total_duration = events.last().map(|e| e.timestamp).unwrap_or(0.0);
+        eprintln!("DEBUG: total_duration={total_duration:.2}s, fps={fps}, speed={speed}");
         if total_duration <= 0.0 {
-            // Just render the initial state as one frame
             let rgba = self.render(term);
             return Ok(vec![Frame { rgba, delay_ms: 100, width: self.width as u16, height: self.height as u16 }]);
         }
 
-        let frame_interval = 1.0 / (fps as f64) * speed;
+        let frame_interval = 1.0 / (fps as f64) / speed;
         let num_frames = (total_duration / frame_interval).ceil() as usize + 1;
+        eprintln!("DEBUG: frame_interval={frame_interval:.4}s, num_frames={num_frames}");
 
-        let mut frames = Vec::with_capacity(num_frames);
+        let mut frames: Vec<Frame> = Vec::with_capacity(num_frames);
         let mut last_hash: u64 = 0;
+        let mut pending_delay_ms: u16 = 0;
 
         for i in 0..num_frames {
             let target_time = (i as f64) * frame_interval;
             term.process_events(events, target_time);
             let rgba = self.render(term);
 
-            // Delta optimization: skip identical frames
             let hash = self.hash_pixels(&rgba);
             if hash != last_hash {
-                let delay_ms = if i == num_frames - 1 {
-                    200 // hold last frame a bit
-                } else {
-                    (frame_interval * 1000.0).round() as u16
-                };
+                // Push accumulated delay to previous frame
+                if pending_delay_ms > 0 {
+                    if let Some(last) = frames.last_mut() {
+                        last.delay_ms = last.delay_ms.saturating_add(pending_delay_ms);
+                    }
+                }
+                pending_delay_ms = 0;
+
+                let delay_ms = (frame_interval * 1000.0).round() as u16;
                 frames.push(Frame { rgba, delay_ms, width: self.width as u16, height: self.height as u16 });
                 last_hash = hash;
             } else {
-                // Extend previous frame's delay
-                if let Some(last) = frames.last_mut() {
-                    last.delay_ms = (last.delay_ms as f64 + frame_interval * 1000.0).round() as u16;
-                }
+                pending_delay_ms = pending_delay_ms.saturating_add((frame_interval * 1000.0).round() as u16);
             }
         }
+
+        // Add final pause
+        if let Some(last) = frames.last_mut() {
+            last.delay_ms = last.delay_ms.saturating_add(200);
+        }
+
+        let total_ms: u32 = frames.iter().map(|f| f.delay_ms as u32).sum();
+        eprintln!("DEBUG: {} frames, total delay={}ms ({:.2}s)", frames.len(), total_ms, total_ms as f64 / 1000.0);
 
         // Ensure at least one frame
         if frames.is_empty() {
@@ -144,10 +154,11 @@ impl Renderer {
     }
 
     fn hash_pixels(&self, buf: &[u8]) -> u64 {
-        // Simple hash: take first 64 bytes and combine
-        let mut h: u64 = 0;
-        for (i, &byte) in buf.iter().enumerate().take(256) {
-            h ^= (byte as u64) << ((i % 8) * 8);
+        // FNV-1a hash over full buffer for reliable delta detection
+        let mut h: u64 = 0xcbf29ce484222325;
+        for &byte in buf.iter() {
+            h ^= byte as u64;
+            h = h.wrapping_mul(0x100000001b3);
         }
         h
     }

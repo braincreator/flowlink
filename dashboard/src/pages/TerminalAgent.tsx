@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Monitor, Wifi, WifiOff, ArrowLeft } from 'lucide-react';
+import { Monitor, Wifi, WifiOff, ArrowLeft, Settings } from 'lucide-react';
 import TerminalComponent from '../components/Terminal';
+import TerminalSettingsPanel from '../components/terminal/TerminalSettings';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
@@ -15,6 +16,7 @@ export default function TerminalAgent() {
   const agentList = (agents || []) as any[];
   const agent = agentList.find((a: any) => a.id === id);
   const hostname = agent?.hostname || id || 'Unknown';
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const wsUrl = id ? `${api.getApiBase().replace(/^http/, 'ws')}/api/agents/${id}/shell` : null;
 
@@ -60,8 +62,13 @@ export default function TerminalAgent() {
               {connected ? t('terminal.connected') : reconnecting ? t('terminal.reconnecting') : t('terminal.disconnected')}
             </span>
           </div>
+          <button onClick={() => setSettingsOpen(true)} className="p-1.5 rounded-md hover:bg-white/10 transition-colors" title="Terminal Settings">
+            <Settings size={14} className="text-white/50" />
+          </button>
         </div>
       </div>
+
+      <TerminalSettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {/* Terminal */}
       <div className="flex-1 min-h-0">
