@@ -1,10 +1,14 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Save, Server, Shield, Bell, Info, Globe, Volume2, VolumeX } from 'lucide-react';
+import { Save, Server, Shield, Bell, Info, Globe, Volume2, VolumeX, TerminalSquare, ArrowRight } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../api/client';
 import { useNotifications } from '../hooks/useNotifications';
+import { useTerminalSettings } from '../hooks/useTerminalSettings';
+import { getTheme, themes } from '../components/terminal/themes';
+import ThemePreview from '../components/terminal/ThemePreview';
 
 export default function Settings() {
   const { t, i18n } = useTranslation();
@@ -23,6 +27,9 @@ export default function Settings() {
 
   const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
   const { settings: notifSettings, updateSettings } = useNotifications();
+  const { settings: termSettings, update: updateTermSettings } = useTerminalSettings();
+  const navigate = useNavigate();
+  const currentTheme = getTheme(termSettings.themeId);
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 fade-in">
@@ -108,6 +115,57 @@ export default function Settings() {
       </div>
 
       <NotificationPreferences />
+
+      {/* Terminal Appearance */}
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <TerminalSquare size={16} className="text-emerald-400" />
+            <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('ts.terminal_appearance')}</h3>
+          </div>
+          <button onClick={() => navigate('/terminal')}
+            className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+            {t('ts.open_terminal_settings')} <ArrowRight size={12} />
+          </button>
+        </div>
+
+        {/* Current theme with live preview */}
+        <div className="mb-4">
+          <ThemePreview theme={currentTheme} className="border border-[var(--color-border)]" />
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-xs text-[var(--color-dim)]">{t('ts.current_theme')}:</span>
+            <span className="text-xs font-medium text-[var(--color-text)]">{currentTheme.name}</span>
+            <span className="text-xs text-[var(--color-dim)]">— {currentTheme.description}</span>
+          </div>
+        </div>
+
+        {/* Quick theme picker grid */}
+        <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+          {themes.map(th => {
+            const palette = [th.colors.black, th.colors.red, th.colors.green, th.colors.yellow, th.colors.blue, th.colors.magenta, th.colors.cyan, th.colors.white];
+            return (
+              <button key={th.id} onClick={() => updateTermSettings({ themeId: th.id })}
+                className={`relative rounded-md p-1.5 text-left transition-all hover:scale-105 ${
+                  termSettings.themeId === th.id
+                    ? 'ring-2 ring-indigo-500 ring-offset-1 ring-offset-[var(--color-surface)]'
+                    : 'ring-1 ring-[var(--color-border)] hover:ring-[var(--color-dim)]'
+                }`}
+                style={{ background: th.colors.background }}
+                title={th.name}>
+                {termSettings.themeId === th.id && (
+                  <div className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-indigo-500 border border-[var(--color-surface)]" />
+                )}
+                <div className="grid grid-cols-8 gap-px">
+                  {palette.map((c, i) => (
+                    <div key={i} className="h-2 rounded-sm" style={{ background: c }} />
+                  ))}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-3 text-xs text-[var(--color-dim)]">{t('ts.quick_customize')}</p>
+      </div>
 
       {/* Language */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
