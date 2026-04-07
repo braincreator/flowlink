@@ -1,8 +1,8 @@
-import { useState, createContext, useContext, type ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Bot, Shield, FileText, Terminal, HardDrive,
-  FileCode, Smartphone, Users, Activity, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Wrench, CreditCard
+  FileCode, Smartphone, Users, Activity, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Wrench, CreditCard, Sun, Moon, GraduationCap
 } from 'lucide-react';
 
 const navItems = [
@@ -20,6 +20,7 @@ const navItems = [
   { to: '/llm', icon: Brain, label: 'LLM Proxy' },
   { to: '/mcp', icon: Wrench, label: 'MCP Tools' },
   { to: '/billing', icon: CreditCard, label: 'Billing' },
+  { to: '/onboarding', icon: GraduationCap, label: 'Onboarding' },
 ];
 
 const pageTitles: Record<string, string> = {};
@@ -39,7 +40,23 @@ export const useSidebar = () => useContext(SidebarContext);
 export function Layout() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const stored = localStorage.getItem('flowlink_theme') as 'dark' | 'light' | null;
+    if (stored) return stored;
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  });
   const location = useLocation();
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('flowlink_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    document.documentElement.setAttribute('data-transitioning', '');
+    setTheme(t => t === 'dark' ? 'light' : 'dark');
+    setTimeout(() => document.documentElement.removeAttribute('data-transitioning'), 250);
+  };
 
   const title = pageTitles[location.pathname] || 'Dashboard';
 
@@ -98,6 +115,9 @@ export function Layout() {
           <header className="flex h-16 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)]/50 backdrop-blur-md px-6 md:pl-6 pl-14">
             <h1 className="text-lg font-semibold">{title}</h1>
             <div className="flex items-center gap-3">
+              <button onClick={toggleTheme} className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border)] text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors" title="Toggle theme">
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
               <div className="h-2 w-2 rounded-full bg-emerald-400 pulse-dot" />
               <span className="text-xs text-[var(--color-dim)]">v0.9.2</span>
               <div className="ml-2 flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-xs font-bold text-white">A</div>

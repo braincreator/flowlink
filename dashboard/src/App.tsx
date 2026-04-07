@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Sidebar';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Onboarding from './pages/Onboarding';
 import Agents from './pages/Agents';
 import Shield from './pages/Shield';
 import Audit from './pages/Audit';
@@ -15,9 +16,12 @@ import Settings from './pages/Settings';
 import Billing from './pages/Billing';
 import LLM from './pages/LLM';
 import MCP from './pages/MCP';
+import TerminalPage from './pages/Terminal';
+import { NotificationProvider } from './hooks/useNotifications';
 
 export default function App() {
   return (
+    <NotificationProvider>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -32,13 +36,16 @@ export default function App() {
           <Route path="devices" element={<Devices />} />
           <Route path="rbac" element={<RBAC />} />
           <Route path="metrics" element={<Metrics />} />
+          <Route path="onboarding" element={<Onboarding />} />
           <Route path="settings" element={<Settings />} />
           <Route path="billing" element={<Billing />} />
           <Route path="llm" element={<LLM />} />
           <Route path="mcp" element={<MCP />} />
+          <Route path="terminal" element={<TerminalPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>
+    </NotificationProvider>
   );
 }

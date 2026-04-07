@@ -19,6 +19,30 @@
   --font-mono: 'SF Mono', 'Fira Code', 'Menlo', monospace;
 }
 
+/* Light theme */
+[data-theme="light"] {
+  --color-bg: #f8f9fb;
+  --color-surface: #ffffff;
+  --color-surface2: #f1f3f7;
+  --color-surface3: #e5e7eb;
+  --color-border: #e2e5ed;
+  --color-border-light: #d1d5db;
+  --color-text: #1a1d27;
+  --color-dim: #6b7280;
+}
+
+[data-theme="light"] .glass {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(226, 229, 237, 0.6);
+}
+
+/* Theme transition */
+[data-transitioning] *,
+[data-transitioning] *::before,
+[data-transitioning] *::after {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease !important;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {

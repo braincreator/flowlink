@@ -1,12 +1,15 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bot, Cpu, MemoryStick, HardDrive, Terminal } from 'lucide-react';
 import { DataTable, Badge, SlidePanel, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
+import TerminalPanel from '../components/TerminalPanel';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
 
 export default function Agents() {
   const [selected, setSelected] = useState<any>(null);
   const [execOpen, setExecOpen] = useState(false);
+  const [termOpen, setTermOpen] = useState(false);
   const [cmd, setCmd] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
@@ -102,6 +105,9 @@ export default function Agents() {
               <button onClick={() => setExecOpen(true)} className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)]">
                 <Terminal size={16} /> Execute Command
               </button>
+              <button onClick={() => setTermOpen(true)} className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface2)]">
+                <Terminal size={16} /> Open Terminal
+              </button>
               <button onClick={async () => { if (selected && confirm(`Disconnect ${selected.hostname}?`)) { try { await api.removeAgent(selected.id); refresh(); setSelected(null); } catch {} } }}
                 className="flex-1 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2.5 text-sm font-medium text-rose-400 transition-colors hover:bg-rose-500/20">
                 Disconnect
@@ -129,6 +135,8 @@ export default function Agents() {
           </select>
         </div>
       </Modal>
+
+      <TerminalPanel open={termOpen} onClose={() => setTermOpen(false)} agent={selected} mode="shell" />
     </div>
   );
 }

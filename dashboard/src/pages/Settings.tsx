@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Save, Server, Shield, Bell, Info, CheckCircle, XCircle } from 'lucide-react';
+import { Save, Server, Shield, Bell, Info, CheckCircle, XCircle, Volume2, VolumeX } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import { api } from '../api/client';
+import { useNotifications } from '../hooks/useNotifications';
 
 export default function Settings() {
   const { logout } = useAuth();
@@ -19,6 +20,7 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
 
   const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
+  const { settings: notifSettings, updateSettings } = useNotifications();
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 fade-in">
@@ -103,6 +105,8 @@ export default function Settings() {
         </div>
       </div>
 
+      <NotificationPreferences />
+
       <div className="flex gap-3">
         <button onClick={handleSave} className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-6 py-3 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)] hover:shadow-lg hover:shadow-indigo-500/20">
           <Save size={16} /> {saved ? '✓ Saved!' : 'Save Configuration'}
@@ -111,6 +115,51 @@ export default function Settings() {
           className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-6 py-3 text-sm font-medium text-rose-400 transition-colors hover:bg-rose-500/20">
           Sign Out
         </button>
+      </div>
+    </div>
+  );
+}
+
+function NotificationPreferences() {
+  const { settings, updateSettings } = useNotifications();
+
+  const Toggle = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) => (
+    <label className="flex items-center justify-between py-2">
+      <span className="text-sm text-[var(--color-text)]">{label}</span>
+      <button
+        onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-surface3)]'}`}
+      >
+        <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
+      </button>
+    </label>
+  );
+
+  return (
+    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+      <div className="flex items-center gap-2 mb-4">
+        {settings.soundEnabled ? <Volume2 size={16} className="text-indigo-400" /> : <VolumeX size={16} className="text-[var(--color-dim)]" />}
+        <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">Browser Notifications & Sound</h3>
+      </div>
+      <div className="space-y-1">
+        <Toggle label="Browser notifications" checked={settings.browserEnabled} onChange={v => updateSettings({ browserEnabled: v })} />
+        <Toggle label="Sound alerts" checked={settings.soundEnabled} onChange={v => updateSettings({ soundEnabled: v })} />
+        <div className="py-2">
+          <label className="mb-2 block text-sm text-[var(--color-text)]">Volume</label>
+          <input
+            type="range" min={0} max={0.5} step={0.01} value={settings.volume}
+            onChange={e => updateSettings({ volume: parseFloat(e.target.value) })}
+            className="w-full max-w-xs accent-[var(--color-accent)]"
+          />
+          <span className="text-xs text-[var(--color-dim)]">{Math.round(settings.volume * 200)}%</span>
+        </div>
+        <div className="border-t border-[var(--color-border)] pt-2 mt-2">
+          <div className="text-xs text-[var(--color-dim)] uppercase tracking-wider mb-2">Events</div>
+          <Toggle label="L3 Critical alerts" checked={settings.events.l3} onChange={v => updateSettings({ events: { ...settings.events, l3: v } })} />
+          <Toggle label="L2 Medium alerts" checked={settings.events.l2} onChange={v => updateSettings({ events: { ...settings.events, l2: v } })} />
+          <Toggle label="Agent events (online/offline)" checked={settings.events.agentEvents} onChange={v => updateSettings({ events: { ...settings.events, agentEvents: v } })} />
+          <Toggle label="Errors" checked={settings.events.errors} onChange={v => updateSettings({ events: { ...settings.events, errors: v } })} />
+        </div>
       </div>
     </div>
   );
