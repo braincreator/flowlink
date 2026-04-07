@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Copy, Check, AlertTriangle } from 'lucide-react';
 import type { ToastMessage } from '../types';
@@ -89,6 +89,7 @@ export function DataTable<T extends Record<string, any>>({ columns, data, onRowC
             <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
               {columns.map(col => (
                 <th key={col.key} onClick={() => toggleSort(col.key)}
+                  aria-sort={sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
                   className={`cursor-pointer px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-[var(--color-dim)] hover:text-[var(--color-text)] transition-colors ${col.className || ''}`}>
                   {col.label} {sortKey === col.key && (sortDir === 'asc' ? '↑' : '↓')}
                 </th>
@@ -131,11 +132,23 @@ export function Modal({ open, onClose, title, children, actions }: {
   open: boolean; onClose: () => void; title: string; children: ReactNode;
   actions?: ReactNode;
 }) {
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape') onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (open) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [open, handleKeyDown]);
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-full max-w-lg rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl fade-in" onClick={e => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={title}
+        className="relative w-full max-w-lg rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-2xl fade-in" onClick={e => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-semibold">{title}</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"><X size={16} /></button>
@@ -150,11 +163,23 @@ export function Modal({ open, onClose, title, children, actions }: {
 export function SlidePanel({ open, onClose, title, children, width = 'w-[480px]' }: {
   open: boolean; onClose: () => void; title: string; children: ReactNode; width?: string;
 }) {
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape') onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (open) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [open, handleKeyDown]);
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50" onClick={onClose}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-      <div className={`absolute right-0 top-0 bottom-0 ${width} overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl slide-in-right`} onClick={e => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={title}
+        className={`absolute right-0 top-0 bottom-0 ${width} overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl slide-in-right`} onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-4">
           <h3 className="text-lg font-semibold">{title}</h3>
           <button onClick={onClose} className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"><X size={16} /></button>
@@ -210,7 +235,8 @@ export function EmptyState({ icon, title, description, action }: { icon: ReactNo
 
 export function LoadingSkeleton({ lines = 3 }: { lines?: number }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" role="status" aria-label="Loading">
+      <span className="sr-only">Loading...</span>
       {Array.from({ length: lines }, (_, i) => (
         <div key={i} className="shimmer h-4 rounded" style={{ width: `${60 + Math.random() * 40}%` }} />
       ))}
@@ -227,7 +253,7 @@ export function Toast({ toasts, onRemove }: { toasts: ToastMessage[]; onRemove: 
     warning: 'border-amber-500/40 bg-amber-500/10',
   };
   return (
-    <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2">
+    <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-2" aria-live="polite">
       {toasts.map(toast => (
         <div key={toast.id} className={`flex items-center gap-3 rounded-xl border px-4 py-3 shadow-lg fade-in ${colors[toast.type]}`}>
           {icons[toast.type]}

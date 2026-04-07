@@ -1,35 +1,78 @@
 import { useState, useEffect, createContext, useContext, type ReactNode } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard, Bot, Shield, FileText, MonitorPlay, HardDrive,
   FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare, Radio
 } from 'lucide-react';
+import { version } from '../../package.json';
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
-  { to: '/agents', icon: Bot, labelKey: 'nav.agents' },
-  { to: '/shield', icon: Shield, labelKey: 'nav.shield' },
-  { to: '/audit', icon: FileText, labelKey: 'nav.audit' },
-  { to: '/sessions', icon: MonitorPlay, labelKey: 'nav.sessions' },
-  { to: '/backups', icon: HardDrive, labelKey: 'nav.backups' },
-  { to: '/policies', icon: FileCode, labelKey: 'nav.policies' },
-  { to: '/devices', icon: Smartphone, labelKey: 'nav.devices' },
-  { to: '/rbac', icon: Users, labelKey: 'nav.rbac' },
-  { to: '/metrics', icon: BarChart3, labelKey: 'nav.metrics' },
-  { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
-  { to: '/llm', icon: Brain, labelKey: 'nav.llm' },
-  { to: '/mcp', icon: Puzzle, labelKey: 'nav.mcp' },
-  { to: '/billing', icon: CreditCard, labelKey: 'nav.billing' },
-  { to: '/onboarding', icon: GraduationCap, labelKey: 'nav.onboarding' },
-  { to: '/terminal', icon: TerminalSquare, labelKey: 'nav.terminal' },
-  { to: '/terminal/soc', icon: LayoutDashboard, labelKey: 'nav.terminal_soc' },
-  { to: '/terminal/relay', icon: Radio, labelKey: 'nav.terminal_relay' },
+interface NavItem {
+  to: string;
+  icon: typeof LayoutDashboard;
+  labelKey: string;
+}
+
+interface NavGroup {
+  label?: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
+  {
+    label: 'Main',
+    items: [
+      { to: '/', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+      { to: '/agents', icon: Bot, labelKey: 'nav.agents' },
+      { to: '/shield', icon: Shield, labelKey: 'nav.shield' },
+      { to: '/devices', icon: Smartphone, labelKey: 'nav.devices' },
+    ],
+  },
+  {
+    label: 'Monitoring',
+    items: [
+      { to: '/audit', icon: FileText, labelKey: 'nav.audit' },
+      { to: '/sessions', icon: MonitorPlay, labelKey: 'nav.sessions' },
+      { to: '/metrics', icon: BarChart3, labelKey: 'nav.metrics' },
+      { to: '/backups', icon: HardDrive, labelKey: 'nav.backups' },
+    ],
+  },
+  {
+    label: 'Security',
+    items: [
+      { to: '/rbac', icon: Users, labelKey: 'nav.rbac' },
+      { to: '/policies', icon: FileCode, labelKey: 'nav.policies' },
+    ],
+  },
+  {
+    label: 'Integrations',
+    items: [
+      { to: '/llm', icon: Brain, labelKey: 'nav.llm' },
+      { to: '/mcp', icon: Puzzle, labelKey: 'nav.mcp' },
+      { to: '/billing', icon: CreditCard, labelKey: 'nav.billing' },
+    ],
+  },
+  {
+    label: 'Terminal',
+    items: [
+      { to: '/terminal', icon: TerminalSquare, labelKey: 'nav.terminal' },
+      { to: '/terminal/soc', icon: LayoutDashboard, labelKey: 'nav.terminal_soc' },
+      { to: '/terminal/relay', icon: Radio, labelKey: 'nav.terminal_relay' },
+    ],
+  },
+  {
+    items: [
+      { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
+      { to: '/onboarding', icon: GraduationCap, labelKey: 'nav.onboarding' },
+    ],
+  },
 ];
 
 const titleKeys: Record<string, string> = {};
-navItems.forEach(n => { if (n.to !== '/') titleKeys[n.to] = n.labelKey; });
-titleKeys['/'] = 'nav.dashboard';
+navGroups.forEach(g => g.items.forEach(n => {
+  titleKeys[n.to] = n.to === '/' ? 'nav.dashboard' : n.labelKey;
+}));
 
 interface SidebarCtx {
   collapsed: boolean;
@@ -68,6 +111,8 @@ export function Layout() {
   const location = useLocation();
   const { t } = useTranslation();
 
+  useKeyboardShortcuts();
+
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('flowlink_theme', theme);
@@ -79,6 +124,8 @@ export function Layout() {
     setTimeout(() => document.documentElement.removeAttribute('data-transitioning'), 250);
   };
 
+  const isDark = theme === 'dark';
+
   const title = t(titleKeys[location.pathname] || 'nav.dashboard');
 
   return (
@@ -86,6 +133,7 @@ export function Layout() {
       <div className="flex h-screen overflow-hidden bg-[var(--color-bg)]">
         {/* Mobile menu button */}
         <button onClick={() => setMobileOpen(true)}
+          aria-label="Open menu"
           className="fixed top-3 left-3 z-[60] flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] lg:hidden">
           <Menu size={18} />
         </button>
@@ -109,21 +157,39 @@ export function Layout() {
 
           {/* Nav */}
           <nav className="flex-1 overflow-y-auto py-3">
-            {navItems.map(item => (
-              <NavLink key={item.to} to={item.to} end={item.to === '/'}
-                onClick={() => setMobileOpen(false)}
-                className={({ isActive }) => `flex items-center gap-3 mx-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150
-                  ${isActive ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent-light)]' : 'text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)]'}
-                  ${collapsed ? 'justify-center' : ''}`}>
-                <item.icon size={18} className="flex-shrink-0" />
-                {!collapsed && <span>{t(item.labelKey)}</span>}
-              </NavLink>
+            {navGroups.map((group, groupIdx) => (
+              <div key={group.label ?? `ungrouped-${groupIdx}`}>
+                {groupIdx > 0 && (
+                  <div className={`${collapsed ? 'mx-3' : 'mx-4'} mt-4 pt-3 border-t border-[var(--color-border)]`}>
+                    {!collapsed && group.label && (
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-dim)]">{group.label}</span>
+                    )}
+                  </div>
+                )}
+                {groupIdx === 0 && !collapsed && group.label && (
+                  <div className="mx-4 mb-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-dim)]">{group.label}</span>
+                  </div>
+                )}
+                {group.items.map(item => (
+                  <NavLink key={item.to} to={item.to} end={item.to === '/'}
+                    onClick={() => setMobileOpen(false)}
+                    title={collapsed ? t(item.labelKey) : undefined}
+                    className={({ isActive }) => `flex items-center gap-3 mx-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150
+                      ${isActive ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent-light)]' : 'text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)]'}
+                      ${collapsed ? 'justify-center' : ''}`}>
+                    <item.icon size={18} className="flex-shrink-0" />
+                    {!collapsed && <span>{t(item.labelKey)}</span>}
+                  </NavLink>
+                ))}
+              </div>
             ))}
           </nav>
 
           {/* Collapse toggle */}
           <div className="hidden border-t border-[var(--color-border)] p-3 lg:block">
             <button onClick={() => setCollapsed(!collapsed)}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               className="flex w-full items-center justify-center rounded-lg py-2 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors">
               {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
             </button>
@@ -137,12 +203,16 @@ export function Layout() {
             <h1 className="text-lg font-semibold">{title}</h1>
             <div className="flex items-center gap-3">
               <LanguageToggle />
-              <button onClick={toggleTheme} className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border)] text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors" title="Toggle theme">
+              <button onClick={toggleTheme} className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border)] text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors" title="Toggle theme"
+                aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>
                 {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
               </button>
               <span className="hidden text-xs font-medium text-[var(--color-dim)] sm:inline">{t(`settings.${theme}`)}</span>
+              <kbd className="hidden lg:inline-flex items-center gap-0.5 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[10px] text-[var(--color-dim)] font-mono">
+                <span>⌘</span>K
+              </kbd>
               <div className="h-2 w-2 rounded-full bg-emerald-400 pulse-dot" />
-              <span className="text-xs text-[var(--color-dim)]">v0.9.2</span>
+              <span className="text-xs text-[var(--color-dim)]">v{version}</span>
               <div className="ml-2 flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-xs font-bold text-white">A</div>
             </div>
           </header>

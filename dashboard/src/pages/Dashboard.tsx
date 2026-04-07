@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Shield, Bot, AlertTriangle, Activity, Clock, TerminalSquare } from 'lucide-react';
+import { Shield, Bot, AlertTriangle, Activity, Clock, TerminalSquare, Download } from 'lucide-react';
 import { StatCard, Badge, LoadingSkeleton } from '../components/Layout';
 import { DashboardWidgets, type WidgetDef } from '../components/DashboardWidgets';
 import { useApi, useSSE } from '../hooks/useApi';
 import { api } from '../api/client';
+import { exportChartImage } from '../utils/chartExport';
 
 const PIE_COLORS = ['#f43f5e', '#f59e0b', '#6366f1'];
 
@@ -93,6 +94,14 @@ export default function Dashboard() {
       render: () => (
         <div>
           <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('dashboard.last_24h')}</h3>
+          <div className="flex items-center justify-end mb-2">
+            <button onClick={() => exportChartImage('chart-commands', 'flowlink-commands-24h')}
+              className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
+              aria-label="Export chart as image"
+              title="Export as PNG">
+              <Download size={14} />
+            </button>
+          </div>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={[]}>
               <defs><linearGradient id="cmdGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} /><stop offset="100%" stopColor="#6366f1" stopOpacity={0} /></linearGradient></defs>
@@ -111,6 +120,14 @@ export default function Dashboard() {
       render: () => (
         <div>
           <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('dashboard.shield_status')}</h3>
+          <div className="flex items-center justify-end mb-2">
+            <button onClick={() => exportChartImage('chart-risk', 'flowlink-risk-distribution')}
+              className="rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
+              aria-label="Export chart as image"
+              title="Export as PNG">
+              <Download size={14} />
+            </button>
+          </div>
           <div className="flex items-center justify-center">
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
@@ -172,7 +189,7 @@ export default function Dashboard() {
     <div className="space-y-6 fade-in">
       {error && !agents && !shieldStats && (
         <div className="flex flex-col items-center py-16 text-center">
-          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <AlertTriangle size={40} className="mb-4 text-[var(--color-dim)] opacity-40" />
           <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
           <button onClick={() => { refreshAgents(); refreshShield(); refreshAlerts(); }} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>

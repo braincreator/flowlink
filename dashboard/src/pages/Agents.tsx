@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Bot, Cpu, HardDrive, TerminalSquare } from 'lucide-react';
+import { Bot, Cpu, HardDrive, TerminalSquare, AlertTriangle } from 'lucide-react';
 import { DataTable, Badge, SlidePanel, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
 import TerminalPanel from '../components/TerminalPanel';
 import { useApi } from '../hooks/useApi';
@@ -29,7 +29,7 @@ export default function Agents() {
     <div className="space-y-6 fade-in">
       {error && !data && (
         <div className="flex flex-col items-center py-16 text-center">
-          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <AlertTriangle size={40} className="mb-4 text-[var(--color-dim)] opacity-40" />
           <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('agents.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
           <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('agents.retry')}</button>
@@ -40,7 +40,7 @@ export default function Agents() {
         {['all', 'online', 'offline'].map(s => (
           <button key={s} onClick={() => setFilterStatus(s)}
             className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${filterStatus === s ? 'bg-[var(--color-accent)] text-white' : 'border border-[var(--color-border)] text-[var(--color-dim)] hover:text-[var(--color-text)]'}`}>
-            {s === 'all' ? t('agents.all') : s === 'online' ? `🟢 ${t('agents.online')}` : `🔴 ${t('agents.offline')}`}
+            {s === 'all' ? t('agents.all') : s === 'online' ? <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400" />{t('agents.online')}</span> : <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-rose-400" />{t('agents.offline')}</span>}
           </button>
         ))}
       </div>

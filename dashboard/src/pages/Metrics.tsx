@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BarChart3, Cpu, MemoryStick, CheckCircle, XCircle } from 'lucide-react';
+import { BarChart3, Cpu, MemoryStick, CheckCircle, XCircle, AlertTriangle, Download } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Badge, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
+import { exportChartImage } from '../utils/chartExport';
 
 export default function Metrics() {
   const { t } = useTranslation();
@@ -40,7 +41,7 @@ export default function Metrics() {
     <div className="space-y-6 fade-in">
       {error && !agents && !promText && (
         <div className="flex flex-col items-center py-16 text-center">
-          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <AlertTriangle size={40} className="mb-4 text-[var(--color-dim)] opacity-40" />
           <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
           <button onClick={() => { refreshAgents(); refreshMetrics(); refreshHealth(); }} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>
@@ -77,33 +78,45 @@ export default function Metrics() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+        <div id="chart-cpu" className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 mb-4">
             <Cpu size={16} className="text-[var(--color-accent)]" />
             <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('metrics.cpu')}</h3>
             <span className="ml-auto text-lg font-bold">{info.cpu_usage ?? 0}%</span>
+            <button onClick={() => exportChartImage('chart-cpu', 'flowlink-cpu')}
+              className="ml-auto rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
+              aria-label="Export chart as image"
+              title="Export as PNG">
+              <Download size={14} />
+            </button>
           </div>
           <ResponsiveContainer width="100%" height={160}>
             <LineChart data={[]}>
               <XAxis dataKey="t" tick={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
-              <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
+              <YAxis tick={{ fontSize: 11, fill: 'var(--color-dim)' }} axisLine={false} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
+              <Tooltip contentStyle={{ background: 'var(--color-surface2)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
               <Line type="monotone" dataKey="cpu" stroke="#6366f1" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
           <div className="flex items-center justify-center py-4 text-sm text-[var(--color-dim)] opacity-60">{t('common.no_time_series_short')}</div>
         </div>
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+        <div id="chart-memory" className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <div className="flex items-center gap-2 mb-4">
             <MemoryStick size={16} className="text-emerald-400" />
             <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('metrics.memory')}</h3>
             <span className="ml-auto text-lg font-bold">{info.memory_usage ?? 0}%</span>
+            <button onClick={() => exportChartImage('chart-memory', 'flowlink-memory')}
+              className="ml-auto rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
+              aria-label="Export chart as image"
+              title="Export as PNG">
+              <Download size={14} />
+            </button>
           </div>
           <ResponsiveContainer width="100%" height={160}>
             <LineChart data={[]}>
               <XAxis dataKey="t" tick={false} axisLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
-              <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
+              <YAxis tick={{ fontSize: 11, fill: 'var(--color-dim)' }} axisLine={false} domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
+              <Tooltip contentStyle={{ background: 'var(--color-surface2)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
               <Line type="monotone" dataKey="mem" stroke="#10b981" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -114,7 +127,7 @@ export default function Metrics() {
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('metrics.agent_resources')}</h3>
         {agentList.filter((a: any) => a.status === 'online').length === 0 ? (
-          <EmptyState icon={<Cpu size={48} />} title={t('common.no_online_agents')} description="{t('metrics.agent_resource_desc')}" />
+          <EmptyState icon={<Cpu size={48} />} title={t('common.no_online_agents')} description={t('metrics.agent_resource_desc')} />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             {agentList.filter((a: any) => a.status === 'online').map((a: any) => (

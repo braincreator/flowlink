@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Smartphone, Laptop, QrCode, Trash2, Plus } from 'lucide-react';
+import { Smartphone, Laptop, QrCode, Trash2, Plus, AlertTriangle } from 'lucide-react';
 import { Badge, DataTable, Modal, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi } from '../hooks/useApi';
 import { api } from '../api/client';
@@ -44,7 +44,7 @@ export default function Devices() {
     <div className="space-y-6 fade-in">
       {error && !data && (
         <div className="flex flex-col items-center py-16 text-center">
-          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <AlertTriangle size={40} className="mb-4 text-[var(--color-dim)] opacity-40" />
           <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{error}</p>
           <button onClick={refresh} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>

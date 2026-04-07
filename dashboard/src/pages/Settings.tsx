@@ -24,8 +24,25 @@ export default function Settings() {
   const info = (systemInfo as any) || {};
   const healthStatus = (health as any)?.status === 'ok';
   const [saved, setSaved] = useState(false);
+  const [relaySettings, setRelaySettings] = useState({
+    listenAddress: '0.0.0.0:8080',
+    tlsCert: '/etc/flowlink/tls.crt',
+    logLevel: 'info',
+  });
+  const [shieldSettings, setShieldSettings] = useState({
+    mode: 'intercept',
+    policyFile: '/etc/flowlink/shield-policy.yaml',
+  });
+  const [notifConfig, setNotifConfig] = useState({
+    botToken: '',
+    channel: '@flowlink-alerts',
+  });
 
-  const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
+  const handleSave = () => {
+    console.log('Saving settings:', { relaySettings, shieldSettings, notifConfig });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
   const { settings: notifSettings, updateSettings } = useNotifications();
   const { settings: termSettings, update: updateTermSettings } = useTerminalSettings();
   const navigate = useNavigate();
@@ -63,15 +80,15 @@ export default function Settings() {
         <div className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.listen_address")}</label>
-            <input type="text" defaultValue="0.0.0.0:8080" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
+            <input type="text" value={relaySettings.listenAddress} onChange={e => setRelaySettings(s => ({...s, listenAddress: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
           </div>
           <div>
             <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.tls_cert")}</label>
-            <input type="text" defaultValue="/etc/flowlink/tls.crt" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
+            <input type="text" value={relaySettings.tlsCert} onChange={e => setRelaySettings(s => ({...s, tlsCert: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
           </div>
           <div>
             <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.log_level")}</label>
-            <select defaultValue="info" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
+            <select value={relaySettings.logLevel} onChange={e => setRelaySettings(s => ({...s, logLevel: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
               <option>trace</option><option>debug</option><option value="info">info</option><option>warn</option><option>error</option>
             </select>
           </div>
@@ -86,13 +103,13 @@ export default function Settings() {
         <div className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.shield_mode")}</label>
-            <select defaultValue="intercept" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
+            <select value={shieldSettings.mode} onChange={e => setShieldSettings(s => ({...s, mode: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
               <option value="monitor">Monitor (log only)</option><option value="alert">Alert</option><option value="intercept">Intercept</option><option value="enforce">Enforce</option>
             </select>
           </div>
           <div>
             <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.policy_file")}</label>
-            <input type="text" defaultValue="/etc/flowlink/shield-policy.yaml" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
+            <input type="text" value={shieldSettings.policyFile} onChange={e => setShieldSettings(s => ({...s, policyFile: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
           </div>
         </div>
       </div>
@@ -105,11 +122,11 @@ export default function Settings() {
         <div className="space-y-4">
           <div>
             <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.telegram_bot_token")}</label>
-            <input type="password" defaultValue="" placeholder="Enter token..." className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
+            <input type="password" value={notifConfig.botToken} onChange={e => setNotifConfig(s => ({...s, botToken: e.target.value}))} placeholder="Enter token..." className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
           </div>
           <div>
             <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.telegram_channel")}</label>
-            <input type="text" defaultValue="@flowlink-alerts" className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none" />
+            <input type="text" value={notifConfig.channel} onChange={e => setNotifConfig(s => ({...s, channel: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none" />
           </div>
         </div>
       </div>
@@ -210,6 +227,7 @@ function NotificationPreferences() {
     <label className="flex items-center justify-between py-2">
       <span className="text-sm text-[var(--color-text)]">{label}</span>
       <button
+        role="switch" aria-checked={checked} aria-label={label}
         onClick={() => onChange(!checked)}
         className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-surface3)]'}`}
       >
@@ -232,6 +250,7 @@ function NotificationPreferences() {
           <input
             type="range" min={0} max={0.5} step={0.01} value={settings.volume}
             onChange={e => updateSettings({ volume: parseFloat(e.target.value) })}
+            aria-label={t('settings.volume')}
             className="w-full max-w-xs accent-[var(--color-accent)]"
           />
           <span className="text-xs text-[var(--color-dim)]">{Math.round(settings.volume * 200)}%</span>

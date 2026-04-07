@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ShieldAlert as ShieldAlertIcon, ShieldCheck, Bird, FileCode } from 'lucide-react';
+import { ShieldAlert as ShieldAlertIcon, ShieldCheck, Bird, FileCode, AlertTriangle, Video, Download } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Badge, RiskGauge, LoadingSkeleton, EmptyState } from '../components/Layout';
 import { useApi, useSSE } from '../hooks/useApi';
 import { api } from '../api/client';
 import SessionRecorder from '../components/SessionRecorder';
+import { exportChartImage } from '../utils/chartExport';
 
 export default function Shield() {
   const { t } = useTranslation();
@@ -59,7 +60,7 @@ export default function Shield() {
     <div className="space-y-6 fade-in">
       {alertsError && !alerts && (
         <div className="flex flex-col items-center py-16 text-center">
-          <div className="text-4xl mb-4 opacity-40">⚠️</div>
+          <AlertTriangle size={40} className="mb-4 text-[var(--color-dim)] opacity-40" />
           <h3 className="text-lg font-semibold text-[var(--color-dim)]">{t('common.unable_connect')}</h3>
           <p className="mt-2 text-sm text-[var(--color-dim)] opacity-70">{alertsError}</p>
           <button onClick={refreshAlerts} className="mt-4 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:bg-[var(--color-accent-light)]">{t('common.retry')}</button>
@@ -129,7 +130,7 @@ export default function Shield() {
                     <button onClick={() => resolve(alert.alert_id, true)} className="rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-400 transition-colors hover:bg-emerald-500/30">{t('shield.approve')}</button>
                     <button onClick={() => resolve(alert.alert_id, false)} className="rounded-lg bg-rose-500/20 px-3 py-1.5 text-xs font-medium text-rose-400 transition-colors hover:bg-rose-500/30">{t('shield.reject')}</button>
                     {alert.castData && (
-                      <button onClick={() => setReplayAlert(alert)} className="rounded-lg bg-[var(--color-accent)]/15 px-3 py-1.5 text-xs font-medium text-[var(--color-accent-light)] transition-colors hover:bg-[var(--color-accent)]/25">🎬 {t('sessions.record_session')}</button>
+                      <button onClick={() => setReplayAlert(alert)} className="rounded-lg bg-[var(--color-accent)]/15 px-3 py-1.5 text-xs font-medium text-[var(--color-accent-light)] transition-colors hover:bg-[var(--color-accent)]/25"><Video size={12} className="inline" /> {t('sessions.record_session')}</button>
                     )}
                   </div>
                 </div>
@@ -141,7 +142,7 @@ export default function Shield() {
 
       {tab === 'canaries' && (
         canaryList.length === 0 ? (
-          <EmptyState icon={<Bird size={48} />} title={`${t('shield.canary_tokens')}...`} description="{t('shield.add_canary_desc')}" />
+          <EmptyState icon={<Bird size={48} />} title={`${t('shield.canary_tokens')}...`} description={t('shield.add_canary_desc')} />
         ) : (
           <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
             <table className="w-full text-sm">
@@ -168,7 +169,7 @@ export default function Shield() {
 
       {tab === 'policies' && (
         policyList.length === 0 ? (
-          <EmptyState icon={<FileCode size={48} />} title={t('policies.no_rules')} description="{t('shield.add_policy_desc')}" />
+          <EmptyState icon={<FileCode size={48} />} title={t('policies.no_rules')} description={t('shield.add_policy_desc')} />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {policyList.map((p: any, i: number) => (
@@ -188,26 +189,42 @@ export default function Shield() {
       )}
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+        <div id="chart-interceptions" className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('shield.interceptions_over_time')}</h3>
+          <div className="flex items-center gap-2 mb-4">
+            <button onClick={() => exportChartImage('chart-interceptions', 'flowlink-interceptions')}
+              className="ml-auto rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
+              aria-label="Export chart as image"
+              title="Export as PNG">
+              <Download size={14} />
+            </button>
+          </div>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={[]}>
               <defs><linearGradient id="intGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f43f5e" stopOpacity={0.3} /><stop offset="100%" stopColor="#f43f5e" stopOpacity={0} /></linearGradient></defs>
-              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
-              <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
+              <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'var(--color-dim)' }} axisLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: 'var(--color-dim)' }} axisLine={false} />
+              <Tooltip contentStyle={{ background: 'var(--color-surface2)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
               <Area type="monotone" dataKey="interceptions" stroke="#f43f5e" fill="url(#intGrad)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
           <div className="flex items-center justify-center py-4 text-sm text-[var(--color-dim)] opacity-60">{t('common.no_time_series')}</div>
         </div>
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+        <div id="chart-dangerous" className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
           <h3 className="mb-4 text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('shield.top_dangerous')}</h3>
+          <div className="flex items-center gap-2 mb-4">
+            <button onClick={() => exportChartImage('chart-dangerous', 'flowlink-dangerous-commands')}
+              className="ml-auto rounded-lg p-1.5 text-[var(--color-dim)] hover:bg-[var(--color-surface2)] hover:text-[var(--color-text)] transition-colors"
+              aria-label="Export chart as image"
+              title="Export as PNG">
+              <Download size={14} />
+            </button>
+          </div>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={[]} layout="vertical">
-              <XAxis type="number" tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
-              <YAxis dataKey="command" type="category" width={120} tick={{ fontSize: 11, fill: '#8b8fa3' }} axisLine={false} />
-              <Tooltip contentStyle={{ background: '#1e2235', border: '1px solid #2e3142', borderRadius: '8px', fontSize: '12px' }} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--color-dim)' }} axisLine={false} />
+              <YAxis dataKey="command" type="category" width={120} tick={{ fontSize: 11, fill: 'var(--color-dim)' }} axisLine={false} />
+              <Tooltip contentStyle={{ background: 'var(--color-surface2)', border: '1px solid var(--color-border)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)' }} />
               <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
