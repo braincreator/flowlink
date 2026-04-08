@@ -61,6 +61,23 @@ impl Relay {
             None
         };
 
+        // Database (optional — Supabase PostgreSQL)
+        let db = if let Some(url) = &self.config.database_url {
+            match flowlink_db::DbPool::open(url).await {
+                Ok(pool) => {
+                    pool.run_migrations().await?;
+                    log::info!("Database connected (PostgreSQL/Supabase)");
+                    Some(Arc::new(pool))
+                }
+                Err(e) => {
+                    log::warn!("Database connection failed: {e}. Running without DB.");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let state = AppState {
             pool, approvals, eventbus, handler, registry,
             device_manager: Arc::new(DeviceManager::new(devices::PushConfig::default())),
@@ -71,7 +88,7 @@ impl Relay {
             )),
             metrics: Arc::new(metrics::Metrics::new()),
             billing: None, // TODO: initialize from config
-            db: None,     // TODO: initialize from config
+            db,
         };
 
         let app = server::build_router(state);

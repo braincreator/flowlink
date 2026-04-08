@@ -209,6 +209,8 @@ pub struct RelayConfig {
     pub billing: BillingConfig,
     #[serde(default)]
     pub registry: RegistryConfig,
+    #[serde(default)]
+    pub database_url: Option<String>,
 }
 
 fn default_relay_name() -> String { "FlowLink Relay".into() }
@@ -408,11 +410,13 @@ mod tests {
             llm: LlmConfig::default(),
             billing: BillingConfig::default(),
             registry: RegistryConfig::default(),
+            database_url: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: RelayConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.api_token, "tok");
         assert_eq!(back.wss_addr.to_string(), "0.0.0.0:9443");
+        assert!(back.database_url.is_none());
     }
 
     #[test]
