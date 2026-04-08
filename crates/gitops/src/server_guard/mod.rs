@@ -37,6 +37,7 @@ pub mod guard_mode;
 pub mod command_runner;
 pub mod pipeline;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -266,9 +267,47 @@ pub struct ServerGuardStatus {
 // Event source tasks
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// File hash utility
+// ---------------------------------------------------------------------------
+
+use sha2::{Digest, Sha256};
+
+fn file_sha256(path: &std::path::Path) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = std::io::Read::read(&mut file, &mut buf).ok()?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
+    Some(format!("{:x}", hasher.finalize()))
+}
+
 /// File watcher background task
 async fn start_file_watcher(tx: mpsc::Sender<GuardEvent>, paths: Vec<String>) {
     use crate::drift::event_driven::FileWatcher;
+
+    // Load baseline hashes for watched paths
+    let mut baselines: HashMap<std::path::PathBuf, String> = HashMap::new();
+    for p in &paths {
+        let path = std::path::PathBuf::from(p);
+        if path.is_file() {
+            if let Some(hash) = file_sha256(&path) {
+                baselines.insert(path.clone(), hash);
+            }
+        } else if path.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&path) {
+                for entry in entries.flatten() {
+                    if let Some(hash) = file_sha256(&entry.path()) {
+                        baselines.insert(entry.path(), hash);
+                    }
+                }
+            }
+        }
+    }
+    info!("🛡 ServerGuard: loaded {} file baselines", baselines.len());
 
     let mut watcher = match FileWatcher::new(paths) {
         w => w,
@@ -282,11 +321,21 @@ async fn start_file_watcher(tx: mpsc::Sender<GuardEvent>, paths: Vec<String>) {
     info!("🛡 ServerGuard: file watcher started on {} paths", watcher.watched_paths().len());
 
     while let Some(event) = watcher.next_event().await {
+        let current_hash = file_sha256(&event.path);
+        let baseline_hash = baselines.get(&event.path).cloned();
+
+        // Update baseline on create/modify
+        if event.kind == "create" || event.kind == "modify" {
+            if let Some(ref hash) = current_hash {
+                baselines.insert(event.path.clone(), hash.clone());
+            }
+        }
+
         let guard_event = GuardEvent::file_change(
             event.path,
             event.kind,
-            None, // TODO: compute hash
-            None, // TODO: lookup baseline
+            current_hash,
+            baseline_hash,
         );
         if tx.send(guard_event).await.is_err() {
             break;

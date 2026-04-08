@@ -115,7 +115,7 @@ impl HybridGuard {
     async fn start_ebpf(self: Arc<Self>) -> Result<HybridHandle> {
         let (monitor, mut rx) = EbpfKernelMonitor::load(
             self.config.patterns.clone(),
-            vec![], // TODO: expose allowed_uids via ShieldGuard accessor
+            self.inner.allowed_uids().to_vec(),
         ).await?;
 
         info!("🛡 HybridGuard: eBPF kernel monitor loaded, consuming events");

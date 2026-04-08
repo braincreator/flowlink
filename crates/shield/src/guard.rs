@@ -155,6 +155,11 @@ impl ShieldGuard {
         }
     }
 
+    /// Get allowed UIDs for kernel-level bypass
+    pub fn allowed_uids(&self) -> &[u32] {
+        &self.config.allowed_uids
+    }
+
     /// Run the full interception pipeline for a PID
     pub async fn intercept(&self, pid: u32) -> InterceptResult {
         let proc_info = match ProcessInfo::from_pid(pid) {

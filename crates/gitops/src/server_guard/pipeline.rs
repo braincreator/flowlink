@@ -345,10 +345,21 @@ impl Classifier {
             event.action = ActionTier::Silent;
         } else {
             // Non-root accessing canary = intruder
-            event.severity = Severity::Critical;
-            event.action = ActionTier::Escalate;
+            match risk {
+                "high" | "critical" => {
+                    event.severity = Severity::Critical;
+                    event.action = ActionTier::Escalate;
+                }
+                "medium" => {
+                    event.severity = Severity::High;
+                    event.action = ActionTier::Escalate;
+                }
+                _ => {
+                    event.severity = Severity::Medium;
+                    event.action = ActionTier::Escalate;
+                }
+            }
         }
-        let _ = risk; // TODO: use risk level from canary config
     }
 
     fn classify_state_drift(&self, event: &mut GuardEvent, component: &str) {
