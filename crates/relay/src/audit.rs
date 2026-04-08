@@ -64,7 +64,7 @@ impl AuditStore {
     }
 
     pub fn query(&self, filter: &AuditFilter) -> Vec<AuditEvent> {
-        let now_nanos = Utc::now().timestamp_nanos_opt().unwrap_or(0) as u64;
+        let _now_nanos = Utc::now().timestamp_nanos_opt().unwrap_or(0) as u64;
         let mut results: Vec<AuditEvent> = self.events
             .iter()
             .filter(|e| {

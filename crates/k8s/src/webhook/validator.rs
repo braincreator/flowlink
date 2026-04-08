@@ -30,7 +30,7 @@ const DANGEROUS_CAPS: &[&str] = &[
 const DANGEROUS_MOUNTS: &[&str] = &["/", "/etc", "/var", "/usr", "/bin", "/sbin", "/lib"];
 
 impl AdmissionWebhook {
-    pub(crate) fn validate_pod(&self, pod: &Value, ns: &str) -> Vec<PolicyViolation> {
+    pub(crate) fn validate_pod(&self, pod: &Value, _ns: &str) -> Vec<PolicyViolation> {
         let mut violations = Vec::new();
 
         violations.extend(self.check_security_context(pod));

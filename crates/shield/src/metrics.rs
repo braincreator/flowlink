@@ -1,4 +1,4 @@
-use prometheus::{core::Collector, CounterVec, Encoder, Gauge, HistogramVec, Opts, Registry, TextEncoder};
+use prometheus::{CounterVec, Encoder, Gauge, HistogramVec, Opts, Registry, TextEncoder};
 
 /// Prometheus metrics for FlowLink Shield (standalone binary).
 #[derive(Clone)]

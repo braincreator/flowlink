@@ -6,8 +6,7 @@ mod level1;
 mod level2;
 mod level3;
 
-pub use types::{ThreatLevel, Threat, Command, AnalysisResult, PolicyAwareResult};
-pub use types::bn;
+pub use types::{Command, AnalysisResult, PolicyAwareResult};
 
 use crate::policy_dsl::{PolicyEngine, EvalContext as PolicyEvalContext};
 

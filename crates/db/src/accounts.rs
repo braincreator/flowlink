@@ -4,7 +4,6 @@ use anyhow::Result;
 use sqlx::PgPool;
 use chrono::{DateTime, Utc};
 
-use crate::pool::DbPool;
 
 /// Account row from database
 #[derive(Debug, Clone, sqlx::FromRow)]

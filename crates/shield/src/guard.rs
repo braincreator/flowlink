@@ -312,7 +312,7 @@ impl ShieldGuard {
         }
 
         // Step 6: Wait for approval with timeout
-        let (responder_tx, responder_rx) = oneshot::channel();
+        let (responder_tx, _responder_rx) = oneshot::channel();
 
         let pending = PendingAction {
             pid,
@@ -325,7 +325,7 @@ impl ShieldGuard {
             responder: responder_tx,
         };
 
-        let intercepted_at = pending.intercepted_at;
+        let _intercepted_at = pending.intercepted_at;
         self.pending.insert(pid, pending);
 
         // Start timeout timer
@@ -454,7 +454,7 @@ impl ShieldGuard {
     /// Send an AuditEvent to the relay's audit channel (plaintext, non-blocking)
     async fn send_audit_event(&self, agent_id: &str, event: flowlink_core::channels::AuditEvent) {
         if let Some(ref relay) = self.relay_client {
-            let agent_id = agent_id.to_string();
+            let _agent_id = agent_id.to_string();
             let relay = relay.clone();
             tokio::spawn(async move {
                 let url = relay.relay_url();

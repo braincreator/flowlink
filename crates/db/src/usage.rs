@@ -1,10 +1,9 @@
 //! Daily usage persistence
 
 use anyhow::Result;
-use chrono::{DateTime, Utc, NaiveDate};
+use chrono::{Utc, NaiveDate};
 use sqlx::PgPool;
 
-use crate::pool::DbPool;
 
 #[derive(Debug, Clone, Default)]
 pub struct UsageRow {

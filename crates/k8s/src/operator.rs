@@ -95,9 +95,7 @@ impl ShieldOperator {
 
     /// Configure or update the MutatingWebhookConfiguration for the given namespace.
     pub async fn ensure_webhook_config(&self, namespace: &str, cert_pem: &str) -> Result<()> {
-        use k8s_openapi::api::admissionregistration::v1::{
-            MutatingWebhookConfiguration, MutatingWebhook, WebhookClientConfig, RuleWithOperations,
-        };
+        use k8s_openapi::api::admissionregistration::v1::MutatingWebhookConfiguration;
 
         let webhook_name = "flowlink-shield-webhook";
         let service_name = "flowlink-shield-webhook";

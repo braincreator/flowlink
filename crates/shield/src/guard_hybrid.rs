@@ -3,13 +3,12 @@
 
 use std::sync::Arc;
 use anyhow::Result;
-use log::{info, warn, error};
-use tokio::sync::mpsc;
+use log::{info, warn};
 
-use crate::ebpf_kernel::{EbpfKernelMonitor, KernelEvent, DangerousPattern, default_patterns};
+use crate::ebpf_kernel::{KernelEvent, DangerousPattern, default_patterns};
 #[cfg(target_os = "macos")]
-use crate::es_monitor::{EsMonitor, EsConfig};
-use crate::guard::{ShieldGuard, ShieldGuardConfig};
+use crate::es_monitor::EsConfig;
+use crate::guard::ShieldGuard;
 use crate::interceptor::{sigcont, sigkill};
 
 /// Hybrid guard configuration

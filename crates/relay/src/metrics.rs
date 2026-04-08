@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use prometheus::{core::Collector, CounterVec, Encoder, Gauge, GaugeVec, HistogramVec, Opts, Registry, TextEncoder};
+use prometheus::{CounterVec, Encoder, Gauge, GaugeVec, HistogramVec, Opts, Registry, TextEncoder};
 
 /// Prometheus metrics for FlowLink Relay.
 #[derive(Clone)]

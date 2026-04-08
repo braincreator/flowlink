@@ -77,27 +77,27 @@ impl AuditRepo {
         let mut conditions = Vec::new();
         let mut bind_idx = 0u32;
 
-        if let Some(level) = &filter.level {
+        if let Some(_level) = &filter.level {
             bind_idx += 1;
             conditions.push(format!("level = ${}", bind_idx));
         }
-        if let Some(cat) = &filter.category {
+        if let Some(_cat) = &filter.category {
             bind_idx += 1;
             conditions.push(format!("category = ${}", bind_idx));
         }
-        if let Some(agent) = &filter.agent_id {
+        if let Some(_agent) = &filter.agent_id {
             bind_idx += 1;
             conditions.push(format!("agent_id = ${}", bind_idx));
         }
-        if let Some(acc) = &filter.account_id {
+        if let Some(_acc) = &filter.account_id {
             bind_idx += 1;
             conditions.push(format!("account_id = ${}", bind_idx));
         }
-        if let Some(from) = filter.from {
+        if let Some(_from) = filter.from {
             bind_idx += 1;
             conditions.push(format!("timestamp >= ${}", bind_idx));
         }
-        if let Some(to) = filter.to {
+        if let Some(_to) = filter.to {
             bind_idx += 1;
             conditions.push(format!("timestamp <= ${}", bind_idx));
         }

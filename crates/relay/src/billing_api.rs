@@ -3,7 +3,7 @@
 //! REST API for plan management, usage checking, and invoices.
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     response::IntoResponse,
     Json,
 };

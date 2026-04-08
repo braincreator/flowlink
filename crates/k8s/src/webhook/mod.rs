@@ -2,9 +2,8 @@ mod types;
 mod validator;
 
 pub use types::*;
-use validator::*;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::config::K8sConfig;
 use crate::crd::{PolicyRule, ShieldMode};

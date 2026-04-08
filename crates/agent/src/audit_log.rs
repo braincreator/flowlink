@@ -142,7 +142,7 @@ fn sign_entry(entry: &AuditEntry, secret: &[u8]) -> String {
 
 /// Constant-time HMAC comparison.
 fn hmac_constant_eq(a: &str, b: &str) -> bool {
-    use hmac::Mac;
+    
     // Simple constant-time comparison via subtle or manual
     let a_bytes = a.as_bytes();
     let b_bytes = b.as_bytes();

@@ -14,7 +14,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::{AccountBilling, BillingEngine};
+use super::AccountBilling;
 
 // ---------------------------------------------------------------------------
 // Persist trait — storage backend abstraction

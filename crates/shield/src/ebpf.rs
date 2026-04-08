@@ -2,7 +2,7 @@
 // eBPF (Linux) or simulated /proc polling
 
 use anyhow::Result;
-use log::{info, warn};
+use log::info;
 use std::collections::HashSet;
 
 /// Trait for process monitors that detect new processes

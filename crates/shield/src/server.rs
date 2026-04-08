@@ -7,8 +7,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::Serialize;
-use crate::guard::{ShieldGuard, InterceptResult};
-use crate::forensic::ForensicContext;
+use crate::guard::ShieldGuard;
 
 /// Shared state for the HTTP server
 #[derive(Clone)]

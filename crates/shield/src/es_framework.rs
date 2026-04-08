@@ -1,8 +1,7 @@
 // FlowLink Shield — macOS Endpoint Security Framework bindings
 // Low-level wrapper around the ES API for race-free process interception.
 
-use anyhow::{Result, Context};
-use log::{info, warn, error};
+use anyhow::Result;
 
 /// Event types we care about
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -37,7 +36,7 @@ pub use real_es::*;
 mod real_es {
     use super::*;
     use std::os::raw::c_void;
-    use std::ffi::CStr;
+    
 
     // Opaque ES client handle
     pub struct EsClient {

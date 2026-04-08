@@ -1,5 +1,4 @@
 use base64::Engine;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::config::K8sConfig;

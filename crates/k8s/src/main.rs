@@ -13,7 +13,6 @@ use std::sync::Arc;
 use tokio::signal;
 
 use flowlink_k8s::config::K8sConfig;
-use flowlink_k8s::crd::ShieldMode;
 use flowlink_k8s::operator::ShieldOperator;
 use flowlink_k8s::webhook::{AdmissionRequest, AdmissionResponse, AdmissionResponseStatus, AdmissionWebhook};
 

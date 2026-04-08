@@ -3,11 +3,11 @@
 // Equivalent to eBPF on Linux: processes are blocked BEFORE they start.
 
 use anyhow::Result;
-use log::{info, warn, error};
+use log::{info, warn};
 
 use crate::ebpf::ProcessMonitor;
-use crate::ebpf_kernel::{KernelEvent, DangerousPattern, default_patterns};
-use crate::es_framework::{EsClient, EsAuthResult, EsEventType, EsProcessEvent};
+use crate::ebpf_kernel::{DangerousPattern, default_patterns};
+use crate::es_framework::EsClient;
 
 /// Configuration for the ES monitor
 #[derive(Debug, Clone)]
@@ -67,7 +67,7 @@ impl EsMonitor {
 }
 
 impl ProcessMonitor for EsMonitor {
-    fn start(&mut self, callback: Box<dyn Fn(u32) + Send + Sync>) -> Result<()> {
+    fn start(&mut self, _callback: Box<dyn Fn(u32) + Send + Sync>) -> Result<()> {
         if self.running {
             anyhow::bail!("ES monitor already running");
         }

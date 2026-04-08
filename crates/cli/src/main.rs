@@ -1,7 +1,6 @@
 // FlowLink CLI — unified command for agent and relay
 
 use clap::{Parser, Subcommand};
-use log::info;
 use std::io::{self, Read};
 
 #[derive(Parser, Debug)]

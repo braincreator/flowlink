@@ -10,13 +10,11 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use log::info;
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, pin::Pin};
-use futures_util::stream::Stream;
+use std::convert::Infallible;
 use std::sync::Arc;
 // StreamExt comes from futures_util (re-exported via axum)
 
 use crate::approval::{ApprovalDecision, ApprovalQueue};
-use crate::auth::AuthManager;
 use crate::devices::DeviceManager;
 use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;

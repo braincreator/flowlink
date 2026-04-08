@@ -1,9 +1,7 @@
 // FlowLink Shield — eBPF Kernel Monitor
 // Loads the BPF program, populates maps, consumes ring buffer events.
 
-use anyhow::{Result, Context};
-use log::{info, warn, error};
-use std::sync::Arc;
+use anyhow::Result;
 use tokio::sync::mpsc;
 
 /// Event received from the eBPF ring buffer

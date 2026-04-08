@@ -3,7 +3,6 @@
 use axum::extract::ws::Message as AxumMsg;
 use dashmap::DashMap;
 use flowlink_core::Message;
-use log::warn;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 

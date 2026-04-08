@@ -3,10 +3,9 @@
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use dashmap::DashMap;
-use log::warn;
 use rand::Rng;
 
-use flowlink_core::rbac::{Permission, RbacToken, RbacUser, Role};
+use flowlink_core::rbac::{Permission, RbacToken, RbacUser};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RbacError {

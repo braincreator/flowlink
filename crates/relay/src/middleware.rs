@@ -227,7 +227,7 @@ pub fn cors_layer(allowed_origins: Vec<String>) -> tower_http::cors::CorsLayer {
             .allow_credentials(false);
     }
 
-    let origins: Vec<axum::http::HeaderValue> = allowed_origins
+    let _origins: Vec<axum::http::HeaderValue> = allowed_origins
         .iter()
         .filter_map(|o| o.parse().ok())
         .collect();
