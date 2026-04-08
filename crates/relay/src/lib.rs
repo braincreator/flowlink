@@ -87,7 +87,13 @@ impl Relay {
                 std::path::Path::new(&shellexpand::tilde("~/.flowlink/audit.jsonl").to_string())
             )),
             metrics: Arc::new(metrics::Metrics::new()),
-            billing: None, // TODO: initialize from config
+            billing: if self.config.billing.enabled {
+                Some(Arc::new(flowlink_billing::BillingEngine::new(
+                    flowlink_billing::payment::PaymentConfig::default(),
+                )))
+            } else {
+                None
+            },
             db,
         };
 

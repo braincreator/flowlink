@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+use crate::middleware::AccountIdExtractor;
 use crate::server::AppState;
 
 // ═══════════════════════════════════════════════
@@ -40,27 +41,45 @@ pub struct BillingInfo {
 }
 
 // ═══════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════
+
+fn get_billing_engine(state: &AppState) -> Result<&Arc<flowlink_billing::BillingEngine>, axum::response::Response> {
+    match &state.billing {
+        Some(engine) => Ok(engine),
+        None => Err((
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "Billing not configured"})),
+        ).into_response()),
+    }
+}
+
+// ═══════════════════════════════════════════════
 // Handlers
 // ═══════════════════════════════════════════════
 
 /// GET /api/billing — get billing info for the authenticated account
-pub async fn get_billing_info(State(_state): State<AppState>) -> impl IntoResponse {
-    // TODO: extract account_id from JWT auth context
-    let account_id = "default";
-
-    let billing_engine = match &_state.billing {
-        Some(engine) => engine,
-        None => {
-            return (
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "Billing not configured"})),
-            ).into_response();
-        }
+pub async fn get_billing_info(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+) -> impl IntoResponse {
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
     };
 
-    let account_billing = billing_engine.get_or_create_account(account_id);
+    // Ensure account exists in DB
+    if let Some(db) = &state.db {
+        if let Err(e) = flowlink_db::accounts::AccountRepo::get_or_create(
+            db.pool(), &account.0, "free",
+        ).await {
+            log::warn!("DB account lookup failed: {e}");
+        }
+    }
+
+    let account_billing = billing_engine.get_or_create_account(&account.0);
     let plan = billing_engine.plans().get(&account_billing.plan_id);
-    let usage = billing_engine.usage().get_snapshot(account_id);
+    let usage = billing_engine.usage().get_snapshot(&account.0);
 
     let plan_name = plan.as_ref().map(|p| p.name.clone()).unwrap_or_default();
     let available_plans: Vec<Value> = billing_engine.plans()
@@ -90,33 +109,24 @@ pub async fn get_billing_info(State(_state): State<AppState>) -> impl IntoRespon
 }
 
 /// GET /api/billing/usage — get current usage snapshot
-pub async fn get_usage(State(_state): State<AppState>) -> impl IntoResponse {
-    let account_id = "default"; // TODO: from JWT
-
-    let billing_engine = match &_state.billing {
-        Some(engine) => engine,
-        None => {
-            return (
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "Billing not configured"})),
-            ).into_response();
-        }
+pub async fn get_usage(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+) -> impl IntoResponse {
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
     };
 
-    let snapshot = billing_engine.usage().get_snapshot(account_id);
+    let snapshot = billing_engine.usage().get_snapshot(&account.0);
     (axum::http::StatusCode::OK, Json(snapshot)).into_response()
 }
 
 /// GET /api/billing/plans — list available plans
-pub async fn list_plans(State(_state): State<AppState>) -> impl IntoResponse {
-    let billing_engine = match &_state.billing {
-        Some(engine) => engine,
-        None => {
-            return (
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "Billing not configured"})),
-            ).into_response();
-        }
+pub async fn list_plans(State(state): State<AppState>) -> impl IntoResponse {
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
     };
 
     let plans = billing_engine.plans().list_available();
@@ -125,26 +135,28 @@ pub async fn list_plans(State(_state): State<AppState>) -> impl IntoResponse {
 
 /// POST /api/billing/change-plan — change plan
 pub async fn change_plan(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
     Json(body): Json<ChangePlanRequest>,
 ) -> impl IntoResponse {
-    let account_id = "default"; // TODO: from JWT
-
-    let billing_engine = match &_state.billing {
-        Some(engine) => engine,
-        None => {
-            return (
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "Billing not configured"})),
-            ).into_response();
-        }
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
     };
 
-    let mut account_billing = billing_engine.get_or_create_account(account_id);
+    let mut account_billing = billing_engine.get_or_create_account(&account.0);
 
     match billing_engine.change_plan(&mut account_billing, &body.plan_id) {
         Ok(()) => {
             billing_engine.update_account(&account_billing);
+            // Persist to DB if available
+            if let Some(db) = &state.db {
+                if let Err(e) = flowlink_db::accounts::AccountRepo::update_plan(
+                    db.pool(), &account.0, &body.plan_id,
+                ).await {
+                    log::warn!("Failed to persist plan change to DB: {e}");
+                }
+            }
             (axum::http::StatusCode::OK, Json(json!({
                 "plan_id": account_billing.plan_id,
                 "message": "Plan changed successfully",
@@ -159,36 +171,27 @@ pub async fn change_plan(
 }
 
 /// GET /api/billing/invoices — list invoices
-pub async fn list_invoices(State(_state): State<AppState>) -> impl IntoResponse {
-    let account_id = "default"; // TODO: from JWT
-
-    let billing_engine = match &_state.billing {
-        Some(engine) => engine,
-        None => {
-            return (
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "Billing not configured"})),
-            ).into_response();
-        }
+pub async fn list_invoices(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+) -> impl IntoResponse {
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
     };
 
-    let invoices = billing_engine.invoices().list_for_account(account_id);
+    let invoices = billing_engine.invoices().list_for_account(&account.0);
     (axum::http::StatusCode::OK, Json(invoices)).into_response()
 }
 
 /// GET /api/billing/invoices/{id} — get specific invoice
 pub async fn get_invoice(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let billing_engine = match &_state.billing {
-        Some(engine) => engine,
-        None => {
-            return (
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "Billing not configured"})),
-            ).into_response();
-        }
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
     };
 
     match billing_engine.invoices().get(&id) {
@@ -202,15 +205,10 @@ pub async fn get_invoice(
 }
 
 /// GET /api/billing/payments/methods — list available payment methods
-pub async fn list_payment_methods(State(_state): State<AppState>) -> impl IntoResponse {
-    let billing_engine = match &_state.billing {
-        Some(engine) => engine,
-        None => {
-            return (
-                axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"error": "Billing not configured"})),
-            ).into_response();
-        }
+pub async fn list_payment_methods(State(state): State<AppState>) -> impl IntoResponse {
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
     };
 
     let methods: Vec<Value> = billing_engine.payments().available_methods()

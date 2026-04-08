@@ -26,6 +26,28 @@ pub struct ClientId(pub String);
 #[derive(Clone)]
 pub struct UserRoles(pub Vec<flowlink_core::rbac::Role>);
 
+#[derive(Clone)]
+pub struct AccountId(pub String);
+
+/// Extract AccountId from request extensions.
+/// Set by auth middleware (from JWT or ClientId fallback).
+#[derive(Clone)]
+pub struct AccountIdExtractor(pub String);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for AccountIdExtractor {
+    type Rejection = axum::http::StatusCode;
+
+    fn from_request_parts<'a>(
+        parts: &'a mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        let account = parts.extensions.get::<AccountId>().map(|a| a.0.clone())
+            .or_else(|| parts.extensions.get::<ClientId>().map(|c| c.0.clone()))
+            .unwrap_or_else(|| "default".to_string());
+        std::future::ready(Ok(AccountIdExtractor(account)))
+    }
+}
+
 // ── Auth Middleware (simple, dev-mode passthrough) ──
 
 pub async fn auth_middleware_simple(req: Request, next: Next) -> Response {
