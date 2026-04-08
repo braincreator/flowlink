@@ -8,4 +8,5 @@ members = [
     "crates/relay",
     "crates/cli",
     "crates/k8s",
+    "crates/gitops",
 ]

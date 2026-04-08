@@ -1,0 +1,149 @@
+# FlowLink GitOps — Auto-Fix Rules for Drift Detection
+# When drift is detected, these rules determine if automatic remediation is allowed.
+
+rules:
+  # Docker containers
+
+  - name: restart-stopped-containers
+    component: docker
+    drift_type: ContainerStopped
+    severity: Medium
+    auto_fix: true
+    command: "docker start {container.name}"
+    notify: true
+    cooldown_seconds: 300
+    max_retries: 3
+
+  - name: restart-crashed-containers
+    component: docker
+    drift_type: ContainerCrashed
+    severity: High
+    auto_fix: true
+    command: "docker restart {container.name}"
+    notify: true
+    cooldown_seconds: 300
+    max_retries: 2
+
+  # Services
+
+  - name: restart-failed-services
+    component: services
+    drift_type: ServiceFailed
+    severity: High
+    auto_fix: true
+    command: "systemctl restart {service.name}"
+    notify: true
+    cooldown_seconds: 600
+    max_retries: 2
+
+  - name: restart-stopped-services
+    component: services
+    drift_type: ServiceStopped
+    severity: Medium
+    auto_fix: false
+    command: "systemctl start {service.name}"
+    notify: true
+
+  # Packages
+
+  - name: unexpected-package-installed
+    component: packages
+    drift_type: PackageAdded
+    severity: Low
+    auto_fix: false
+    notify: true
+
+  - name: unexpected-package-removed
+    component: packages
+    drift_type: PackageRemoved
+    severity: Medium
+    auto_fix: false
+    notify: true
+
+  # Security (always alert, never auto-fix)
+
+  - name: ssh-authorized-keys-changed
+    component: files
+    drift_type: FileModified
+    severity: Critical
+    path_pattern: "/home/*/.ssh/authorized_keys"
+    auto_fix: false
+    notify: true
+    alert_channel: "security"
+
+  - name: etc-passwd-changed
+    component: files
+    drift_type: FileModified
+    severity: Critical
+    path_pattern: "/etc/passwd"
+    auto_fix: false
+    notify: true
+    alert_channel: "security"
+
+  - name: etc-shadow-changed
+    component: files
+    drift_type: FileModified
+    severity: Critical
+    path_pattern: "/etc/shadow"
+    auto_fix: false
+    notify: true
+    alert_channel: "security"
+
+  - name: firewall-rules-changed
+    component: files
+    drift_type: FileModified
+    severity: Critical
+    path_pattern: "/etc/iptables/*"
+    auto_fix: false
+    notify: true
+    alert_channel: "security"
+
+  - name: sudoers-changed
+    component: files
+    drift_type: FileModified
+    severity: Critical
+    path_pattern: "/etc/sudoers*"
+    auto_fix: false
+    notify: true
+    alert_channel: "security"
+
+  # Config files
+
+  - name: nginx-config-changed
+    component: files
+    drift_type: FileModified
+    severity: High
+    path_pattern: "/etc/nginx/*"
+    auto_fix: false
+    notify: true
+
+  - name: docker-config-changed
+    component: files
+    drift_type: FileModified
+    severity: High
+    path_pattern: "/etc/docker/*"
+    auto_fix: false
+    notify: true
+
+  # Global settings
+
+settings:
+  # Minimum time between auto-fix attempts (seconds)
+  global_cooldown: 300
+
+  # Maximum auto-fixes per hour across all rules
+  max_auto_fixes_per_hour: 10
+
+  # If true, critical severity drifts will trigger immediate backup before any fix
+  backup_before_fix_on_critical: true
+
+  # Notification settings
+  notifications:
+    # Channels: "telegram", "email", "webhook"
+    default_channel: "telegram"
+
+    # Minimum severity to trigger notification
+    min_severity: Low
+
+    # Rate limit notifications (max per hour)
+    max_per_hour: 20

@@ -1,5 +1,8 @@
 // FlowLink Shield — eBPF-powered 3-level command guardian
 
+#[cfg(feature = "gitops")]
+mod gitops_integration;
+
 mod engine;
 mod interceptor;
 mod snapshot;

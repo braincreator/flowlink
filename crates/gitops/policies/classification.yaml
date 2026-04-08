@@ -1,0 +1,261 @@
+# FlowLink GitOps — Command Classification Policy
+# Rules are evaluated in order; first match wins.
+
+rules:
+  # === BLOCKED TIER ===
+
+  - name: block-rm-root
+    command: "rm"
+    conditions:
+      - flag: "-rf"
+      - arg_contains: "/"
+    tier: Blocked
+    reason: "Root filesystem deletion is blocked"
+
+  - name: block-rm-no-preserve-root
+    command: "rm"
+    conditions:
+      - flag: "--no-preserve-root"
+    tier: Blocked
+    reason: "No-preserve-root flag is blocked"
+
+  - name: block-mkfs
+    command: "mkfs"
+    tier: Blocked
+    reason: "Filesystem formatting is blocked"
+
+  - name: block-fdisk
+    command: "fdisk"
+    tier: Blocked
+    reason: "Disk partitioning is blocked"
+
+  - name: block-dd-disk
+    command: "dd"
+    conditions:
+      - arg_contains: "of=/dev/"
+    tier: Blocked
+    reason: "Direct disk write is blocked"
+
+  - name: block-chmod-shadow
+    command: "chmod"
+    conditions:
+      - arg_contains: "777"
+      - arg_any: ["/etc/shadow", "/etc/passwd", "/etc/ssh"]
+    tier: Blocked
+    reason: "Permission change on critical system files is blocked"
+
+  # === DESTRUCTIVE TIER ===
+
+  - name: destructive-rm
+    command: "rm"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-mv
+    command: "mv"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-truncate
+    command: "truncate"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-shred
+    command: "shred"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-dd
+    command: "dd"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-sed-inplace
+    command: "sed"
+    conditions:
+      - flag: "-i"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-docker-rm
+    command: "docker"
+    subcommand: "rm"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-docker-rmi
+    command: "docker"
+    subcommand: "rmi"
+    tier: Destructive
+
+  - name: destructive-docker-down
+    command: "docker"
+    subcommand: "down"
+    tier: Destructive
+
+  - name: destructive-systemctl-stop
+    command: "systemctl"
+    subcommand: "stop"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-systemctl-disable
+    command: "systemctl"
+    subcommand: "disable"
+    tier: Destructive
+
+  - name: destructive-apt-remove
+    command: "apt"
+    subcommand: "remove"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-apt-purge
+    command: "apt"
+    subcommand: "purge"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-psql-drop
+    command: "psql"
+    conditions:
+      - arg_any: ["DROP", "TRUNCATE", "DELETE"]
+    tier: Destructive
+    auto_backup: true
+
+  # === MODIFY TIER ===
+
+  - name: modify-chmod-777
+    command: "chmod"
+    conditions:
+      - arg_contains: "777"
+    tier: Modify
+    rewrite: "755"
+    reason: "chmod 777 is too permissive, auto-corrected to 755"
+
+  - name: modify-chmod-666
+    command: "chmod"
+    conditions:
+      - arg_contains: "666"
+    tier: Modify
+    rewrite: "644"
+    reason: "chmod 666 is too permissive, auto-corrected to 644"
+
+  # === NETWORK TIER ===
+
+  - name: network-curl
+    command: "curl"
+    tier: Network
+    requires_approval: false
+
+  - name: network-wget
+    command: "wget"
+    tier: Network
+    requires_approval: false
+
+  - name: network-ssh
+    command: "ssh"
+    tier: Network
+    requires_approval: true
+
+  - name: network-scp
+    command: "scp"
+    tier: Network
+    requires_approval: true
+
+  - name: network-rsync
+    command: "rsync"
+    tier: Network
+    requires_approval: true
+
+  # === READ-ONLY TIER ===
+
+  - name: readonly-cat
+    command: "cat"
+    tier: ReadOnly
+
+  - name: readonly-ls
+    command: "ls"
+    tier: ReadOnly
+
+  - name: readonly-grep
+    command: "grep"
+    tier: ReadOnly
+
+  - name: readonly-find
+    command: "find"
+    tier: ReadOnly
+
+  - name: readonly-stat
+    command: "stat"
+    tier: ReadOnly
+
+  - name: readonly-head
+    command: "head"
+    tier: ReadOnly
+
+  - name: readonly-tail
+    command: "tail"
+    tier: ReadOnly
+
+  - name: readonly-wc
+    command: "wc"
+    tier: ReadOnly
+
+  - name: readonly-file
+    command: "file"
+    tier: ReadOnly
+
+  - name: readonly-which
+    command: "which"
+    tier: ReadOnly
+
+  - name: readonly-echo
+    command: "echo"
+    tier: ReadOnly
+
+  - name: readonly-pwd
+    command: "pwd"
+    tier: ReadOnly
+
+  - name: readonly-ps
+    command: "ps"
+    tier: ReadOnly
+
+  - name: readonly-df
+    command: "df"
+    tier: ReadOnly
+
+  - name: readonly-free
+    command: "free"
+    tier: ReadOnly
+
+  - name: readonly-docker-ps
+    command: "docker"
+    subcommand: "ps"
+    tier: ReadOnly
+
+  - name: readonly-docker-logs
+    command: "docker"
+    subcommand: "logs"
+    tier: ReadOnly
+
+  - name: readonly-docker-inspect
+    command: "docker"
+    subcommand: "inspect"
+    tier: ReadOnly
+
+  - name: readonly-docker-images
+    command: "docker"
+    subcommand: "images"
+    tier: ReadOnly
+
+  - name: readonly-systemctl-status
+    command: "systemctl"
+    subcommand: "status"
+    tier: ReadOnly
+
+  - name: readonly-journalctl
+    command: "journalctl"
+    tier: ReadOnly

@@ -36,6 +36,7 @@ harness = false
 
 [features]
 ebpf = ["aya"]
+gitops = []
 
 [dependencies.aya]
 version = "0.12"
