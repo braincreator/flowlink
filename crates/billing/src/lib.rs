@@ -122,8 +122,12 @@ impl BillingEngine {
     }
 
     /// Update account billing state
+    ///
+    /// Note: persistence is handled at the API layer (billing_api.rs) which
+    /// writes to the database. This method is intentionally a no-op for the
+    /// in-memory engine.
     pub fn update_account(&self, _billing: &AccountBilling) {
-        // TODO: persist to database
+        // Persistence is handled by billing_api.rs → db crate
     }
 
     /// Check if an operation is allowed under the current plan
