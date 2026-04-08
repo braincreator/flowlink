@@ -1,0 +1,18 @@
+[package]
+name = "flowlink-billing"
+version = "0.1.0"
+edition = "2021"
+description = "Billing engine for FlowLink: plans, usage tracking, invoices, payments"
+
+[dependencies]
+flowlink-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

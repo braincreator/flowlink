@@ -1049,6 +1049,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "flowlink-billing"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "flowlink-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "flowlink-core"
 version = "0.1.0"
 dependencies = [
