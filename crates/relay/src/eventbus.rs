@@ -31,11 +31,10 @@ impl EventBus {
 
     /// Subscribe to a named channel. Returns a receiver.
     pub fn subscribe(&self, channel: &str) -> broadcast::Receiver<String> {
-        if !self.channels.contains_key(channel) {
-            let (tx, _) = broadcast::channel(256);
-            self.channels.insert(channel.to_string(), tx);
-        }
-        self.channels.get(channel).unwrap().subscribe()
+        self.channels
+            .entry(channel.to_string())
+            .or_insert_with(|| broadcast::channel(256).0)
+            .subscribe()
     }
 }
 

@@ -13,6 +13,15 @@ uuid = { version = "1", features = ["v4", "serde"] }
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
+dashmap = "6"
+reqwest = { version = "0.12", features = ["json"], default-features = false, optional = true }
+sha2 = "0.10"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt"] }
+
+[features]
+default = ["tochka-live"]
+tochka-live = ["reqwest/rustls-tls"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

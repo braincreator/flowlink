@@ -147,8 +147,8 @@ pub async fn change_plan(
     let mut account_billing = billing_engine.get_or_create_account(&account.0);
 
     match billing_engine.change_plan(&mut account_billing, &body.plan_id) {
-        Ok(()) => {
-            billing_engine.update_account(&account_billing);
+        Ok(created_invoice) => {
+            // change_plan already calls update_account internally
             // Persist to DB if available
             if let Some(db) = &state.db {
                 if let Err(e) = flowlink_db::accounts::AccountRepo::update_plan(
@@ -156,11 +156,38 @@ pub async fn change_plan(
                 ).await {
                     log::warn!("Failed to persist plan change to DB: {e}");
                 }
+                // Persist invoice to DB
+                if let Some(ref inv) = created_invoice {
+                    let row = flowlink_db::invoices::InvoiceRow {
+                        id: inv.id.clone(),
+                        account_id: inv.account_id.clone(),
+                        number: inv.number.clone(),
+                        status: format!("{:?}", inv.status).to_lowercase(),
+                        subtotal_kopecks: inv.subtotal_kopecks as i64,
+                        tax_kopecks: inv.tax_kopecks as i64,
+                        total_kopecks: inv.total_kopecks as i64,
+                        currency: inv.currency.clone(),
+                        payment_method: inv.payment_method.as_ref().map(|m| format!("{:?}", m).to_lowercase()),
+                        created_at: inv.created_at,
+                        paid_at: inv.paid_at,
+                        due_at: inv.due_at,
+                        notes: inv.notes.clone(),
+                    };
+                    if let Err(e) = flowlink_db::invoices::InvoiceRepo::create(
+                        db.pool(), &row, &[],
+                    ).await {
+                        log::warn!("Failed to persist invoice to DB: {e}");
+                    }
+                }
             }
-            (axum::http::StatusCode::OK, Json(json!({
+            let mut resp = json!({
                 "plan_id": account_billing.plan_id,
                 "message": "Plan changed successfully",
-            }))).into_response()
+            });
+            if let Some(inv) = created_invoice {
+                resp["invoice"] = serde_json::to_value(&inv).unwrap_or(json!(null));
+            }
+            (axum::http::StatusCode::OK, Json(resp)).into_response()
         }
         Err(e) => {
             (axum::http::StatusCode::BAD_REQUEST, Json(json!({

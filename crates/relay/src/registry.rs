@@ -92,7 +92,7 @@ impl Registry {
             last_activity: None,
         };
         self.clients.insert(client.id.clone(), client.clone());
-        self.save_clients()?;
+        self.save_clients();
         Ok(client)
     }
 
@@ -151,7 +151,7 @@ impl Registry {
             active: true,
         };
         self.agents.insert(agent.id.clone(), agent.clone());
-        self.save_agents()?;
+        self.save_agents();
         Ok(agent)
     }
 
@@ -192,11 +192,32 @@ impl Registry {
         Ok(())
     }
 
-    fn save_clients(&self) -> Result<()> {
+    /// Blocking save — use in tests or shutdown hooks.
+    /// In production, prefer save_clients() (non-blocking).
+    pub fn save_clients_sync(&self) -> Result<()> {
         let clients: Vec<_> = self.clients.iter().map(|r| r.value().clone()).collect();
         let json = serde_json::to_string_pretty(&clients)?;
         std::fs::write(self.data_dir.join("clients.json"), json)?;
         Ok(())
+    }
+
+    /// Blocking save — use in tests or shutdown hooks.
+    fn flush_clients(&self) -> Result<()> {
+        self.save_clients_sync()
+    }
+
+    /// Save clients to disk without blocking the caller.
+    /// Uses a detached thread — safe to call from async context.
+    fn save_clients(&self) {
+        let clients: Vec<_> = self.clients.iter().map(|r| r.value().clone()).collect();
+        let path = self.data_dir.join("clients.json");
+        std::thread::spawn(move || {
+            if let Ok(json) = serde_json::to_string_pretty(&clients) {
+                if let Err(e) = std::fs::write(&path, json) {
+                    log::error!("Failed to save clients: {e}");
+                }
+            }
+        });
     }
 
     fn load_agents(&self) -> Result<()> {
@@ -211,11 +232,31 @@ impl Registry {
         Ok(())
     }
 
-    fn save_agents(&self) -> Result<()> {
+    /// Blocking save — use in tests or shutdown hooks.
+    pub fn save_agents_sync(&self) -> Result<()> {
         let agents: Vec<_> = self.agents.iter().map(|r| r.value().clone()).collect();
         let json = serde_json::to_string_pretty(&agents)?;
         std::fs::write(self.data_dir.join("agents.json"), json)?;
         Ok(())
+    }
+
+    /// Blocking save — use in tests or shutdown hooks.
+    fn flush_agents(&self) -> Result<()> {
+        self.save_agents_sync()
+    }
+
+    /// Save agents to disk without blocking the caller.
+    /// Uses a detached thread — safe to call from async context.
+    fn save_agents(&self) {
+        let agents: Vec<_> = self.agents.iter().map(|r| r.value().clone()).collect();
+        let path = self.data_dir.join("agents.json");
+        std::thread::spawn(move || {
+            if let Ok(json) = serde_json::to_string_pretty(&agents) {
+                if let Err(e) = std::fs::write(&path, json) {
+                    log::error!("Failed to save agents: {e}");
+                }
+            }
+        });
     }
 }
 
@@ -258,6 +299,7 @@ mod tests {
             let reg = Registry::new(dir.path()).unwrap();
             let c = reg.register_client("Persist".into(), String::new()).unwrap();
             id = c.id;
+            reg.flush_clients().unwrap();
         }
         let reg2 = Registry::new(dir.path()).unwrap();
         assert!(reg2.get_client(&id).is_some());

@@ -43,6 +43,8 @@ fn test_registry_persistence() {
         let reg = Registry::new(dir.path()).unwrap();
         let client = reg.register_client("Persist Test".into(), String::new()).unwrap();
         reg.register_agent(&client.id, "agent-p".into(), "token-p".into()).unwrap();
+        reg.save_clients_sync().unwrap();
+        reg.save_agents_sync().unwrap();
     }
     let reg2 = Registry::new(dir.path()).unwrap();
     assert_eq!(reg2.list_clients().len(), 1);

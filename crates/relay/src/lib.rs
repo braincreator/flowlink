@@ -15,6 +15,7 @@ pub mod devices;
 pub mod rbac_manager;
 pub mod metrics;
 pub mod billing_api;
+pub mod billing_persist;
 
 use std::sync::Arc;
 use log::info;

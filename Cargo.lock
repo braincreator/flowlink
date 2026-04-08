@@ -1139,10 +1139,14 @@ name = "flowlink-billing"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
+ "dashmap",
  "flowlink-core",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1270,6 +1274,7 @@ name = "flowlink-relay"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.8.8",
  "chrono",
  "criterion",
@@ -1291,6 +1296,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

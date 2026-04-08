@@ -37,7 +37,23 @@ impl AuditStore {
 
     pub fn record(&self, event: AuditEvent) -> anyhow::Result<()> {
         let id = event.id.clone();
-        // Persist to journal
+        let journal_path = self.journal_path.clone();
+        let event_clone = event.clone();
+        // Persist to journal (fire-and-forget, non-blocking)
+        std::thread::spawn(move || {
+            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&journal_path) {
+                if let Ok(line) = serde_json::to_string(&event_clone) {
+                    let _ = writeln!(f, "{}", line);
+                }
+            }
+        });
+        self.events.insert(id, event);
+        Ok(())
+    }
+
+    /// Blocking write — use in tests or shutdown hooks.
+    pub fn record_sync(&self, event: AuditEvent) -> anyhow::Result<()> {
+        let id = event.id.clone();
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&self.journal_path) {
             if let Ok(line) = serde_json::to_string(&event) {
                 let _ = writeln!(f, "{}", line);
@@ -367,7 +383,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("audit.jsonl");
         let store1 = AuditStore::new(&path);
-        store1.record(make_event("a1", 1000)).unwrap();
+        store1.record_sync(make_event("a1", 1000)).unwrap();
         drop(store1);
 
         let store2 = AuditStore::new(&path);

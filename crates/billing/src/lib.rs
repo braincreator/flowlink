@@ -2,11 +2,9 @@
 //!
 //! Revenue-critical module: plans, usage tracking, invoices, payments.
 //!
-//! # Supported Payment Methods (Russia)
-//! - SBP (Система Быстрых Платежей)
-//! - Т-Банк (ex-Тинькофф)
-//! - СберБанк
-//! - Точка Банк (for business)
+//! # Payment Gateway (Russia)
+//! - Точка Банк acquiring (SBP + bank cards)
+//! - Subscriptions API (рекуррентные автосписания)
 //!
 //! # Plans
 //! - Free: 100 req/day, 1 agent, 100MB storage
@@ -17,12 +15,17 @@ pub mod plans;
 pub mod usage;
 pub mod invoice;
 pub mod payment;
+pub mod tochka;
+pub mod persist;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use tracing;
 
 /// Billing engine — central struct for all billing operations
 pub struct BillingEngine {
@@ -34,6 +37,12 @@ pub struct BillingEngine {
     invoices: Arc<invoice::InvoiceStore>,
     /// Payment configuration
     payments: Arc<payment::PaymentConfig>,
+    /// In-memory account billing state (account_id → AccountBilling)
+    accounts: DashMap<String, AccountBilling>,
+    /// Optional persistence backend (None = memory-only)
+    persist: Option<Arc<dyn persist::BillingPersist>>,
+    /// Whether initial load from persist has been done
+    loaded: AtomicBool,
 }
 
 /// Account billing state
@@ -86,13 +95,73 @@ pub struct BillingCheck {
 }
 
 impl BillingEngine {
-    /// Create a new billing engine
+    /// Create a new billing engine (memory-only, no persistence)
     pub fn new(payments: payment::PaymentConfig) -> Self {
         Self {
             plans: Arc::new(plans::PlanRegistry::default()),
             usage: Arc::new(usage::UsageTracker::new()),
             invoices: Arc::new(invoice::InvoiceStore::new()),
             payments: Arc::new(payments),
+            accounts: DashMap::new(),
+            persist: None,
+            loaded: AtomicBool::new(true),
+        }
+    }
+
+    /// Create with persistence backend
+    pub fn with_persist(
+        payments: payment::PaymentConfig,
+        persist: Arc<dyn persist::BillingPersist>,
+    ) -> Self {
+        Self {
+            plans: Arc::new(plans::PlanRegistry::default()),
+            usage: Arc::new(usage::UsageTracker::new()),
+            invoices: Arc::new(invoice::InvoiceStore::new()),
+            payments: Arc::new(payments),
+            accounts: DashMap::new(),
+            persist: Some(persist),
+            loaded: AtomicBool::new(false),
+        }
+    }
+
+    /// Load all accounts from persistence into memory.
+    /// Must be called once at startup when using a persist backend.
+    /// Idempotent — safe to call multiple times.
+    pub async fn load_all(&self) -> Result<usize> {
+        if self.loaded.swap(true, Ordering::SeqCst) {
+            return Ok(self.accounts.len());
+        }
+
+        let persist = match &self.persist {
+            Some(p) => p,
+            None => return Ok(0),
+        };
+
+        let accounts = persist.load_all().await?;
+        let count = accounts.len();
+        for acc in accounts {
+            self.accounts.insert(acc.account_id.clone(), acc);
+        }
+
+        tracing::info!(count, "Loaded billing accounts from persistence");
+        Ok(count)
+    }
+
+    /// Persist a single account to the backend (fire-and-forget with logging).
+    /// Called automatically on mutations. Non-blocking.
+    fn persist_account(&self, account: &AccountBilling) {
+        if let Some(persist) = &self.persist {
+            let account = account.clone();
+            let persist = persist.clone();
+            tokio::spawn(async move {
+                if let Err(e) = persist.save_account(&account).await {
+                    tracing::error!(
+                        account_id = %account.account_id,
+                        error = %e,
+                        "Failed to persist billing account"
+                    );
+                }
+            });
         }
     }
 
@@ -118,16 +187,35 @@ impl BillingEngine {
 
     /// Get or create account billing state
     pub fn get_or_create_account(&self, account_id: &str) -> AccountBilling {
-        AccountBilling::new(account_id)
+        self.accounts
+            .entry(account_id.to_string())
+            .or_insert_with(|| AccountBilling::new(account_id))
+            .clone()
     }
 
-    /// Update account billing state
-    ///
-    /// Note: persistence is handled at the API layer (billing_api.rs) which
-    /// writes to the database. This method is intentionally a no-op for the
-    /// in-memory engine.
-    pub fn update_account(&self, _billing: &AccountBilling) {
-        // Persistence is handled by billing_api.rs → db crate
+    /// Update account billing state in memory + persist
+    pub fn update_account(&self, billing: &AccountBilling) {
+        self.accounts.insert(billing.account_id.clone(), billing.clone());
+        self.persist_account(billing);
+    }
+
+    /// Remove an account from memory + persist
+    pub fn remove_account(&self, account_id: &str) {
+        self.accounts.remove(account_id);
+        if let Some(persist) = &self.persist {
+            let account_id = account_id.to_string();
+            let persist = persist.clone();
+            tokio::spawn(async move {
+                if let Err(e) = persist.delete_account(&account_id).await {
+                    tracing::error!(account_id, error = %e, "Failed to delete account from persistence");
+                }
+            });
+        }
+    }
+
+    /// List all account IDs
+    pub fn list_accounts(&self) -> Vec<String> {
+        self.accounts.iter().map(|r| r.key().clone()).collect()
     }
 
     /// Check if an operation is allowed under the current plan
@@ -203,7 +291,7 @@ impl BillingEngine {
         &self,
         billing: &mut AccountBilling,
         new_plan_id: &str,
-    ) -> Result<()> {
+    ) -> Result<Option<invoice::Invoice>> {
         let plan = self.plans.get(new_plan_id)
             .ok_or_else(|| anyhow::anyhow!("Unknown plan: {}", new_plan_id))?;
 
@@ -226,7 +314,17 @@ impl BillingEngine {
             Some(now + chrono::Duration::days(30))
         };
 
-        Ok(())
+        self.update_account(billing);
+
+        // Generate invoice for paid plans
+        let created_invoice = if plan.price_kopecks > 0 {
+            let inv = self.invoices.create(invoice::Invoice::for_plan(&billing.account_id, &plan));
+            Some(inv)
+        } else {
+            None
+        };
+
+        Ok(created_invoice)
     }
 
     /// Change plan (allows downgrades)
@@ -234,7 +332,7 @@ impl BillingEngine {
         &self,
         billing: &mut AccountBilling,
         new_plan_id: &str,
-    ) -> Result<()> {
+    ) -> Result<Option<invoice::Invoice>> {
         let plan = self.plans.get(new_plan_id)
             .ok_or_else(|| anyhow::anyhow!("Unknown plan: {}", new_plan_id))?;
 
@@ -248,7 +346,58 @@ impl BillingEngine {
             Some(now + chrono::Duration::days(30))
         };
 
+        self.update_account(billing);
+
+        // Generate invoice for paid plans
+        let created_invoice = if plan.price_kopecks > 0 {
+            let inv = self.invoices.create(invoice::Invoice::for_plan(&billing.account_id, &plan));
+            Some(inv)
+        } else {
+            None
+        };
+
+        Ok(created_invoice)
+    }
+
+    /// Record a payment against an invoice
+    pub fn record_payment(
+        &self,
+        invoice_id: &str,
+        method: payment::PaymentMethod,
+    ) -> Result<()> {
+        let mut invoice = self.invoices.get(invoice_id)
+            .ok_or_else(|| anyhow::anyhow!("Invoice not found: {}", invoice_id))?;
+
+        invoice.mark_paid(method);
+        self.invoices.update(invoice.clone());
+
+        // Credit account balance
+        if let Some(mut billing) = self.accounts.get_mut(&invoice.account_id) {
+            billing.balance_kopecks += invoice.subtotal_kopecks as i64;
+        }
+
         Ok(())
+    }
+
+    /// Generate an overage invoice for an account
+    pub fn generate_overage_invoice(
+        &self,
+        account_id: &str,
+        extra_requests: u64,
+        extra_tokens: u64,
+    ) -> Option<invoice::Invoice> {
+        if extra_requests == 0 && extra_tokens == 0 {
+            return None;
+        }
+
+        let inv = self.invoices.create(invoice::Invoice::for_overage(
+            account_id,
+            extra_requests,
+            extra_tokens,
+            self.payments.overage_request_price_kopecks,
+            self.payments.overage_token_price_kopecks,
+        ));
+        Some(inv)
     }
 }
 

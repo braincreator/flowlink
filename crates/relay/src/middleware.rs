@@ -208,7 +208,9 @@ pub async fn request_id_middleware(mut req: Request, next: Next) -> Response {
     req.extensions_mut().insert(RequestId(request_id.clone()));
 
     let mut response = next.run(req).await;
-    response.headers_mut().insert("x-request-id", request_id.parse().unwrap());
+    if let Ok(val) = request_id.parse() {
+        response.headers_mut().insert("x-request-id", val);
+    }
     response
 }
 
