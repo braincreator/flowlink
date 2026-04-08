@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 flowlink-core = { path = "../core" }
+flowlink-crypto = { path = "../crypto" }
 
 tokio = { version = "1", features = ["full", "sync"] }
 serde = { version = "1", features = ["derive"] }
@@ -27,8 +28,6 @@ tar = "0.4"
 flate2 = "1"
 
 # Crypto (integrity chain, vault encryption)
-sha2 = "0.10"
-hmac = "0.12"
 aes-gcm = "0.10"
 hex = "0.4"
 

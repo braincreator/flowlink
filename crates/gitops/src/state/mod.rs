@@ -13,7 +13,7 @@ pub use services::{ServiceCollector, ServiceInfo, ServiceState, ServicesState};
 use crate::types::{ComponentState, SemanticDrift, ServerState};
 use anyhow::Result;
 use chrono::Utc;
-use sha2::{Digest, Sha256};
+use flowlink_crypto::sha256_hex;
 use std::collections::HashMap;
 
 pub struct StateManager {
@@ -149,14 +149,14 @@ impl StateManager {
         let mut sorted_keys: Vec<&String> = components.keys().collect();
         sorted_keys.sort();
 
-        let mut hasher = Sha256::new();
+        let mut data = Vec::new();
         for key in sorted_keys {
             if let Some(component) = components.get(key) {
-                hasher.update(key.as_bytes());
-                hasher.update(component.checksum.as_bytes());
+                data.extend_from_slice(key.as_bytes());
+                data.extend_from_slice(component.checksum.as_bytes());
             }
         }
-        format!("{:x}", hasher.finalize())
+        sha256_hex(&data)
     }
 }
 

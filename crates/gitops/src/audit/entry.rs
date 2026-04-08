@@ -1,9 +1,6 @@
 use crate::types::AuditEntry;
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use anyhow::Result;
-
-type HmacSha256 = Hmac<Sha256>;
+use flowlink_crypto::hmac_sha256_hex;
 
 /// Compute HMAC-SHA256 for an audit entry
 /// The HMAC is computed over the serialized entry fields (excluding the hmac field itself)
@@ -11,12 +8,7 @@ pub fn compute_hmac(entry: &AuditEntry, key: &[u8], prev_hmac: &str) -> Result<S
     let serialized = serialize_for_hmac(entry)?;
     let data = format!("{}||{}", prev_hmac, serialized);
     
-    let mut mac = HmacSha256::new_from_slice(key)
-        .map_err(|e| anyhow::anyhow!("Failed to initialize HMAC: {}", e))?;
-    mac.update(data.as_bytes());
-    
-    let result = mac.finalize();
-    Ok(hex::encode(result.into_bytes()))
+    Ok(hmac_sha256_hex(key, data.as_bytes()))
 }
 
 /// Serialize entry fields for HMAC computation

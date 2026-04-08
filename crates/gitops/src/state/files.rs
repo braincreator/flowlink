@@ -3,8 +3,8 @@ use crate::types::{ComponentState, DriftAction, SemanticDrift};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::Utc;
+use flowlink_crypto::sha256_hex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
@@ -42,27 +42,10 @@ impl FileCollector {
     }
 
     async fn compute_file_hash(path: &Path) -> Result<String> {
-        let mut file = fs::File::open(path)
+        let data = fs::read(path)
             .await
-            .map_err(|e| anyhow!("Failed to open file {:?}: {}", path, e))?;
-
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0u8; 8192];
-
-        loop {
-            let bytes_read = file
-                .read(&mut buffer)
-                .await
-                .map_err(|e| anyhow!("Failed to read file {:?}: {}", path, e))?;
-
-            if bytes_read == 0 {
-                break;
-            }
-
-            hasher.update(&buffer[..bytes_read]);
-        }
-
-        Ok(format!("{:x}", hasher.finalize()))
+            .map_err(|e| anyhow!("Failed to read file {:?}: {}", path, e))?;
+        Ok(sha256_hex(&data))
     }
 
     async fn collect_file_info(path: &str) -> FileInfo {
@@ -141,13 +124,13 @@ impl FileCollector {
         let mut sorted = files.to_vec();
         sorted.sort_by(|a, b| a.path.cmp(&b.path));
 
-        let mut hasher = Sha256::new();
+        let mut data = Vec::new();
         for file in sorted {
-            hasher.update(file.path.as_bytes());
-            hasher.update(file.hash.as_bytes());
-            hasher.update(&[file.exists as u8]);
+            data.extend_from_slice(file.path.as_bytes());
+            data.extend_from_slice(file.hash.as_bytes());
+            data.push(file.exists as u8);
         }
-        format!("{:x}", hasher.finalize())
+        sha256_hex(&data)
     }
 
     async fn write_file(path: &str, content: &[u8]) -> Result<()> {

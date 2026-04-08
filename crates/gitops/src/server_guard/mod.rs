@@ -271,18 +271,9 @@ pub struct ServerGuardStatus {
 // File hash utility
 // ---------------------------------------------------------------------------
 
-use sha2::{Digest, Sha256};
-
 fn file_sha256(path: &std::path::Path) -> Option<String> {
-    let mut file = std::fs::File::open(path).ok()?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = std::io::Read::read(&mut file, &mut buf).ok()?;
-        if n == 0 { break; }
-        hasher.update(&buf[..n]);
-    }
-    Some(format!("{:x}", hasher.finalize()))
+    let data = std::fs::read(path).ok()?;
+    Some(flowlink_crypto::sha256_hex(&data))
 }
 
 /// File watcher background task

@@ -3,8 +3,8 @@ use crate::types::{ComponentState, DriftAction, SemanticDrift};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::Utc;
+use flowlink_crypto::sha256_hex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -119,13 +119,13 @@ impl ServiceCollector {
         let mut sorted = services.to_vec();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let mut hasher = Sha256::new();
+        let mut data = Vec::new();
         for service in sorted {
-            hasher.update(service.name.as_bytes());
-            hasher.update(service.state.to_string().as_bytes());
-            hasher.update(&[service.enabled as u8]);
+            data.extend_from_slice(service.name.as_bytes());
+            data.extend_from_slice(service.state.to_string().as_bytes());
+            data.push(service.enabled as u8);
         }
-        format!("{:x}", hasher.finalize())
+        sha256_hex(&data)
     }
 
     async fn start_service(&self, service_name: &str) -> Result<()> {

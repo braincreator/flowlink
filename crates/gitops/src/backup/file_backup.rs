@@ -9,7 +9,6 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,6 +17,7 @@ use tokio::fs;
 use tokio::task::spawn_blocking;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+use flowlink_crypto::sha256_hex;
 
 /// Engine for creating file snapshots and backups
 pub struct FileBackupEngine {
@@ -220,23 +220,9 @@ impl FileBackupEngine {
         let path = path.to_path_buf();
         
         spawn_blocking(move || {
-            use std::io::Read;
-
-            let mut file = std::fs::File::open(&path)
-                .context(format!("Failed to open file: {:?}", path))?;
-            let mut hasher = Sha256::new();
-            let mut buffer = vec![0u8; 8192];
-
-            loop {
-                let bytes_read = file.read(&mut buffer)?;
-                if bytes_read == 0 {
-                    break;
-                }
-                hasher.update(&buffer[..bytes_read]);
-            }
-
-            let result = hasher.finalize();
-            Ok(format!("{:x}", result))
+            let data = std::fs::read(&path)
+                .context(format!("Failed to read file: {:?}", path))?;
+            Ok(sha256_hex(&data))
         })
         .await
         .context("Failed to compute file hash")?
@@ -286,19 +272,8 @@ impl FileBackupEngine {
             builder.finish().context("Failed to finalize archive")?;
 
             // Compute checksum of the archive
-            let mut file = std::fs::File::open(&output_path)?;
-            let mut hasher = Sha256::new();
-            let mut buffer = vec![0u8; 8192];
-
-            loop {
-                let bytes_read = file.read(&mut buffer)?;
-                if bytes_read == 0 {
-                    break;
-                }
-                hasher.update(&buffer[..bytes_read]);
-            }
-
-            let checksum = format!("{:x}", hasher.finalize());
+            let archive_data = std::fs::read(&output_path)?;
+            let checksum = sha256_hex(&archive_data);
             let metadata = std::fs::metadata(&output_path)?;
             let size = metadata.len();
 

@@ -203,11 +203,8 @@ impl DatabaseBackupEngine {
 
     /// Compute SHA256 checksum
     async fn compute_checksum(&self, path: &Path) -> Result<String> {
-        use sha2::{Digest, Sha256};
         let data = tokio::fs::read(path).await?;
-        let mut hasher = Sha256::new();
-        hasher.update(&data);
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(flowlink_crypto::sha256_hex(&data))
     }
 
     /// List configured databases

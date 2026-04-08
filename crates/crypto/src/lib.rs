@@ -1,4 +1,5 @@
 // FlowLink Crypto — E2EE: X25519 key exchange + AES-256-GCM
+// Hash utilities: SHA-256, HMAC-SHA256
 // Port of internal/crypto/crypto.go
 
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
@@ -6,9 +7,11 @@ use aes_gcm::{Aes256Gcm, AeadCore, Nonce};
 use anyhow::Result;
 use rand::rngs::OsRng as RandRng;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
+
+// Re-export sha2 for streaming hash use cases
+pub use sha2::{Digest, Sha256};
 
 // ═══════════════════════════════════════════════
 // Constants
@@ -16,6 +19,37 @@ use base64::{Engine, engine::general_purpose::STANDARD as B64};
 
 pub const AES_KEY_SIZE: usize = 32;
 pub const NONCE_SIZE: usize = 12;
+
+// ═══════════════════════════════════════════════
+// Hash & HMAC Utilities
+// ═══════════════════════════════════════════════
+
+/// Compute SHA-256 hash, returning raw 32 bytes.
+pub fn sha256(data: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
+/// Compute SHA-256 hash as a lowercase hex string (64 chars).
+pub fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+/// Compute HMAC-SHA256 as a lowercase hex string (64 chars).
+///
+/// # Panics
+/// Panics if the key length exceeds HMAC's maximum (512 bytes).
+pub fn hmac_sha256_hex(key: &[u8], data: &[u8]) -> String {
+    use hmac::{Hmac, Mac};
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key).expect("HMAC key length invalid");
+    mac.update(data);
+    let result = mac.finalize().into_bytes();
+    hex::encode(result)
+}
 
 // ═══════════════════════════════════════════════
 // Keypair
@@ -739,5 +773,95 @@ mod tests {
         let kp = KeyPair::generate();
         let after = chrono::Utc::now().timestamp();
         assert!(kp.created_at >= before && kp.created_at <= after);
+    }
+
+    // ── Hash & HMAC Utilities ──
+
+    #[test]
+    fn test_sha256_known_vector() {
+        // SHA-256("abc") = ba7816bf 8f01cfea 414140de 5dae2223 b00361a3 96177a9c b410ff61 f20015ad
+        let hash = sha256(b"abc");
+        assert_eq!(
+            hex::encode(hash),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn test_sha256_hex_known_vector() {
+        let hex_str = sha256_hex(b"abc");
+        assert_eq!(
+            hex_str,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(hex_str.len(), 64);
+    }
+
+    #[test]
+    fn test_sha256_empty() {
+        // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        let hex_str = sha256_hex(b"");
+        assert_eq!(
+            hex_str,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn test_sha256_deterministic() {
+        let h1 = sha256_hex(b"hello world");
+        let h2 = sha256_hex(b"hello world");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_sha256_different_inputs() {
+        let h1 = sha256_hex(b"foo");
+        let h2 = sha256_hex(b"bar");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_sha256_bytes_matches_hex() {
+        let bytes = sha256(b"test");
+        let hex_str = sha256_hex(b"test");
+        assert_eq!(hex::encode(bytes), hex_str);
+    }
+
+    #[test]
+    fn test_hmac_sha256_hex_known_vector() {
+        // RFC 4231 Test Case 2: key="Jefe", data="what do ya want for nothing?"
+        let hex_str = hmac_sha256_hex(b"Jefe", b"what do ya want for nothing?");
+        assert_eq!(
+            hex_str,
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+
+    #[test]
+    fn test_hmac_sha256_hex_deterministic() {
+        let h1 = hmac_sha256_hex(b"key", b"data");
+        let h2 = hmac_sha256_hex(b"key", b"data");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_hmac_sha256_hex_different_keys() {
+        let h1 = hmac_sha256_hex(b"key1", b"data");
+        let h2 = hmac_sha256_hex(b"key2", b"data");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_hmac_sha256_hex_different_data() {
+        let h1 = hmac_sha256_hex(b"key", b"data1");
+        let h2 = hmac_sha256_hex(b"key", b"data2");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_hmac_sha256_hex_length() {
+        let hex_str = hmac_sha256_hex(b"key", b"data");
+        assert_eq!(hex_str.len(), 64); // 32 bytes = 64 hex chars
     }
 }

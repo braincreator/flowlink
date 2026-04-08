@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use bollard::container::{ListContainersOptions, StartContainerOptions, StopContainerOptions};
 use bollard::Docker;
 use chrono::Utc;
+use flowlink_crypto::sha256_hex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use tracing::{debug, warn};
 
@@ -92,13 +92,13 @@ impl DockerCollector {
         let mut sorted = containers.to_vec();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let mut hasher = Sha256::new();
+        let mut data = Vec::new();
         for container in sorted {
-            hasher.update(container.name.as_bytes());
-            hasher.update(container.image.as_bytes());
-            hasher.update(container.status.to_string().as_bytes());
+            data.extend_from_slice(container.name.as_bytes());
+            data.extend_from_slice(container.image.as_bytes());
+            data.extend_from_slice(container.status.to_string().as_bytes());
         }
-        format!("{:x}", hasher.finalize())
+        sha256_hex(&data)
     }
 
     async fn list_containers(&self) -> Result<Vec<ContainerInfo>> {

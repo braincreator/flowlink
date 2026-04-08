@@ -6,7 +6,7 @@
 use crate::config::VaultConfig;
 use crate::types::*;
 use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
+use flowlink_crypto::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

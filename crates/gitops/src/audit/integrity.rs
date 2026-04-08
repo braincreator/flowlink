@@ -1,11 +1,8 @@
 use crate::config::HmacKeySource;
 use crate::types::{AuditEntry, IntegrityStatus};
 use anyhow::{Context, Result};
-use hmac::{Hmac, Mac};
-use sha2::{Digest, Sha256};
+use flowlink_crypto::{hmac_sha256_hex, sha256};
 use tracing::{debug, warn};
-
-type HmacSha256 = Hmac<Sha256>;
 
 pub struct IntegrityVerifier {
     key: Vec<u8>,
@@ -83,14 +80,10 @@ impl IntegrityVerifier {
         match source {
             HmacKeySource::MachineId => {
                 let machine_id = Self::get_machine_id()?;
-                let mut hasher = Sha256::new();
-                hasher.update(machine_id.as_bytes());
-                Ok(hasher.finalize().as_slice().to_vec())
+                Ok(sha256(machine_id.as_bytes()).to_vec())
             }
             HmacKeySource::ConfigKey { key } => {
-                let mut hasher = Sha256::new();
-                hasher.update(key.as_bytes());
-                Ok(hasher.finalize().as_slice().to_vec())
+                Ok(sha256(key.as_bytes()).to_vec())
             }
         }
     }
@@ -135,13 +128,7 @@ fn compute_entry_hmac(entry: &AuditEntry, key: &[u8], prev_hmac: &str) -> Result
 
     let data = format!("{}||{}", prev_hmac, serialized);
 
-    let mut mac = HmacSha256::new_from_slice(key)
-        .map_err(|e| anyhow::anyhow!("Failed to initialize HMAC: {}", e))?;
-
-    mac.update(data.as_bytes());
-
-    let result = mac.finalize();
-    Ok(hex::encode(result.into_bytes()))
+    Ok(hmac_sha256_hex(key, data.as_bytes()))
 }
 
 fn serialize_entry_fields(entry: &AuditEntry) -> Result<String> {

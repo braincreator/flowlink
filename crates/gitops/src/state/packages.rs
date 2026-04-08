@@ -3,8 +3,8 @@ use crate::types::{ComponentState, DriftAction, SemanticDrift};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::Utc;
+use flowlink_crypto::sha256_hex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::process::Stdio;
 use tokio::process::Command;
@@ -155,16 +155,16 @@ impl PackageCollector {
     }
 
     fn compute_checksum(packages: &[PackageInfo]) -> String {
-        let mut hasher = Sha256::new();
         let mut sorted: Vec<_> = packages.iter().collect();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
         
+        let mut data = Vec::new();
         for pkg in sorted {
-            hasher.update(pkg.name.as_bytes());
-            hasher.update(pkg.version.as_bytes());
-            hasher.update(pkg.architecture.as_bytes());
+            data.extend_from_slice(pkg.name.as_bytes());
+            data.extend_from_slice(pkg.version.as_bytes());
+            data.extend_from_slice(pkg.architecture.as_bytes());
         }
-        format!("{:x}", hasher.finalize())
+        sha256_hex(&data)
     }
 
     async fn install_packages_dpkg(&self, packages: &[PackageInfo]) -> Result<ApplyResult> {
