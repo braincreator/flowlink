@@ -130,13 +130,27 @@ impl Connection {
     }
 
     async fn handle_message(&self, text: &str) -> Option<Message> {
-        let msg: Message = match serde_json::from_str(text) {
+        let mut msg: Message = match serde_json::from_str(text) {
             Ok(m) => m,
             Err(e) => {
                 warn!("Failed to parse message: {e}");
                 return None;
             }
         };
+
+        // SECURITY: Never trust priority from external clients.
+        // Priority::System is reserved for internal operations (auto-restore,
+        // health engine) that create Messages programmatically — never from
+        // the WebSocket. Force all inbound messages to User priority.
+        if msg.priority == Priority::System {
+            warn!(
+                "Inbound message had system priority (id={} type={:?}) — forced to user. \
+                 System priority is only for internal operations.",
+                msg.id, msg.msg_type
+            );
+            msg.priority = Priority::User;
+        }
+
         info!("Received: {:?}", msg.msg_type);
         let response = crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup, &self.killswitch, &self.skill_mgr, &self.sandbox, &self.executor).await;
         // Drain any shield alerts queued during dispatch and send them as separate messages

@@ -762,4 +762,25 @@ mod tests {
         assert!(resp.is_none());
         assert_eq!(shield_alert_count(), before + 1);
     }
+
+    #[tokio::test]
+    async fn test_system_priority_in_dispatch_still_bypasses() {
+        // When dispatch() receives a System message directly (internal call),
+        // it bypasses policy. This test verifies the dispatch-level behavior.
+        // Note: connection layer strips System for inbound, but internal
+        // components create System messages programmatically.
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        ks.pause("test");
+
+        // Simulate an internal System message (not from WebSocket)
+        let msg = system_msg_with(MessageType::ExecRequest, serde_json::json!({
+            "command": "echo internal-system",
+            "timeout_sec": 5,
+            "request_id": "internal-1"
+        }));
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+
+        assert!(resp.is_some());
+        assert_eq!(resp.unwrap().msg_type, MessageType::ExecDone);
+    }
 }
