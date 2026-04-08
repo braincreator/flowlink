@@ -29,12 +29,11 @@ kube-core = "0.93"
 k8s-openapi = { version = "0.22", features = ["v1_29"] }
 
 # Webhook
-axum = "0.7"
-tower-http = { version = "0.5", features = ["cors"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
 rcgen = "0.11"
-rustls = "0.21"
 hyper = "1.0"
 
 [dev-dependencies]
-tower = "0.4"
+tower = "0.5"
 http = "1.0"
