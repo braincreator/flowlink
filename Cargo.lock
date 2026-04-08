@@ -1174,6 +1174,7 @@ dependencies = [
  "chrono",
  "criterion",
  "dashmap",
+ "flowlink-billing",
  "flowlink-core",
  "flowlink-crypto",
  "futures-util",

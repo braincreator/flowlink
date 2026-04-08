@@ -116,6 +116,16 @@ impl BillingEngine {
         &self.payments
     }
 
+    /// Get or create account billing state
+    pub fn get_or_create_account(&self, account_id: &str) -> AccountBilling {
+        AccountBilling::new(account_id)
+    }
+
+    /// Update account billing state
+    pub fn update_account(&self, _billing: &AccountBilling) {
+        // TODO: persist to database
+    }
+
     /// Check if an operation is allowed under the current plan
     ///
     /// Returns BillingCheck with allowed/denied status.

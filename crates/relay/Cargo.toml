@@ -8,6 +8,7 @@ description = "FlowLink relay server — WebSocket hub for agents, HTTP API for 
 [dependencies]
 flowlink-core = { path = "../core" }
 flowlink-crypto = { path = "../crypto" }
+flowlink-billing = { path = "../billing" }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.26"
 axum = { version = "0.8", features = ["ws"] }

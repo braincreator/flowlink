@@ -44,6 +44,7 @@ pub struct AppState {
     pub shield_alerts: Arc<ShieldAlertManager>,
     pub audit_store: Arc<AuditStore>,
     pub metrics: Arc<Metrics>,
+    pub billing: Option<Arc<flowlink_billing::BillingEngine>>,
 }
 
 // ═══════════════════════════════════════════════
@@ -720,6 +721,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/audit/export", get(audit_export))
         .route("/api/audit/event", post(audit_ingest))
         .route("/api/shield/canary", post(canary_alert_handler))
+        // Billing routes
+        .route("/api/billing", axum::routing::get(crate::billing_api::get_billing_info))
+        .route("/api/billing/usage", axum::routing::get(crate::billing_api::get_usage))
+        .route("/api/billing/plans", axum::routing::get(crate::billing_api::list_plans))
+        .route("/api/billing/change-plan", axum::routing::post(crate::billing_api::change_plan))
+        .route("/api/billing/invoices", axum::routing::get(crate::billing_api::list_invoices))
+        .route("/api/billing/invoices/{id}", axum::routing::get(crate::billing_api::get_invoice))
+        .route("/api/billing/payments/methods", axum::routing::get(crate::billing_api::list_payment_methods))
         .route("/metrics", axum::routing::get(crate::metrics::metrics_handler))
         .with_state(state)
         // Middleware layers (innermost first)
@@ -755,6 +764,7 @@ mod tests {
             shield_alerts: Arc::new(ShieldAlertManager::new()),
             audit_store: Arc::new(AuditStore::new(&tempfile::tempdir().unwrap().path().join("audit.jsonl"))),
             metrics: Arc::new(Metrics::new()),
+            billing: None,
         }
     }
 

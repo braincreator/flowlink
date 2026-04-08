@@ -14,6 +14,7 @@ pub mod mcp;
 pub mod devices;
 pub mod rbac_manager;
 pub mod metrics;
+pub mod billing_api;
 
 use std::sync::Arc;
 use log::info;
@@ -69,6 +70,7 @@ impl Relay {
                 std::path::Path::new(&shellexpand::tilde("~/.flowlink/audit.jsonl").to_string())
             )),
             metrics: Arc::new(metrics::Metrics::new()),
+            billing: None, // TODO: initialize from config
         };
 
         let app = server::build_router(state);

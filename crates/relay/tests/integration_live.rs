@@ -49,6 +49,7 @@ fn make_state() -> (AppState, tempfile::TempDir) {
             &tmp.path().join("audit.jsonl")
         )),
         metrics: Arc::new(flowlink_relay::metrics::Metrics::new()),
+        billing: None,
     };
     (state, tmp)
 }
