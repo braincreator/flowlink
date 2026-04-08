@@ -750,7 +750,7 @@ mod tests {
                 Arc::new(ApprovalQueue::new()),
             )),
             registry: Arc::new(Registry::new(tempfile::tempdir().unwrap().path()).unwrap()),
-            device_manager: Arc::new(DeviceManager::new()),
+            device_manager: Arc::new(DeviceManager::new(crate::devices::PushConfig::default())),
             llm_proxy: None,
             shield_alerts: Arc::new(ShieldAlertManager::new()),
             audit_store: Arc::new(AuditStore::new(&tempfile::tempdir().unwrap().path().join("audit.jsonl"))),

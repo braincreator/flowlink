@@ -4,6 +4,14 @@
 rules:
   # === BLOCKED TIER ===
 
+  # ── Git history rewrite (irreversible) ──
+  - name: block-git-filter-branch
+    command: "git"
+    conditions:
+      - arg_any: ["filter-branch", "filter-repo"]
+    tier: Blocked
+    reason: "Git history rewrite is blocked — use with explicit admin approval"
+
   - name: block-rm-root
     command: "rm"
     conditions:
@@ -45,6 +53,89 @@ rules:
     reason: "Permission change on critical system files is blocked"
 
   # === DESTRUCTIVE TIER ===
+
+  # ── Git destructive operations ──
+  - name: destructive-git-push-force
+    command: "git"
+    subcommand: "push"
+    conditions:
+      - flag_any: ["--force", "-f"]
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-git-push-force-lease
+    command: "git"
+    subcommand: "push"
+    conditions:
+      - flag: "--force-with-lease"
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-git-reset-hard
+    command: "git"
+    subcommand: "reset"
+    conditions:
+      - flag_any: ["--hard", "-H"]
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-git-clean-fd
+    command: "git"
+    subcommand: "clean"
+    conditions:
+      - flag: "-f"
+      - flag_any: ["-d", "-x"]
+    tier: Destructive
+    auto_backup: true
+
+  - name: destructive-git-branch-D
+    command: "git"
+    subcommand: "branch"
+    conditions:
+      - flag: "-D"
+    tier: Destructive
+
+  - name: destructive-git-tag-delete
+    command: "git"
+    subcommand: "tag"
+    conditions:
+      - flag_any: ["-d", "-D", "-fd"]
+    tier: Destructive
+
+  - name: destructive-git-stash-drop
+    command: "git"
+    subcommand: "stash"
+    conditions:
+      - arg_any: ["drop", "clear"]
+    tier: Destructive
+
+  - name: destructive-git-reflog-expire
+    command: "git"
+    subcommand: "reflog"
+    conditions:
+      - arg_any: ["expire"]
+    tier: Destructive
+
+  - name: destructive-git-gc-prune
+    command: "git"
+    subcommand: "gc"
+    conditions:
+      - flag: "--prune=now"
+    tier: Destructive
+
+  - name: destructive-git-worktree-remove
+    command: "git"
+    subcommand: "worktree"
+    conditions:
+      - arg_any: ["remove", "prune"]
+    tier: Destructive
+
+  - name: destructive-git-submodule-deinit
+    command: "git"
+    subcommand: "submodule"
+    conditions:
+      - arg: "deinit"
+    tier: Destructive
 
   - name: destructive-rm
     command: "rm"
@@ -170,6 +261,89 @@ rules:
     requires_approval: true
 
   # === READ-ONLY TIER ===
+
+  # ── Git read-only operations ──
+  - name: readonly-git-status
+    command: "git"
+    subcommand: "status"
+    tier: ReadOnly
+
+  - name: readonly-git-log
+    command: "git"
+    subcommand: "log"
+    tier: ReadOnly
+
+  - name: readonly-git-diff
+    command: "git"
+    subcommand: "diff"
+    tier: ReadOnly
+
+  - name: readonly-git-show
+    command: "git"
+    subcommand: "show"
+    tier: ReadOnly
+
+  - name: readonly-git-branch
+    command: "git"
+    subcommand: "branch"
+    tier: ReadOnly
+
+  - name: readonly-git-tag
+    command: "git"
+    subcommand: "tag"
+    tier: ReadOnly
+
+  - name: readonly-git-remote
+    command: "git"
+    subcommand: "remote"
+    tier: ReadOnly
+
+  - name: readonly-git-stash-list
+    command: "git"
+    subcommand: "stash"
+    conditions:
+      - arg: "list"
+    tier: ReadOnly
+
+  - name: readonly-git-blame
+    command: "git"
+    subcommand: "blame"
+    tier: ReadOnly
+
+  - name: readonly-git-shortlog
+    command: "git"
+    subcommand: "shortlog"
+    tier: ReadOnly
+
+  - name: readonly-git-rev-parse
+    command: "git"
+    subcommand: "rev-parse"
+    tier: ReadOnly
+
+  - name: readonly-git-describe
+    command: "git"
+    subcommand: "describe"
+    tier: ReadOnly
+
+  - name: readonly-git-ls-files
+    command: "git"
+    subcommand: "ls-files"
+    tier: ReadOnly
+
+  - name: readonly-git-ls-tree
+    command: "git"
+    subcommand: "ls-tree"
+    tier: ReadOnly
+
+  - name: readonly-git-reflog
+    command: "git"
+    subcommand: "reflog"
+    tier: ReadOnly
+
+  - name: readonly-git-count-objects
+    command: "git"
+    subcommand: "count-objects"
+    tier: ReadOnly
 
   - name: readonly-cat
     command: "cat"

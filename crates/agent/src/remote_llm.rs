@@ -30,6 +30,8 @@ pub struct RemoteLlm {
 
 impl RemoteLlm {
     pub fn new(relay_url: String, api_token: String, timeout_secs: u64) -> Self {
+        // Trim trailing slash to prevent double-slash when constructing API paths.
+        let relay_url = relay_url.trim_end_matches('/').to_string();
         Self {
             relay_url,
             api_token,
@@ -149,9 +151,24 @@ mod tests {
     #[test]
     fn test_url_trailing_slash_handling() {
         let llm = RemoteLlm::new("https://relay.example.com/".into(), "tok".into(), 10);
-        // URL construction adds /api/v1/llm/complete, so trailing slash could double-slash
-        // This is a test to document current behavior
-        let expected = "https://relay.example.com//api/v1/llm/complete";
+        // Trailing slash should be trimmed so API path doesn't double-slash
+        let expected = "https://relay.example.com/api/v1/llm/complete";
+        let url = format!("{}/api/v1/llm/complete", llm.relay_url);
+        assert_eq!(url, expected);
+    }
+
+    #[test]
+    fn test_url_no_trailing_slash_unchanged() {
+        let llm = RemoteLlm::new("https://relay.example.com".into(), "tok".into(), 10);
+        let expected = "https://relay.example.com/api/v1/llm/complete";
+        let url = format!("{}/api/v1/llm/complete", llm.relay_url);
+        assert_eq!(url, expected);
+    }
+
+    #[test]
+    fn test_url_multiple_trailing_slashes() {
+        let llm = RemoteLlm::new("https://relay.example.com///".into(), "tok".into(), 10);
+        let expected = "https://relay.example.com/api/v1/llm/complete";
         let url = format!("{}/api/v1/llm/complete", llm.relay_url);
         assert_eq!(url, expected);
     }

@@ -9,7 +9,6 @@ use base64::Engine;
 use clap::Parser;
 use kube::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::sync::Arc;
 use tokio::signal;
 
@@ -186,19 +185,33 @@ async fn main() -> Result<()> {
 
     log::info!("FlowLink K8s Operator starting in namespace {}", config.namespace);
 
-    // Try to connect to Kubernetes
-    let client = match Client::try_default().await {
+    // Try to connect to Kubernetes — fall back to webhook-only mode if unavailable
+    let k8s_client: Option<Client> = match Client::try_default().await {
         Ok(c) => {
             log::info!("Connected to Kubernetes cluster");
-            c
+            Some(c)
         }
         Err(e) => {
-            log::warn!("Cannot connect to Kubernetes ({}), running in standalone mode", e);
-            // Create a dummy client for standalone webhook mode
-            // In production, this would be handled differently
-            return Err(e.into());
+            log::warn!(
+                "Cannot connect to Kubernetes ({}), running in webhook-only mode",
+                e
+            );
+            None
         }
     };
+
+    // Spawn the operator in a background task if K8s is available
+    if let Some(client) = k8s_client {
+        let operator = ShieldOperator::new(client, config.clone());
+        tokio::spawn(async move {
+            if let Err(e) = operator.run().await {
+                log::error!("Operator failed: {}", e);
+            }
+        });
+        log::info!("ShieldOperator spawned");
+    } else {
+        log::warn!("ShieldOperator not started — K8s unavailable, webhook-only mode");
+    }
 
     let webhook = Arc::new(AdmissionWebhook::new(config.clone(), vec![]));
     let state = AppState {

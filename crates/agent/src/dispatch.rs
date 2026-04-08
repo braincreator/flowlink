@@ -2,6 +2,7 @@
 use flowlink_core::*;
 use log::{info, warn};
 use serde::Deserialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::approval::ApprovalManager;
 use crate::executor::{Executor, ExecResult};
@@ -10,6 +11,15 @@ use crate::killswitch::KillSwitch;
 use crate::policy::PolicyEngine;
 use crate::skills::{SkillManager, Skill};
 use crate::sandbox::Sandbox;
+
+/// Global counter for shield alerts received by this agent.
+/// Incremented atomically so it is safe to read from any thread (metrics, status endpoints, etc.).
+static SHIELD_ALERT_RECEIVED_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Return the total number of shield alerts received since process start.
+pub fn shield_alert_count() -> u64 {
+    SHIELD_ALERT_RECEIVED_COUNT.load(Ordering::Relaxed)
+}
 
 /// Dispatch an incoming message and return an optional response to send back.
 pub async fn dispatch(
@@ -56,10 +66,7 @@ pub async fn dispatch(
             None
         }
 
-        MessageType::ShieldAlert => {
-            info!("Shield alert received (no-op for now)");
-            None
-        }
+        MessageType::ShieldAlert => handle_shield_alert(msg),
 
         MessageType::SkillPush => handle_skill_push(msg, skill_mgr),
         MessageType::SkillList => handle_skill_list(msg, skill_mgr),
@@ -99,6 +106,58 @@ pub async fn dispatch(
             None
         }
     }
+}
+
+/// Handle an incoming ShieldAlert message.
+///
+/// Parses the alert payload, logs detailed information at WARN level,
+/// increments the global shield alert counter, and returns `None` (no reply
+/// needed — the server that sent the alert does not expect an ACK).
+fn handle_shield_alert(msg: &Message) -> Option<Message> {
+    // Increment the metric counter unconditionally for every received alert
+    let count = SHIELD_ALERT_RECEIVED_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+
+    match &msg.payload {
+        Some(payload) => {
+            // Attempt to deserialize into the structured alert payload
+            match serde_json::from_value::<ShieldAlertPayload>(payload.clone()) {
+                Ok(alert) => {
+                    warn!(
+                        "[ShieldAlert #{}] id={} pid={} uid={} user={} cmd={:?} rule={} action={} snapshot={:?} ts={}",
+                        count,
+                        alert.alert_id,
+                        alert.pid,
+                        alert.uid,
+                        alert.username,
+                        alert.command,
+                        alert.rule_name,
+                        alert.action,
+                        alert.snapshot,
+                        alert.timestamp,
+                    );
+                }
+                Err(e) => {
+                    // Payload present but malformed — still log what we can
+                    warn!(
+                        "[ShieldAlert #{}] (malformed payload) agent={:?} error={}",
+                        count,
+                        msg.agent_id,
+                        e,
+                    );
+                }
+            }
+        }
+        None => {
+            warn!(
+                "[ShieldAlert #{}] received with no payload, agent={:?}",
+                count,
+                msg.agent_id,
+            );
+        }
+    }
+
+    // ShieldAlerts are informational from server to agent; no reply needed
+    None
 }
 
 async fn handle_approval_response(msg: &Message, approval: &ApprovalManager) {
@@ -576,5 +635,60 @@ mod tests {
         let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::Error);
+    }
+
+    #[tokio::test]
+    async fn test_shield_alert_increments_counter() {
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+
+        // Reset the counter for the test
+        let before = shield_alert_count();
+
+        let payload = serde_json::json!({
+            "alert_id": "test-alert-1",
+            "pid": 1234,
+            "uid": 1000,
+            "username": "testuser",
+            "command": "rm -rf /",
+            "rule_name": "no_rm_rf",
+            "action": "blocked",
+            "timestamp": 1700000000
+        });
+        let msg = msg_with(MessageType::ShieldAlert, payload);
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+
+        // ShieldAlert handler returns None (no reply)
+        assert!(resp.is_none());
+        // Counter should have incremented
+        assert_eq!(shield_alert_count(), before + 1);
+    }
+
+    #[tokio::test]
+    async fn test_shield_alert_no_payload() {
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+
+        let before = shield_alert_count();
+
+        let msg = Message::new(MessageType::ShieldAlert).with_agent_id("test-agent");
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+
+        assert!(resp.is_none());
+        // Counter still increments even without payload
+        assert_eq!(shield_alert_count(), before + 1);
+    }
+
+    #[tokio::test]
+    async fn test_shield_alert_malformed_payload() {
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+
+        let before = shield_alert_count();
+
+        // Payload that doesn't match ShieldAlertPayload schema
+        let payload = serde_json::json!({ "garbage": true });
+        let msg = msg_with(MessageType::ShieldAlert, payload);
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+
+        assert!(resp.is_none());
+        assert_eq!(shield_alert_count(), before + 1);
     }
 }

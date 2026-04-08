@@ -119,6 +119,20 @@ impl ActionClassifier {
         vec![
             // === BLOCKED TIER ===
             
+            // ── Git history rewrite (irreversible) ──
+            ClassificationRule {
+                name: "block-git-filter-branch".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\b(filter-branch|filter-repo)\b".to_string()),
+                ],
+                tier: ActionTier::Blocked,
+                action: RuleAction::Block {
+                    reason: "Git history rewrite is blocked — use with explicit admin approval".to_string(),
+                },
+                message: "Attempting to rewrite git history".to_string(),
+            },
+            
             // rm -rf / or --no-preserve-root
             ClassificationRule {
                 name: "block-rm-root".to_string(),
@@ -172,6 +186,130 @@ impl ActionClassifier {
 
             // === DESTRUCTIVE TIER ===
             
+            // ── Git destructive operations ──
+            ClassificationRule {
+                name: "destructive-git-push-force".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\bpush\b".to_string()),
+                    RuleCondition::ArgContains("--force".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git force push — overwrites remote history".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-push-force-lease".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\bpush\b".to_string()),
+                    RuleCondition::ArgContains("--force-with-lease".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git force push with lease".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-reset-hard".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\breset\b".to_string()),
+                    RuleCondition::ArgContains("--hard".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git reset --hard — discards working changes".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-clean-fd".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\bclean\b".to_string()),
+                    RuleCondition::ArgContains("-f".to_string()),
+                    RuleCondition::ArgContains("d".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git clean -fd — removing untracked files".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-branch-d".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\bbranch\b".to_string()),
+                    RuleCondition::HasFlag("-D".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git branch -D — force delete branch".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-tag-delete".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\btag\b".to_string()),
+                    RuleCondition::HasFlag("-d".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git tag delete".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-stash-drop".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\bstash\b".to_string()),
+                    RuleCondition::ArgMatches(r"\b(drop|clear)\b".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git stash drop/clear".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-reflog-expire".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\breflog\b".to_string()),
+                    RuleCondition::ArgMatches(r"\b(expire)\b".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git reflog expire — losing recovery history".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-gc-prune".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\bgc\b".to_string()),
+                    RuleCondition::ArgContains("--prune=now".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git gc with aggressive pruning".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-worktree-remove".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\bworktree\b".to_string()),
+                    RuleCondition::ArgMatches(r"\b(remove|prune)\b".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git worktree remove/prune".to_string(),
+            },
+            ClassificationRule {
+                name: "destructive-git-submodule-deinit".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\bsubmodule\b".to_string()),
+                    RuleCondition::ArgMatches(r"\bdeinit\b".to_string()),
+                ],
+                tier: ActionTier::Destructive,
+                action: RuleAction::Allow,
+                message: "Git submodule deinit".to_string(),
+            },
+
             // rm, rmdir
             ClassificationRule {
                 name: "destructive-rm".to_string(),
@@ -287,6 +425,51 @@ impl ActionClassifier {
 
             // === READ-ONLY TIER ===
             
+            // ── Git read-only operations ──
+            ClassificationRule {
+                name: "readonly-git".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgMatches(r"\b(status|log|diff|show|branch|tag|remote|shortlog|blame|rev-parse|describe|ls-files|ls-tree|reflog|count-objects|verify-pack|config)\b".to_string()),
+                ],
+                tier: ActionTier::ReadOnly,
+                action: RuleAction::Allow,
+                message: "Git read operation".to_string(),
+            },
+            ClassificationRule {
+                name: "readonly-git-stash-list".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgContains("stash".to_string()),
+                    RuleCondition::ArgContains("list".to_string()),
+                ],
+                tier: ActionTier::ReadOnly,
+                action: RuleAction::Allow,
+                message: "Git stash list".to_string(),
+            },
+            ClassificationRule {
+                name: "readonly-git-submodule-status".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgContains("submodule".to_string()),
+                    RuleCondition::ArgContains("status".to_string()),
+                ],
+                tier: ActionTier::ReadOnly,
+                action: RuleAction::Allow,
+                message: "Git submodule status".to_string(),
+            },
+            ClassificationRule {
+                name: "readonly-git-worktree-list".to_string(),
+                command_pattern: "git".to_string(),
+                conditions: vec![
+                    RuleCondition::ArgContains("worktree".to_string()),
+                    RuleCondition::ArgContains("list".to_string()),
+                ],
+                tier: ActionTier::ReadOnly,
+                action: RuleAction::Allow,
+                message: "Git worktree list".to_string(),
+            },
+
             // Basic read-only commands
             ClassificationRule {
                 name: "readonly-basic".to_string(),
@@ -695,6 +878,139 @@ mod tests {
         // More specific rules should match first
         // rm -rf / should be Blocked, not Destructive
         let result = classifier.classify("rm", &["-rf".to_string(), "/".to_string()]).unwrap();
+        assert_eq!(result.tier, ActionTier::Blocked);
+    }
+
+    // ═══════════════════════════════════════════
+    // Git operations
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn test_git_readonly_operations() {
+        let classifier = ActionClassifier::new();
+
+        // Git read-only commands should be ReadOnly tier
+        let readonly_cmds: Vec<(&str, Vec<String>)> = vec![
+            ("status", vec!["status".to_string()]),
+            ("log", vec!["log".to_string(), "--oneline".to_string()]),
+            ("diff", vec!["diff".to_string(), "HEAD~1".to_string()]),
+            ("show", vec!["show".to_string(), "abc123".to_string()]),
+            ("branch_list", vec!["branch".to_string()]),
+            ("branch_list_verbose", vec!["branch".to_string(), "-v".to_string()]),
+            ("tag_list", vec!["tag".to_string()]),
+            ("remote_list", vec!["remote".to_string(), "-v".to_string()]),
+            ("stash_list", vec!["stash".to_string(), "list".to_string()]),
+            ("blame", vec!["blame".to_string(), "file.rs".to_string()]),
+            ("shortlog", vec!["shortlog".to_string()]),
+        ];
+
+        for (name, args) in readonly_cmds {
+            let result = classifier.classify("git", &args).unwrap();
+            assert_eq!(result.tier, ActionTier::ReadOnly, "git {} should be ReadOnly", name);
+        }
+    }
+
+    #[test]
+    fn test_git_safe_operations() {
+        let classifier = ActionClassifier::new();
+
+        // Git operations that are Modify tier (safe but state-changing)
+        let safe_cmds = vec![
+            ("add", vec!["add".to_string(), ".".to_string()]),
+            ("commit", vec!["commit".to_string(), "-m".to_string(), "fix".to_string()]),
+            ("checkout", vec!["checkout".to_string(), "-b".to_string(), "feature".to_string()]),
+            ("merge", vec!["merge".to_string(), "feature-x".to_string()]),
+            ("rebase", vec!["rebase".to_string(), "main".to_string()]),
+            ("pull", vec!["pull".to_string(), "origin".to_string(), "main".to_string()]),
+            ("push", vec!["push".to_string(), "origin".to_string(), "main".to_string()]),
+            ("clone", vec!["clone".to_string(), "https://github.com/repo.git".to_string()]),
+            ("fetch", vec!["fetch".to_string(), "--all".to_string()]),
+            ("cherry-pick", vec!["cherry-pick".to_string(), "abc123".to_string()]),
+            ("reset_soft", vec!["reset".to_string(), "--soft".to_string(), "HEAD~1".to_string()]),
+            ("reset_mixed", vec!["reset".to_string(), "--mixed".to_string(), "HEAD~1".to_string()]),
+            ("stash_push", vec!["stash".to_string(), "push".to_string(), "-m".to_string(), "wip".to_string()]),
+            ("revert", vec!["revert".to_string(), "abc123".to_string()]),
+            ("worktree_add", vec!["worktree".to_string(), "add".to_string(), "../wt".to_string(), "branch".to_string()]),
+            ("branch_create", vec!["branch".to_string(), "feature-x".to_string()]),
+            ("branch_d_safe", vec!["branch".to_string(), "-d".to_string(), "merged".to_string()]),
+            ("submodule_add", vec!["submodule".to_string(), "add".to_string(), "url".to_string()]),
+        ];
+
+        for (name, args) in safe_cmds {
+            let result = classifier.classify("git", &args).unwrap();
+            assert_ne!(result.tier, ActionTier::Blocked, "git {} should NOT be blocked", name);
+        }
+    }
+
+    #[test]
+    fn test_git_destructive_operations() {
+        let classifier = ActionClassifier::new();
+
+        // Git destructive commands should be Destructive tier
+        let destructive_cmds = vec![
+            ("push_force", vec!["push".to_string(), "--force".to_string(), "origin".to_string()]),
+            ("push_force_lease", vec!["push".to_string(), "--force-with-lease".to_string(), "origin".to_string()]),
+            ("reset_hard", vec!["reset".to_string(), "--hard".to_string(), "HEAD~3".to_string()]),
+            ("clean_fd", vec!["clean".to_string(), "-fd".to_string()]),
+            ("branch_D", vec!["branch".to_string(), "-D".to_string(), "old-feature".to_string()]),
+            ("tag_delete", vec!["tag".to_string(), "-d".to_string(), "v1.0".to_string()]),
+            ("stash_drop", vec!["stash".to_string(), "drop".to_string()]),
+            ("stash_clear", vec!["stash".to_string(), "clear".to_string()]),
+            ("reflog_expire", vec!["reflog".to_string(), "expire".to_string(), "--expire=now".to_string()]),
+            ("gc_prune", vec!["gc".to_string(), "--prune=now".to_string()]),
+            ("worktree_remove", vec!["worktree".to_string(), "remove".to_string(), "../wt".to_string()]),
+            ("submodule_deinit", vec!["submodule".to_string(), "deinit".to_string(), "libs/core".to_string()]),
+        ];
+
+        for (name, args) in destructive_cmds {
+            let result = classifier.classify("git", &args).unwrap();
+            assert_eq!(result.tier, ActionTier::Destructive, "git {} should be Destructive, got {:?}", name, result.tier);
+        }
+    }
+
+    #[test]
+    fn test_git_blocked_operations() {
+        let classifier = ActionClassifier::new();
+
+        // Git filter-branch / filter-repo should be Blocked
+        let result = classifier.classify("git", &["filter-branch".to_string(), "--tree-filter".to_string(), "...".to_string()]).unwrap();
+        assert_eq!(result.tier, ActionTier::Blocked);
+
+        let result = classifier.classify("git", &["filter-repo".to_string(), "--invert-paths".to_string()]).unwrap();
+        assert_eq!(result.tier, ActionTier::Blocked);
+
+        // Check denial reason
+        if let Some(ShieldVerdict::Deny(feedback)) = result.verdict {
+            assert!(feedback.reason.contains("history rewrite"));
+        } else {
+            panic!("Expected Deny verdict for git filter-repo");
+        }
+    }
+
+    #[test]
+    fn test_git_push_normal_not_destructive() {
+        let classifier = ActionClassifier::new();
+
+        // Normal git push should NOT be Destructive
+        let result = classifier.classify("git", &["push".to_string(), "origin".to_string(), "main".to_string()]).unwrap();
+        assert_ne!(result.tier, ActionTier::Destructive, "normal git push should not be Destructive");
+    }
+
+    #[test]
+    fn test_git_clean_f_only_not_destructive() {
+        let classifier = ActionClassifier::new();
+
+        // git clean -f without -d should not be Destructive
+        let result = classifier.classify("git", &["clean".to_string(), "-f".to_string()]).unwrap();
+        assert_ne!(result.tier, ActionTier::Destructive);
+    }
+
+    #[test]
+    fn test_git_priority_blocked_over_destructive() {
+        let classifier = ActionClassifier::new();
+
+        // filter-branch should be Blocked (first match), not Destructive
+        let result = classifier.classify("git", &["filter-branch".to_string(), "--all".to_string()]).unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
     }
 }

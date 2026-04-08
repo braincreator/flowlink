@@ -30,7 +30,10 @@ impl AutoRestoreEngine {
         }
     }
 
-    /// Check if we can still auto-restore (rate limited)
+    /// Check if we can still auto-restore (rate limited).
+    ///
+    /// Resets the hourly counter when more than an hour has elapsed.
+    /// Returns `true` if the restore budget has not been exhausted.
     pub async fn can_restore(&self) -> bool {
         let mut count = self.restore_count.write().await;
         let mut last_reset = self.last_reset.write().await;
@@ -45,7 +48,11 @@ impl AutoRestoreEngine {
         *count < self.max_restores_per_hour
     }
 
-    /// Run health checks after command execution and auto-restore if unhealthy
+    /// Run health checks after command execution and auto-restore if unhealthy.
+    ///
+    /// Returns `Ok(Some(result))` when a restore was performed,
+    /// `Ok(None)` when the system is healthy or rate-limited,
+    /// and `Err` when the restore itself fails.
     pub async fn check_and_restore(&self, backup_id: &str) -> anyhow::Result<Option<RestoreResult>> {
         let health = self.health_checker.run_checks().await;
 
@@ -58,12 +65,37 @@ impl AutoRestoreEngine {
             return Ok(None);
         }
 
-        tracing::warn!("Health check FAILED, triggering auto-restore from backup {}", backup_id);
+        tracing::warn!(
+            backup_id = backup_id,
+            "Health check FAILED, triggering auto-restore"
+        );
 
-        let mut count = self.restore_count.write().await;
-        *count += 1;
+        // Delegate to the backup engine's restore engine.
+        // RestoreEngine::restore returns Result<RestoreResult>.
+        match self.backup_engine.restore_engine().restore(backup_id).await {
+            Ok(result) => {
+                // Only increment the counter on an actual restore attempt that succeeded
+                let mut count = self.restore_count.write().await;
+                *count += 1;
 
-        // TODO: call backup_engine.restore(backup_id) when restore is implemented
-        Ok(None)
+                tracing::info!(
+                    backup_id = backup_id,
+                    files_restored = result.files_restored,
+                    duration_ms = result.duration_ms,
+                    "Auto-restore completed successfully"
+                );
+                Ok(Some(result))
+            }
+            Err(e) => {
+                // Log the failure but do NOT increment the counter — the restore
+                // did not actually succeed so we preserve the budget for retry.
+                tracing::error!(
+                    backup_id = backup_id,
+                    error = %e,
+                    "Auto-restore failed"
+                );
+                Err(e)
+            }
+        }
     }
 }

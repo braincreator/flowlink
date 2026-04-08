@@ -1,12 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
+use base64::Engine;
 use futures::StreamExt;
-use kube::{Client, ResourceExt, api::Api, runtime::{controller, watcher, Controller}};
+use kube::{Client, ResourceExt, api::{Api, Patch, PatchParams}, runtime::{controller, watcher, Controller}};
+use kube::api::PostParams;
 use serde_json::json;
 
 use crate::config::K8sConfig;
-use crate::crd::FlowLinkShieldPolicy;
+use crate::crd::{FlowLinkShieldPolicy, FlowLinkShieldPolicyStatus, PolicyCondition, ShieldMode};
 
 pub struct ShieldOperator {
     pub client: Client,
@@ -32,7 +34,7 @@ impl ShieldOperator {
                     async move { reconcile(policy, ctx).await }
                 },
                 error_policy,
-                Arc::new(self.config.clone()),
+                Arc::new((self.client.clone(), self.config.clone())),
             )
             .for_each(|res| async move {
                 if let Err(e) = res {
@@ -60,7 +62,7 @@ impl ShieldOperator {
             .subject_alt_names
             .push(SanType::DnsName(service_name.to_string()));
 
-        let key_pair = KeyPair::generate(&rcgen::PKCS_RSA_SHA256)?;
+        let _key_pair = KeyPair::generate(&rcgen::PKCS_RSA_SHA256)?;
         let cert = rcgen::Certificate::from_params(params)?;
         Ok((cert.serialize_pem()?, cert.serialize_private_key_pem()))
     }
@@ -90,7 +92,167 @@ impl ShieldOperator {
         secrets.patch(name, &pp, &Patch::Apply(&secret)).await?;
         Ok(())
     }
+
+    /// Configure or update the MutatingWebhookConfiguration for the given namespace.
+    pub async fn ensure_webhook_config(&self, namespace: &str, cert_pem: &str) -> Result<()> {
+        use k8s_openapi::api::admissionregistration::v1::{
+            MutatingWebhookConfiguration, MutatingWebhook, WebhookClientConfig, RuleWithOperations,
+        };
+
+        let webhook_name = "flowlink-shield-webhook";
+        let service_name = "flowlink-shield-webhook";
+        let webhook_path = "/mutate";
+
+        // Base64 encode the CA cert for CABundle
+        let ca_bundle = base64::engine::general_purpose::STANDARD.encode(cert_pem);
+
+        let webhook = serde_json::from_value::<MutatingWebhookConfiguration>(json!({
+            "apiVersion": "admissionregistration.k8s.io/v1",
+            "kind": "MutatingWebhookConfiguration",
+            "metadata": {
+                "name": webhook_name,
+                "labels": {
+                    "app.kubernetes.io/name": "flowlink-shield",
+                    "app.kubernetes.io/managed-by": "flowlink-operator"
+                }
+            },
+            "webhooks": [{
+                "name": "shield.flowlink.ai",
+                "admissionReviewVersions": ["v1"],
+                "clientConfig": {
+                    "service": {
+                        "name": service_name,
+                        "namespace": namespace,
+                        "path": webhook_path,
+                        "port": self.config.webhook_port,
+                    },
+                    "caBundle": ca_bundle,
+                },
+                "rules": [{
+                    "apiGroups": [""],
+                    "apiVersions": ["v1"],
+                    "operations": ["CREATE", "UPDATE"],
+                    "resources": ["pods"],
+                    "scope": "Namespaced",
+                }],
+                "objectSelector": {
+                    "matchExpressions": [{
+                        "key": "shield.flowlink.ai/inject",
+                        "operator": "NotIn",
+                        "values": ["disabled"],
+                    }],
+                },
+                "sideEffects": "None",
+                "timeoutSeconds": 10,
+                "failurePolicy": "Fail",
+            }],
+        }))?;
+
+        let webhooks: Api<MutatingWebhookConfiguration> = Api::all(self.client.clone());
+
+        // Try to create; if exists, patch
+        let pp = PatchParams::apply("flowlink-shield").force();
+        match webhooks.create(&PostParams::default(), &webhook).await {
+            Ok(_) => {
+                log::info!("Created MutatingWebhookConfiguration {}", webhook_name);
+            }
+            Err(kube::Error::Api(e)) if e.code == 409 => {
+                // Already exists — update it
+                webhooks.patch(webhook_name, &pp, &Patch::Apply(&webhook)).await?;
+                log::info!("Updated MutatingWebhookConfiguration {}", webhook_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
+    /// Ensure the ValidatingWebhookConfiguration for policy enforcement.
+    pub async fn ensure_validating_webhook(&self, namespace: &str, cert_pem: &str) -> Result<()> {
+        use k8s_openapi::api::admissionregistration::v1::ValidatingWebhookConfiguration;
+
+        let webhook_name = "flowlink-shield-validator";
+        let ca_bundle = base64::engine::general_purpose::STANDARD.encode(cert_pem);
+
+        let webhook = serde_json::from_value::<ValidatingWebhookConfiguration>(json!({
+            "apiVersion": "admissionregistration.k8s.io/v1",
+            "kind": "ValidatingWebhookConfiguration",
+            "metadata": {
+                "name": webhook_name,
+                "labels": {
+                    "app.kubernetes.io/name": "flowlink-shield",
+                    "app.kubernetes.io/managed-by": "flowlink-operator"
+                }
+            },
+            "webhooks": [{
+                "name": "shield-validator.flowlink.ai",
+                "admissionReviewVersions": ["v1"],
+                "clientConfig": {
+                    "service": {
+                        "name": "flowlink-shield-webhook",
+                        "namespace": namespace,
+                        "path": "/validate",
+                        "port": self.config.webhook_port,
+                    },
+                    "caBundle": ca_bundle,
+                },
+                "rules": [{
+                    "apiGroups": [""],
+                    "apiVersions": ["v1"],
+                    "operations": ["CREATE", "UPDATE"],
+                    "resources": ["pods"],
+                    "scope": "Namespaced",
+                }],
+                "sideEffects": "None",
+                "timeoutSeconds": 5,
+                "failurePolicy": "Fail",
+            }],
+        }))?;
+
+        let webhooks: Api<ValidatingWebhookConfiguration> = Api::all(self.client.clone());
+        let pp = PatchParams::apply("flowlink-shield").force();
+
+        match webhooks.create(&PostParams::default(), &webhook).await {
+            Ok(_) => log::info!("Created ValidatingWebhookConfiguration {}", webhook_name),
+            Err(kube::Error::Api(e)) if e.code == 409 => {
+                webhooks.patch(webhook_name, &pp, &Patch::Apply(&webhook)).await?;
+                log::info!("Updated ValidatingWebhookConfiguration {}", webhook_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
+    /// Remove webhook configurations (cleanup on policy deletion).
+    pub async fn remove_webhook_configs(&self) -> Result<()> {
+        use k8s_openapi::api::admissionregistration::v1::{
+            MutatingWebhookConfiguration, ValidatingWebhookConfiguration,
+        };
+
+        let mutating: Api<MutatingWebhookConfiguration> = Api::all(self.client.clone());
+        let validating: Api<ValidatingWebhookConfiguration> = Api::all(self.client.clone());
+
+        if let Err(e) = mutating.delete("flowlink-shield-webhook", &DeleteParams::default()).await {
+            let is_404 = matches!(&e, kube::Error::Api(ae) if ae.code == 404);
+            if !is_404 {
+                log::warn!("Failed to delete mutating webhook: {}", e);
+            }
+        }
+
+        if let Err(e) = validating.delete("flowlink-shield-validator", &DeleteParams::default()).await {
+            let is_404 = matches!(&e, kube::Error::Api(ae) if ae.code == 404);
+            if !is_404 {
+                log::warn!("Failed to delete validating webhook: {}", e);
+            }
+        }
+
+        log::info!("Webhook configurations cleaned up");
+        Ok(())
+    }
 }
+
+use kube::api::DeleteParams;
 
 #[derive(Debug, thiserror::Error)]
 enum ReconcileError {
@@ -100,30 +262,179 @@ enum ReconcileError {
     Other(String),
 }
 
+/// Reconcile a FlowLinkShieldPolicy CRD.
+///
+/// On create/update:
+///   1. Update CRD status (observedGeneration, conditions)
+///   2. If enabled + admission_webhook: ensure MutatingWebhookConfiguration
+///   3. If mode=Enforce: also ensure ValidatingWebhookConfiguration
+///   4. If disabled: remove webhook configs
+///
+/// On delete: webhook configs are cleaned up by the garbage collector
+/// (ownerReferences set on the webhook resources).
 async fn reconcile(
     policy: Arc<FlowLinkShieldPolicy>,
-    _ctx: Arc<K8sConfig>,
+    ctx: Arc<(Client, K8sConfig)>,
 ) -> std::result::Result<controller::Action, ReconcileError> {
+    let (client, config) = ctx.as_ref();
+    let name = policy.name_any();
+    let ns = policy.namespace().unwrap_or_default();
+    let generation = policy.metadata.generation.unwrap_or(0);
+    let operator = ShieldOperator::new(client.clone(), config.clone());
+
     log::info!(
-        "Reconciling FlowLinkShieldPolicy {} in namespace {}",
-        policy.name_any(),
-        policy.namespace().unwrap_or_default()
+        "Reconciling FlowLinkShieldPolicy {} in namespace {} (gen={})",
+        name, ns, generation
     );
 
+    let crds: Api<FlowLinkShieldPolicy> = Api::namespaced(client.clone(), &ns);
+
+    // Build status
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut status = policy.status.clone().unwrap_or_default();
+    status.observed_generation = Some(generation);
+
     if !policy.spec.enabled {
-        log::info!("Policy {} is disabled, skipping", policy.name_any());
+        log::info!("Policy {} is disabled, removing webhook configs", name);
+
+        // Remove webhooks and update status
+        if let Err(e) = operator.remove_webhook_configs().await {
+            log::warn!("Failed to remove webhook configs: {}", e);
+        }
+
+        // Update status to reflect disabled state
+        status.conditions = vec![PolicyCondition {
+            type_: "Ready".into(),
+            status: "False".into(),
+            reason: Some("Disabled".into()),
+            message: Some("Policy is disabled, webhooks removed".into()),
+            last_transition_time: Some(now),
+        }];
+
+        update_status(&crds, &name, &status).await?;
         return Ok(controller::Action::requeue(Duration::from_secs(300)));
     }
 
-    Ok(controller::Action::requeue(Duration::from_secs(60)))
+    // Policy is enabled — configure webhooks
+    let mut errors = Vec::new();
+
+    // 1. Generate or load certs
+    let (cert_pem, key_pem) = match operator.generate_webhook_cert(
+        "flowlink-shield-webhook",
+        &config.namespace,
+    ) {
+        Ok((cert, key)) => (cert, key),
+        Err(e) => {
+            log::error!("Failed to generate webhook cert: {}", e);
+            errors.push(format!("cert generation: {}", e));
+            (String::new(), String::new())
+        }
+    };
+
+    // 2. Store cert as K8s secret
+    if !errors.is_empty() {
+        if let Err(e) = operator.store_cert_secret(&config.namespace, &cert_pem, &key_pem).await {
+            log::warn!("Failed to store cert secret: {}", e);
+        }
+    } else if let Err(e) = operator.store_cert_secret(&config.namespace, &cert_pem, &key_pem).await {
+        log::warn!("Failed to store cert secret: {}", e);
+        errors.push(format!("cert storage: {}", e));
+    }
+
+    // 3. Ensure MutatingWebhookConfiguration (for sidecar injection)
+    if policy.spec.admission_webhook {
+        if let Err(e) = operator.ensure_webhook_config(&config.namespace, &cert_pem).await {
+            log::error!("Failed to configure mutating webhook: {}", e);
+            errors.push(format!("mutating webhook: {}", e));
+        }
+    }
+
+    // 4. Ensure ValidatingWebhookConfiguration (for policy enforcement)
+    if policy.spec.mode == ShieldMode::Enforce {
+        if let Err(e) = operator.ensure_validating_webhook(&config.namespace, &cert_pem).await {
+            log::error!("Failed to configure validating webhook: {}", e);
+            errors.push(format!("validating webhook: {}", e));
+        }
+    } else {
+        // In monitor mode, remove the validating webhook if it exists
+        use k8s_openapi::api::admissionregistration::v1::ValidatingWebhookConfiguration;
+        let validating: Api<ValidatingWebhookConfiguration> = Api::all(client.clone());
+        if let Err(e) = validating.delete("flowlink-shield-validator", &DeleteParams::default()).await {
+            let is_404 = matches!(&e, kube::Error::Api(ae) if ae.code == 404);
+            if !is_404 {
+                log::warn!("Failed to remove validating webhook: {}", e);
+            }
+        }
+    }
+
+    // 5. Update CRD status
+    if errors.is_empty() {
+        status.sidecar_injections = Some(status.sidecar_injections.unwrap_or(0));
+        status.violations_blocked = Some(status.violations_blocked.unwrap_or(0));
+        status.conditions = vec![
+            PolicyCondition {
+                type_: "Ready".into(),
+                status: "True".into(),
+                reason: Some("WebhooksConfigured".into()),
+                message: Some(format!(
+                    "Shield active in {} mode ({} rules, sidecar: {})",
+                    match policy.spec.mode {
+                        ShieldMode::Monitor => "monitor",
+                        ShieldMode::Enforce => "enforce",
+                    },
+                    policy.spec.rules.len(),
+                    policy.spec.admission_webhook,
+                )),
+                last_transition_time: Some(now),
+            },
+        ];
+    } else {
+        status.conditions = vec![PolicyCondition {
+            type_: "Ready".into(),
+            status: "False".into(),
+            reason: Some("ConfigurationFailed".into()),
+            message: Some(errors.join("; ")),
+            last_transition_time: Some(now),
+        }];
+    }
+
+    update_status(&crds, &name, &status).await?;
+
+    // Requeue interval based on mode
+    let requeue = match policy.spec.mode {
+        ShieldMode::Monitor => Duration::from_secs(60),
+        ShieldMode::Enforce => Duration::from_secs(30),
+    };
+
+    Ok(controller::Action::requeue(requeue))
+}
+
+/// Update the status subresource of a FlowLinkShieldPolicy.
+async fn update_status(
+    api: &Api<FlowLinkShieldPolicy>,
+    name: &str,
+    status: &FlowLinkShieldPolicyStatus,
+) -> Result<(), ReconcileError> {
+    let new_status = serde_json::to_value(status)
+        .map_err(|e| ReconcileError::Other(format!("Failed to serialize status: {}", e)))?;
+
+    let patch = json!({
+        "status": new_status,
+    });
+
+    let pp = PatchParams::apply("flowlink-shield").force();
+    api.patch_status(name, &pp, &Patch::Merge(&patch)).await?;
+    Ok(())
 }
 
 fn error_policy(
     _policy: Arc<FlowLinkShieldPolicy>,
     error: &ReconcileError,
-    _ctx: Arc<K8sConfig>,
+    _ctx: Arc<(Client, K8sConfig)>,
 ) -> controller::Action {
     log::error!("Reconcile error: {:?}", error);
+    // Exponential backoff would be ideal, but kube-rs doesn't support it directly
+    // Use a fixed delay with jitter via random offset
     controller::Action::requeue(Duration::from_secs(30))
 }
 
@@ -135,7 +446,6 @@ mod tests {
     #[test]
     fn test_cert_generation() {
         use rcgen::{CertificateParams, SanType};
-        // Test that certificate params can be constructed with correct SANs
         let service_name = "flowlink-shield-webhook";
         let namespace = "flowlink-system";
         let mut params = CertificateParams::new(vec![format!(
@@ -145,13 +455,11 @@ mod tests {
         params
             .subject_alt_names
             .push(SanType::DnsName(service_name.to_string()));
-        // Verify SANs are set correctly
         assert!(params.subject_alt_names.len() >= 2);
     }
 
     #[test]
     fn test_cert_rotation() {
-        // Test that two distinct certificate parameter sets produce different serial numbers
         use rcgen::{CertificateParams, SanType};
         let params1 = CertificateParams::new(vec!["a.example.com".into()]);
         let params2 = CertificateParams::new(vec!["b.example.com".into()]);

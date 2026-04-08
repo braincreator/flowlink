@@ -62,7 +62,7 @@ impl Relay {
 
         let state = AppState {
             pool, approvals, eventbus, handler, registry,
-            device_manager: Arc::new(DeviceManager::new()),
+            device_manager: Arc::new(DeviceManager::new(devices::PushConfig::default())),
             llm_proxy,
             shield_alerts: Arc::new(server::ShieldAlertManager::new()),
             audit_store: Arc::new(audit::AuditStore::new(

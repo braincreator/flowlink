@@ -63,12 +63,12 @@ impl AuditLog {
         Ok(key)
     }
 
+    /// Generate a cryptographically random 32-byte HMAC key using the OS RNG.
     pub fn generate_key() -> anyhow::Result<Vec<u8>> {
-        Ok(hmac::Hmac::<sha2::Sha256>::new_from_slice(b"flowlink-audit-key-gen")
-            .expect("key")
-            .finalize()
-            .into_bytes()
-            .to_vec())
+        use rand::RngCore;
+        let mut key = vec![0u8; HMAC_SECRET_LEN];
+        rand::rngs::OsRng.fill_bytes(&mut key);
+        Ok(key)
     }
 
     /// Append an entry to today's JSONL log file with HMAC.
@@ -282,10 +282,12 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_key_deterministic() {
-        // The generate_key function uses a fixed seed, so it should be deterministic
+    fn test_generate_key_is_random() {
+        // generate_key() uses OsRng, so consecutive calls must produce different keys.
         let k1 = AuditLog::generate_key().unwrap();
         let k2 = AuditLog::generate_key().unwrap();
-        assert_eq!(k1, k2);
+        assert_eq!(k1.len(), HMAC_SECRET_LEN);
+        assert_eq!(k2.len(), HMAC_SECRET_LEN);
+        assert_ne!(k1, k2, "two consecutive generate_key calls must produce different keys");
     }
 }

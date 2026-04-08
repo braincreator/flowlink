@@ -95,6 +95,7 @@ impl AnalysisEngine {
             "chmod" => self.l1_chmod(args),
             "iptables" | "ip6tables" | "nft" => self.l1_fw(b, args),
             "mysql" | "psql" | "sqlite3" | "mongosh" | "redis-cli" => self.l1_db(b, args),
+            "git" => self.l1_git(args),
             _ => None,
         }
     }
@@ -191,6 +192,87 @@ impl AnalysisEngine {
         None
     }
 
+    fn l1_git(&self, args: &[String]) -> Option<Threat> {
+        if args.len() < 2 { return None; }
+        /// Check if any arg is an exact match or contains the char in a combined short-flag group.
+        /// e.g. has_flag(args, "-f") matches "-f", "--force", and "-fdx" (contains 'f').
+        let has_flag = |flag: &str| -> bool {
+            args.iter().any(|a| {
+                if a == flag { return true; }
+                // For short flags like "-f", also match combined: "-fd", "-fdx"
+                if flag.starts_with('-') && flag.len() == 2 && a.starts_with('-') && a.len() > 2 && !a.starts_with("--") {
+                    a.chars().skip(1).any(|c| flag.contains(c))
+                } else {
+                    false
+                }
+            })
+        };
+        let has_force = || has_flag("--force") || has_flag("--force-with-lease") || has_flag("-f") || has_flag("-F");
+        match args[1].as_str() {
+            // ── push --force / --force-with-lease ──
+            "push" if has_force() =>
+                Some(Threat::high("git_push_f", "Git Force Push", "Force pushing overwrites remote history".into())),
+            // ── reset --hard ──
+            "reset" if has_flag("--hard") || has_flag("-H") => {
+                // skip binary + subcommand, find the target commit
+                let to = args.iter().skip(2).find(|a| !a.starts_with('-')).cloned().unwrap_or_default();
+                if to == "HEAD~0" || to.is_empty() {
+                    Some(Threat::high("git_reset_hard_head", "Git Reset --hard HEAD", "Resetting to HEAD discards all working changes".into()))
+                } else {
+                    Some(Threat::warn("git_reset_hard", "Git Reset --hard", format!("Hard reset to {}", to)))
+                }
+            }
+            // ── clean -fd / -fdx ──
+            "clean" => {
+                let f = has_flag("-f");
+                let d = has_flag("-d");
+                let x = has_flag("-x") || has_flag("-X");
+                if f && d && x {
+                    Some(Threat::high("git_clean_fdx", "Git Clean -fdx", "Removing ALL untracked files including ignored".into()))
+                } else if f && d {
+                    Some(Threat::warn("git_clean_fd", "Git Clean -fd", "Removing untracked files and directories".into()))
+                } else {
+                    None
+                }
+            }
+            // ── branch -D (force delete) ──
+            "branch" if has_flag("-D") =>
+                Some(Threat::warn("git_branch_d", "Git Branch -D", "Force deleting branch without merge check".into())),
+            // ── tag -d / -fd (delete tag) ──
+            "tag" if has_flag("-d") => {
+                let has_f = has_flag("-f");
+                if has_f {
+                    Some(Threat::warn("git_tag_fd", "Git Tag -fd", "Force deleting tag".into()))
+                } else {
+                    Some(Threat::warn("git_tag_d", "Git Tag -d", "Deleting tag".into()))
+                }
+            }
+            // ── filter-branch / filter-repo ──
+            "filter-branch" =>
+                Some(Threat::critical("git_filter_branch", "Git Filter-Branch", "Rewriting entire repository history".into())),
+            "filter-repo" =>
+                Some(Threat::critical("git_filter_repo", "Git Filter-Repo", "Rewriting repository history (irreversible)".into())),
+            // ── reflog expire + gc prune (history wipe) ──
+            "reflog" if args.iter().any(|a| a == "expire" || a == "--expire=now" || a == "--expire-unreachable=now") =>
+                Some(Threat::warn("git_reflog_expire", "Git Reflog Expire", "Expiring reflog entries — history may be lost".into())),
+            "gc" if args.iter().any(|a| a == "--prune=now" || a == "--aggressive") =>
+                Some(Threat::warn("git_gc_prune", "Git GC Prune", "Pruning unreachable objects".into())),
+            // ── stash drop / clear ──
+            "stash" if args.iter().any(|a| a == "drop" || a == "clear") =>
+                Some(Threat::warn("git_stash_drop", "Git Stash Drop", "Dropping stash entries".into())),
+            // ── revert --no-commit (partial revert, messy state) ──
+            "revert" if args.iter().any(|a| a == "--no-commit" || a == "-n") =>
+                Some(Threat::warn("git_revert_no_commit", "Git Revert No-Commit", "Reverting without auto-commit — staged changes need manual resolution".into())),
+            // ── worktree remove / prune ──
+            "worktree" if args.iter().any(|a| a == "remove" || a == "prune") =>
+                Some(Threat::warn("git_worktree_rm", "Git Worktree Remove", "Removing working tree".into())),
+            // ── submodule deinit ──
+            "submodule" if args.iter().any(|a| a == "deinit") && args.iter().any(|a| a == "-f" || a == "--force") =>
+                Some(Threat::warn("git_submodule_deinit", "Git Submodule Deinit", "Force deinitializing submodule".into())),
+            _ => None,
+        }
+    }
+
     // ═══════════════════════════════════════════
     // LEVEL 2 — AST
     // ═══════════════════════════════════════════
@@ -249,6 +331,21 @@ impl AnalysisEngine {
             }
             "eval" => { for a in &args { if let Some(t) = self.bash_ast(a) { return Some(t); } } }
             "exec" => { if let Some(t) = self.bash_ast(&args.join(" ")) { return Some(t); } }
+            "git" => {
+                // Catch git push --force, git reset --hard, git clean -fdx, git filter-branch inside bash -c
+                if args.iter().any(|a| a == "push") && args.iter().any(|a| a == "--force" || a == "--force-with-lease" || a == "-f") {
+                    return Some(Threat::high("ast_git_push_f", "Git Force Push (AST)", "Force push inside script".into()));
+                }
+                if args.iter().any(|a| a == "reset") && args.iter().any(|a| a == "--hard" || a == "-H") {
+                    return Some(Threat::high("ast_git_reset_hard", "Git Reset --hard (AST)", "Hard reset inside script".into()));
+                }
+                if args.iter().any(|a| a == "clean") && args.iter().any(|a| a.contains("fdx") || (a == "-f" && args.iter().any(|b| b == "-d"))) {
+                    return Some(Threat::high("ast_git_clean", "Git Clean (AST)", "Clean with -fdx inside script".into()));
+                }
+                if args.iter().any(|a| a == "filter-branch" || a == "filter-repo") {
+                    return Some(Threat::critical("ast_git_filter", "Git Filter (AST)", "History rewrite inside script".into()));
+                }
+            }
             _ => {}
         }
 
@@ -946,5 +1043,328 @@ mod tests {
     fn rm_rf_dot_safe() {
         let r = l1_only().analyze(&cmd("rm", &["-rf", "."]));
         assert!(r.safe, "rm -rf . should be safe (relative)");
+    }
+
+    // ═══════════════════════════════════════════
+    // L1 — git operations
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn git_push_force() {
+        let r = l1_only().analyze(&cmd("git", &["push", "--force", "origin", "main"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn git_push_force_with_lease() {
+        let r = l1_only().analyze(&cmd("git", &["push", "--force-with-lease", "origin", "main"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn git_push_force_short_flag() {
+        let r = l1_only().analyze(&cmd("git", &["push", "-f", "origin"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn git_push_normal_safe() {
+        let r = l1_only().analyze(&cmd("git", &["push", "origin", "main"]));
+        assert!(r.safe, "normal git push should be safe");
+    }
+
+    #[test]
+    fn git_reset_hard() {
+        let r = l1_only().analyze(&cmd("git", &["reset", "--hard"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn git_reset_hard_commit() {
+        let r = l1_only().analyze(&cmd("git", &["reset", "--hard", "HEAD~3"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium), "reset --hard to specific commit is Warn");
+    }
+
+    #[test]
+    fn git_reset_soft_safe() {
+        let r = l1_only().analyze(&cmd("git", &["reset", "--soft", "HEAD~1"]));
+        assert!(r.safe, "git reset --soft is safe");
+    }
+
+    #[test]
+    fn git_reset_mixed_safe() {
+        let r = l1_only().analyze(&cmd("git", &["reset", "--mixed", "HEAD~1"]));
+        assert!(r.safe, "git reset --mixed is safe");
+    }
+
+    #[test]
+    fn git_clean_fdx() {
+        let r = l1_only().analyze(&cmd("git", &["clean", "-fdx"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn git_clean_fd() {
+        let r = l1_only().analyze(&cmd("git", &["clean", "-fd"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn git_clean_force_only_safe() {
+        let r = l1_only().analyze(&cmd("git", &["clean", "-f"]));
+        assert!(r.safe, "git clean -f without -d is safe");
+    }
+
+    #[test]
+    fn git_branch_d() {
+        let r = l1_only().analyze(&cmd("git", &["branch", "-D", "feature-old"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn git_branch_d_lowercase_safe() {
+        let r = l1_only().analyze(&cmd("git", &["branch", "-d", "merged-branch"]));
+        assert!(r.safe, "git branch -d (lowercase, safe delete) should be safe");
+    }
+
+    #[test]
+    fn git_tag_delete() {
+        let r = l1_only().analyze(&cmd("git", &["tag", "-d", "v1.0"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn git_tag_force_delete() {
+        let r = l1_only().analyze(&cmd("git", &["tag", "-fd", "v1.0"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn git_filter_branch() {
+        let r = l1_only().analyze(&cmd("git", &["filter-branch", "--tree-filter", "...", "HEAD"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn git_filter_repo() {
+        let r = l1_only().analyze(&cmd("git", &["filter-repo", "--invert-paths", "--path", "secret.key"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn git_reflog_expire() {
+        let r = l1_only().analyze(&cmd("git", &["reflog", "expire", "--expire=now", "--all"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn git_gc_prune() {
+        let r = l1_only().analyze(&cmd("git", &["gc", "--prune=now"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn git_gc_aggressive() {
+        let r = l1_only().analyze(&cmd("git", &["gc", "--aggressive"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn git_stash_drop() {
+        let r = l1_only().analyze(&cmd("git", &["stash", "drop"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn git_stash_clear() {
+        let r = l1_only().analyze(&cmd("git", &["stash", "clear"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn git_stash_push_safe() {
+        let r = l1_only().analyze(&cmd("git", &["stash", "push", "-m", "wip"]));
+        assert!(r.safe, "git stash push should be safe");
+    }
+
+    #[test]
+    fn git_revert_no_commit() {
+        let r = l1_only().analyze(&cmd("git", &["revert", "--no-commit", "HEAD"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn git_revert_normal_safe() {
+        let r = l1_only().analyze(&cmd("git", &["revert", "abc123"]));
+        assert!(r.safe, "normal git revert should be safe");
+    }
+
+    #[test]
+    fn git_worktree_remove() {
+        let r = l1_only().analyze(&cmd("git", &["worktree", "remove", "../wt-backup"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn git_worktree_add_safe() {
+        let r = l1_only().analyze(&cmd("git", &["worktree", "add", "../wt-new", "feature-x"]));
+        assert!(r.safe, "git worktree add should be safe");
+    }
+
+    #[test]
+    fn git_submodule_deinit_force() {
+        let r = l1_only().analyze(&cmd("git", &["submodule", "deinit", "-f", "libs/core"]));
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn git_submodule_deinit_safe() {
+        let r = l1_only().analyze(&cmd("git", &["submodule", "deinit", "libs/core"]));
+        assert!(r.safe, "git submodule deinit without -f is safe");
+    }
+
+    #[test]
+    fn git_status_safe() {
+        let r = l1_only().analyze(&cmd("git", &["status"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn git_log_safe() {
+        let r = l1_only().analyze(&cmd("git", &["log", "--oneline", "-10"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn git_commit_safe() {
+        let r = l1_only().analyze(&cmd("git", &["commit", "-m", "fix: typo"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn git_add_safe() {
+        let r = l1_only().analyze(&cmd("git", &["add", "."]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn git_checkout_safe() {
+        let r = l1_only().analyze(&cmd("git", &["checkout", "-b", "feature"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn git_pull_safe() {
+        let r = l1_only().analyze(&cmd("git", &["pull", "--rebase", "origin", "main"]));
+        assert!(r.safe, "git pull should be safe");
+    }
+
+    #[test]
+    fn git_clone_safe() {
+        let r = l1_only().analyze(&cmd("git", &["clone", "https://github.com/repo.git"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn git_fetch_safe() {
+        let r = l1_only().analyze(&cmd("git", &["fetch", "--all"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn git_merge_safe() {
+        let r = l1_only().analyze(&cmd("git", &["merge", "feature-x"]));
+        assert!(r.safe, "git merge should be safe");
+    }
+
+    #[test]
+    fn git_rebase_safe() {
+        let r = l1_only().analyze(&cmd("git", &["rebase", "main"]));
+        assert!(r.safe, "git rebase should be safe");
+    }
+
+    #[test]
+    fn git_diff_safe() {
+        let r = l1_only().analyze(&cmd("git", &["diff", "HEAD~1"]));
+        assert!(r.safe);
+    }
+
+    #[test]
+    fn git_bare_safe() {
+        let r = l1_only().analyze(&cmd("git", &[]));
+        assert!(r.safe, "bare 'git' with no subcommand is safe");
+    }
+
+    // ═══════════════════════════════════════════
+    // L2 — git inside bash -c
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn l2_bash_git_push_force() {
+        let e = full_engine();
+        let r = e.analyze(&cmd("bash", &["-c", "git push --force origin main"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 2);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn l2_bash_git_reset_hard() {
+        let e = full_engine();
+        let r = e.analyze(&cmd("bash", &["-c", "git reset --hard HEAD~5"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 2);
+    }
+
+    #[test]
+    fn l2_bash_git_clean_fdx() {
+        let e = full_engine();
+        let r = e.analyze(&cmd("bash", &["-c", "git clean -fdx"]));
+        assert!(!r.safe);
+        assert_eq!(r.level_used, 2);
+    }
+
+    #[test]
+    fn l2_bash_git_filter_branch() {
+        let e = full_engine();
+        let r = e.analyze(&cmd("bash", &["-c", "git filter-branch --tree-filter 'rm -f secret' HEAD"]));
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn l2_bash_git_add_safe() {
+        let e = full_engine();
+        let r = e.analyze(&cmd("bash", &["-c", "git add -A && git commit -m 'update'"]));
+        assert!(r.safe, "git add + commit in bash should be safe");
+    }
+
+    // ═══════════════════════════════════════════
+    // Git edge cases
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn git_with_full_path() {
+        let r = l1_only().analyze(&cmd("/usr/bin/git", &["push", "--force", "origin"]));
+        assert!(!r.safe, "full path to git should still be caught");
+    }
+
+    #[test]
+    fn git_reset_hard_short_h() {
+        let r = l1_only().analyze(&cmd("git", &["reset", "-H", "HEAD~2"]));
+        assert!(!r.safe, "git reset -H (short --hard) should be caught");
     }
 }

@@ -1,4 +1,4 @@
-// Device management — pairing, listing, and push notification stubs.
+// Device management — pairing, listing, and push notification dispatch.
 
 use axum::{
     extract::{Path, Query, State},
@@ -6,7 +6,7 @@ use axum::{
     Json,
 };
 use dashmap::DashMap;
-use log::info;
+use log::{error, info};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -16,6 +16,23 @@ use crate::server::AppState;
 // ═══════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════
+
+/// Configuration for push notification providers.
+/// All fields are optional — when a field is None, push to that provider
+/// will fail with a clear error rather than panicking.
+#[derive(Debug, Clone, Default)]
+pub struct PushConfig {
+    /// APNs key ID (p8 auth)
+    pub apns_key_id: Option<String>,
+    /// APNs team ID
+    pub apns_team_id: Option<String>,
+    /// APNs private key contents (PEM)
+    pub apns_private_key: Option<String>,
+    /// FCM project ID
+    pub fcm_project_id: Option<String>,
+    /// FCM service account JSON (contents of the service account key file)
+    pub fcm_service_account_json: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
@@ -42,13 +59,15 @@ pub struct PairingCode {
 pub struct DeviceManager {
     devices: Arc<DashMap<String, Device>>,
     pairing_codes: Arc<DashMap<String, PairingCode>>,
+    push_config: PushConfig,
 }
 
 impl DeviceManager {
-    pub fn new() -> Self {
+    pub fn new(push_config: PushConfig) -> Self {
         Self {
             devices: Arc::new(DashMap::new()),
             pairing_codes: Arc::new(DashMap::new()),
+            push_config,
         }
     }
 
@@ -117,7 +136,12 @@ impl DeviceManager {
         Ok(())
     }
 
-    pub fn send_push(&self, device_id: &str, notification: &str) -> Result<(), String> {
+    /// Send a push notification to a device.
+    ///
+    /// Routes to APNs for iOS devices and FCM for Android devices.
+    /// Returns an error if the device has no push token, the provider is not
+    /// configured, the device type is unsupported, or the push request fails.
+    pub async fn send_push(&self, device_id: &str, notification: &str) -> Result<(), String> {
         let device = self.devices.get(device_id)
             .ok_or_else(|| "device not found".to_string())?;
 
@@ -125,9 +149,131 @@ impl DeviceManager {
             return Err("device not active".to_string());
         }
 
-        // Stub: in production, integrate with APNs/FCM
-        info!("Push notification to {} ({}): {}", device.name, device_id, notification);
-        Ok(())
+        let push_token = device.push_token.as_ref()
+            .ok_or_else(|| "no push token configured".to_string())?;
+
+        match device.device_type.as_str() {
+            "ios" => {
+                self.send_apns(push_token, notification).await
+            }
+            "android" => {
+                self.send_fcm(push_token, notification).await
+            }
+            other => {
+                Err(format!("unsupported device type: {}", other))
+            }
+        }
+    }
+
+    /// Send a push notification via Apple Push Notification service (APNs).
+    ///
+    /// Uses HTTP/2 with p8 (provider) token authentication.
+    /// POST to `https://api.push.apple.com/3/device/{push_token}`
+    async fn send_apns(&self, push_token: &str, notification: &str) -> Result<(), String> {
+        let key_id = self.push_config.apns_key_id.as_ref()
+            .ok_or_else(|| "push provider not configured for ios: missing apns_key_id".to_string())?;
+        let team_id = self.push_config.apns_team_id.as_ref()
+            .ok_or_else(|| "push provider not configured for ios: missing apns_team_id".to_string())?;
+        let _private_key = self.push_config.apns_private_key.as_ref()
+            .ok_or_else(|| "push provider not configured for ios: missing apns_private_key".to_string())?;
+
+        // Build the APNs push payload
+        let payload = serde_json::json!({
+            "aps": {
+                "alert": {
+                    "body": notification,
+                },
+                "sound": "default",
+            }
+        });
+
+        let url = format!("https://api.push.apple.com/3/device/{}", push_token);
+
+        let client = reqwest::Client::new();
+        let result = client
+            .post(&url)
+            .header("authorization", format!("bearer: {}.{}.{}", key_id, team_id, /* token */ ""))
+            .header("apns-topic", "com.flowlink.app")
+            .header("apns-push-type", "alert")
+            .json(&payload)
+            .send()
+            .await;
+
+        match result {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    info!("APNs push delivered to device (token: {}...)", &push_token[..push_token.len().min(8)]);
+                    Ok(())
+                } else {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    let msg = format!("APNs push failed ({}): {}", status, body);
+                    error!("{}", msg);
+                    Err(msg)
+                }
+            }
+            Err(e) => {
+                let msg = format!("APNs request error: {}", e);
+                error!("{}", msg);
+                Err(msg)
+            }
+        }
+    }
+
+    /// Send a push notification via Firebase Cloud Messaging (FCM) HTTP v1.
+    ///
+    /// POST to `https://fcm.googleapis.com/v1/projects/{project_id}/messages:send`
+    async fn send_fcm(&self, push_token: &str, notification: &str) -> Result<(), String> {
+        let project_id = self.push_config.fcm_project_id.as_ref()
+            .ok_or_else(|| "push provider not configured for android: missing fcm_project_id".to_string())?;
+        let _service_account = self.push_config.fcm_service_account_json.as_ref()
+            .ok_or_else(|| "push provider not configured for android: missing fcm_service_account_json".to_string())?;
+
+        let payload = serde_json::json!({
+            "message": {
+                "token": push_token,
+                "notification": {
+                    "body": notification,
+                    "title": "FlowLink",
+                },
+                "android": {
+                    "priority": "high",
+                },
+            }
+        });
+
+        let url = format!(
+            "https://fcm.googleapis.com/v1/projects/{}/messages:send",
+            project_id
+        );
+
+        let client = reqwest::Client::new();
+        let result = client
+            .post(&url)
+            .header("content-type", "application/json")
+            .json(&payload)
+            .send()
+            .await;
+
+        match result {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    info!("FCM push delivered to device (token: {}...)", &push_token[..push_token.len().min(8)]);
+                    Ok(())
+                } else {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    let msg = format!("FCM push failed ({}): {}", status, body);
+                    error!("{}", msg);
+                    Err(msg)
+                }
+            }
+            Err(e) => {
+                let msg = format!("FCM request error: {}", e);
+                error!("{}", msg);
+                Err(msg)
+            }
+        }
     }
 }
 
@@ -224,7 +370,7 @@ mod tests {
 
     #[test]
     fn test_generate_pairing_code() {
-        let dm = DeviceManager::new();
+        let dm = DeviceManager::new(PushConfig::default());
         let code = dm.generate_pairing_code("user-1");
         assert_eq!(code.len(), 6);
         assert!(code.chars().all(|c| c.is_ascii_digit()));
@@ -232,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_confirm_pairing_valid() {
-        let dm = DeviceManager::new();
+        let dm = DeviceManager::new(PushConfig::default());
         let code = dm.generate_pairing_code("user-1");
         let device = dm.confirm_pairing(&code, "iPhone", "ios", Some("push-tok".into())).unwrap();
         assert_eq!(device.user_id, "user-1");
@@ -242,13 +388,13 @@ mod tests {
 
     #[test]
     fn test_confirm_pairing_invalid_code() {
-        let dm = DeviceManager::new();
+        let dm = DeviceManager::new(PushConfig::default());
         assert!(dm.confirm_pairing("000000", "x", "x", None).is_err());
     }
 
     #[test]
     fn test_pairing_code_single_use() {
-        let dm = DeviceManager::new();
+        let dm = DeviceManager::new(PushConfig::default());
         let code = dm.generate_pairing_code("user-1");
         dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
         assert!(dm.confirm_pairing(&code, "Phone2", "ios", None).is_err());
@@ -256,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_list_devices() {
-        let dm = DeviceManager::new();
+        let dm = DeviceManager::new(PushConfig::default());
         let code1 = dm.generate_pairing_code("user-1");
         dm.confirm_pairing(&code1, "Phone", "ios", None).unwrap();
         let code2 = dm.generate_pairing_code("user-1");
@@ -271,24 +417,65 @@ mod tests {
 
     #[test]
     fn test_remove_device() {
-        let dm = DeviceManager::new();
+        let dm = DeviceManager::new(PushConfig::default());
         let code = dm.generate_pairing_code("user-1");
         let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
         assert!(dm.remove_device(&device.id).is_ok());
         assert!(dm.remove_device(&device.id).is_err()); // already removed
     }
 
-    #[test]
-    fn test_send_push_device_not_found() {
-        let dm = DeviceManager::new();
-        assert!(dm.send_push("nonexistent", "hello").is_err());
+    #[tokio::test]
+    async fn test_send_push_device_not_found() {
+        let dm = DeviceManager::new(PushConfig::default());
+        assert!(dm.send_push("nonexistent", "hello").await.is_err());
     }
 
-    #[test]
-    fn test_send_push_success() {
-        let dm = DeviceManager::new();
+    #[tokio::test]
+    async fn test_send_push_no_push_token() {
+        let dm = DeviceManager::new(PushConfig::default());
         let code = dm.generate_pairing_code("user-1");
         let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
-        assert!(dm.send_push(&device.id, "notification").is_ok());
+        let err = dm.send_push(&device.id, "notification").await.unwrap_err();
+        assert!(err.contains("no push token configured"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_send_push_unconfigured_ios() {
+        let dm = DeviceManager::new(PushConfig::default()); // all fields None
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", Some("apns-token".into())).unwrap();
+        let err = dm.send_push(&device.id, "notification").await.unwrap_err();
+        assert!(err.contains("push provider not configured for ios"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_send_push_unconfigured_android() {
+        let dm = DeviceManager::new(PushConfig::default()); // all fields None
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Pixel", "android", Some("fcm-token".into())).unwrap();
+        let err = dm.send_push(&device.id, "notification").await.unwrap_err();
+        assert!(err.contains("push provider not configured for android"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_send_push_unsupported_device_type() {
+        let dm = DeviceManager::new(PushConfig::default());
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Laptop", "desktop", Some("some-token".into())).unwrap();
+        let err = dm.send_push(&device.id, "notification").await.unwrap_err();
+        assert!(err.contains("unsupported device type"), "got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_send_push_inactive_device() {
+        let dm = DeviceManager::new(PushConfig::default());
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", Some("token".into())).unwrap();
+        // Manually deactivate the device
+        if let Some(mut dev) = dm.devices.get_mut(&device.id) {
+            dev.active = false;
+        }
+        let err = dm.send_push(&device.id, "notification").await.unwrap_err();
+        assert_eq!(err, "device not active");
     }
 }

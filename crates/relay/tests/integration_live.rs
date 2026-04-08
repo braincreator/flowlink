@@ -26,7 +26,7 @@ fn make_state() -> (AppState, tempfile::TempDir) {
     let approvals = Arc::new(ApprovalQueue::new());
     let registry = Arc::new(Registry::new(tmp.path()).unwrap());
     let handler = Arc::new(RelayHandler::new(pool.clone(), auth.clone(), eventbus.clone(), approvals.clone()));
-    let device_manager = Arc::new(DeviceManager::new());
+    let device_manager = Arc::new(DeviceManager::new(flowlink_relay::devices::PushConfig::default()));
 
     // Register a client for auth
     auth.register_client(Client {

@@ -102,7 +102,7 @@ fn bench_mcp_parsing(c: &mut Criterion) {
 }
 
 fn bench_device_pairing(c: &mut Criterion) {
-    let dm = DeviceManager::new();
+    let dm = DeviceManager::new(flowlink_relay::devices::PushConfig::default());
     c.bench_function("relay/device_generate_pairing_code", |b| {
         b.iter(|| dm.generate_pairing_code("user-1"))
     });
