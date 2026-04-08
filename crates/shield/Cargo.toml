@@ -36,8 +36,12 @@ harness = false
 
 [features]
 ebpf = ["aya"]
-gitops = []
+gitops = ["flowlink-gitops"]
 
 [dependencies.aya]
 version = "0.12"
+optional = true
+
+[dependencies.flowlink-gitops]
+path = "../gitops"
 optional = true

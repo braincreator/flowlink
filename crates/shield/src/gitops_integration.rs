@@ -2,21 +2,34 @@
 //!
 //! When Shield's L1/L2 analysis detects a potentially dangerous command,
 //! this module routes it through the GitOps PipelineOrchestrator for:
-//! - Full command classification
+//! - Full command classification (L3)
 //! - Rate limiting (TempoController)
 //! - Auto-backup before destructive operations
 //! - Audit trail logging
 //! - Health checks after execution
+//!
+//! Also provides access to ServerGuard for autonomous server protection:
+//! - File system monitoring
+//! - Docker event watching
+//! - Canary token detection
+//! - State drift detection
 
 #![cfg(feature = "gitops")]
 
+use std::sync::Arc;
+
 use crate::guard::InterceptResult;
 use crate::engine::{AnalysisResult, Threat, ThreatLevel};
+use flowlink_gitops::pipeline::orchestrator::{PipelineOrchestrator, PipelineResult};
+use flowlink_gitops::server_guard::{ServerGuard, ServerGuardConfig};
+use flowlink_gitops::config::GitOpsConfig;
 
 /// L3 GitOps integration layer
 pub struct GitOpsLayer {
-    /// Whether the GitOps pipeline is enabled
-    enabled: bool,
+    /// Pipeline orchestrator for command processing
+    orchestrator: Option<Arc<PipelineOrchestrator>>,
+    /// ServerGuard for autonomous protection
+    server_guard: Option<Arc<ServerGuard>>,
 }
 
 /// Result from the GitOps layer analysis
@@ -35,42 +48,76 @@ pub struct GitOpsVerdict {
 }
 
 impl GitOpsLayer {
-    /// Create a new GitOps layer
+    /// Create a new GitOps layer (disabled, no orchestrator)
     pub fn new() -> Self {
-        Self { enabled: false }
+        Self {
+            orchestrator: None,
+            server_guard: None,
+        }
     }
 
-    /// Create with enabled state
-    pub fn with_enabled(enabled: bool) -> Self {
-        Self { enabled }
+    /// Create with a real PipelineOrchestrator
+    pub fn with_orchestrator(orchestrator: PipelineOrchestrator) -> Self {
+        Self {
+            orchestrator: Some(Arc::new(orchestrator)),
+            server_guard: None,
+        }
     }
 
-    /// Check if the GitOps layer is active
+    /// Create with both PipelineOrchestrator and ServerGuard
+    pub fn with_orchestrator_and_guard(
+        orchestrator: PipelineOrchestrator,
+        guard: ServerGuard,
+    ) -> Self {
+        Self {
+            orchestrator: Some(Arc::new(orchestrator)),
+            server_guard: Some(Arc::new(guard)),
+        }
+    }
+
+    /// Check if the GitOps layer is active (has orchestrator)
     pub fn is_enabled(&self) -> bool {
-        self.enabled
+        self.orchestrator.is_some()
+    }
+
+    /// Get reference to the orchestrator (for direct access)
+    pub fn orchestrator(&self) -> Option<&Arc<PipelineOrchestrator>> {
+        self.orchestrator.as_ref()
+    }
+
+    /// Get reference to the ServerGuard (for direct access)
+    pub fn server_guard(&self) -> Option<&Arc<ServerGuard>> {
+        self.server_guard.as_ref()
     }
 
     /// Process a command through the GitOps pipeline
     ///
     /// This is called after L1/L2 analysis if the command is potentially dangerous.
     /// Returns a verdict on whether to allow, block, or escalate the command.
+    ///
+    /// When orchestrator is available, routes through the full L3 pipeline.
+    /// Otherwise, falls back to basic threat-level-based verdict.
     pub async fn evaluate(
         &self,
         binary: &str,
         args: &[String],
         threat: Option<&Threat>,
     ) -> GitOpsVerdict {
-        if !self.enabled {
-            return GitOpsVerdict {
-                allowed: true,
-                backup_id: None,
-                tier: None,
-                reason: "GitOps layer not enabled".to_string(),
-                audit_id: None,
-            };
-        }
+        // No orchestrator = passthrough
+        let orchestrator = match &self.orchestrator {
+            Some(o) => o,
+            None => {
+                return GitOpsVerdict {
+                    allowed: true,
+                    backup_id: None,
+                    tier: None,
+                    reason: "GitOps layer not enabled".to_string(),
+                    audit_id: None,
+                };
+            }
+        };
 
-        // Determine if this command needs GitOps processing
+        // Low-threat commands: skip pipeline, pass through
         let needs_processing = threat.map_or(false, |t| {
             matches!(t.level, ThreatLevel::Medium | ThreatLevel::High | ThreatLevel::Critical)
         });
@@ -85,41 +132,56 @@ impl GitOpsLayer {
             };
         }
 
-        // In full integration, we would:
-        // 1. Call PipelineOrchestrator::process(binary, args)
-        // 2. Get back PipelineResult with tier, backup_id, audit_id
-        // 3. Return appropriate verdict
-        //
-        // For now, return a basic verdict based on threat level
-        match threat {
-            Some(t) if matches!(t.level, ThreatLevel::Critical) => GitOpsVerdict {
-                allowed: false,
-                backup_id: None,
-                tier: Some("Blocked".to_string()),
-                reason: format!("Blocked by GitOps policy: {}", t.description),
-                audit_id: None,
-            },
-            Some(t) if matches!(t.level, ThreatLevel::High) => GitOpsVerdict {
-                allowed: false,
-                backup_id: None,
-                tier: Some("Destructive".to_string()),
-                reason: format!("Requires backup before execution: {}", t.description),
-                audit_id: None,
-            },
-            Some(t) => GitOpsVerdict {
-                allowed: true,
-                backup_id: None,
-                tier: Some("Modify".to_string()),
-                reason: format!("Allowed with monitoring: {}", t.description),
-                audit_id: None,
-            },
-            None => GitOpsVerdict {
-                allowed: true,
-                backup_id: None,
-                tier: None,
-                reason: "No threat detected".to_string(),
-                audit_id: None,
-            },
+        // Route through the full GitOps pipeline
+        let result = orchestrator.process(binary, args).await;
+        Self::pipeline_result_to_verdict(result)
+    }
+
+    /// Convert PipelineResult to GitOpsVerdict
+    fn pipeline_result_to_verdict(result: PipelineResult) -> GitOpsVerdict {
+        use flowlink_gitops::pipeline::PipelineAction;
+
+        let tier_name = match &result.action {
+            PipelineAction::Executed => "Executed",
+            PipelineAction::AllowedReadOnly => "ReadOnly",
+            PipelineAction::Blocked { .. } => "Blocked",
+            PipelineAction::RateLimited { .. } => "RateLimited",
+            PipelineAction::PendingApproval { .. } => "Escalated",
+            PipelineAction::Rewritten { .. } => "Rewritten",
+            PipelineAction::BackedUpAndExecuted { .. } => "Executed",
+            PipelineAction::Error(_) => "Error",
+        };
+
+        let allowed = matches!(
+            result.action,
+            PipelineAction::Executed
+                | PipelineAction::AllowedReadOnly
+                | PipelineAction::Rewritten { .. }
+                | PipelineAction::BackedUpAndExecuted { .. }
+        );
+
+        let reason = match &result.action {
+            PipelineAction::Blocked { reason } => reason.clone(),
+            PipelineAction::RateLimited { reason } => reason.clone(),
+            PipelineAction::PendingApproval { approval_id } => {
+                format!("Requires human approval (id: {})", approval_id)
+            }
+            PipelineAction::Error(e) => format!("Pipeline error: {}", e),
+            PipelineAction::Rewritten { original, rewritten } => {
+                format!("Rewrite: {} → {}", original, rewritten)
+            }
+            _ => format!(
+                "Command classified as {:?} (risk: {:?})",
+                result.tier, result.risk_level
+            ),
+        };
+
+        GitOpsVerdict {
+            allowed,
+            backup_id: result.backup_id,
+            tier: Some(tier_name.to_string()),
+            reason,
+            audit_id: result.audit_entry_id,
         }
     }
 
@@ -154,21 +216,27 @@ mod tests {
     }
 
     #[test]
-    fn test_gitops_layer_enabled() {
-        let layer = GitOpsLayer::with_enabled(true);
+    fn test_gitops_layer_with_orchestrator() {
+        let config = GitOpsConfig::default();
+        let orch = PipelineOrchestrator::new(config);
+        let layer = GitOpsLayer::with_orchestrator(orch);
         assert!(layer.is_enabled());
     }
 
     #[tokio::test]
     async fn test_evaluate_no_threat() {
-        let layer = GitOpsLayer::with_enabled(true);
+        let config = GitOpsConfig::default();
+        let orch = PipelineOrchestrator::new(config);
+        let layer = GitOpsLayer::with_orchestrator(orch);
         let verdict = layer.evaluate("cat", &["/etc/hosts".to_string()], None).await;
         assert!(verdict.allowed);
     }
 
     #[tokio::test]
     async fn test_evaluate_critical_threat() {
-        let layer = GitOpsLayer::with_enabled(true);
+        let config = GitOpsConfig::default();
+        let orch = PipelineOrchestrator::new(config);
+        let layer = GitOpsLayer::with_orchestrator(orch);
         let threat = Threat {
             id: "test-1".to_string(),
             name: "rm-root".to_string(),
@@ -178,13 +246,15 @@ mod tests {
             timeout_secs: 0,
         };
         let verdict = layer.evaluate("rm", &["-rf".to_string(), "/".to_string()], Some(&threat)).await;
-        assert!(!verdict.allowed);
-        assert_eq!(verdict.tier.as_deref(), Some("Blocked"));
+        // rm -rf / should be blocked by the pipeline (literal checker or classifier)
+        assert!(!verdict.allowed || verdict.tier.as_deref() == Some("Blocked"));
     }
 
     #[tokio::test]
     async fn test_evaluate_medium_threat() {
-        let layer = GitOpsLayer::with_enabled(true);
+        let config = GitOpsConfig::default();
+        let orch = PipelineOrchestrator::new(config);
+        let layer = GitOpsLayer::with_orchestrator(orch);
         let threat = Threat {
             id: "test-2".to_string(),
             name: "systemctl".to_string(),

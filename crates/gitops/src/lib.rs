@@ -9,6 +9,7 @@ pub mod drift;
 pub mod plan;
 pub mod approval;
 pub mod health;
+pub mod server_guard;
 
 pub use types::*;
 pub use config::GitOpsConfig;
