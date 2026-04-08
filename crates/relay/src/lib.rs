@@ -71,6 +71,7 @@ impl Relay {
             )),
             metrics: Arc::new(metrics::Metrics::new()),
             billing: None, // TODO: initialize from config
+            db: None,     // TODO: initialize from config
         };
 
         let app = server::build_router(state);

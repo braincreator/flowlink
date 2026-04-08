@@ -1277,6 +1277,7 @@ dependencies = [
  "flowlink-billing",
  "flowlink-core",
  "flowlink-crypto",
+ "flowlink-db",
  "futures-util",
  "hex",
  "http-body-util",

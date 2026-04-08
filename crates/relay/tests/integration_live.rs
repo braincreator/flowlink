@@ -50,6 +50,7 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         )),
         metrics: Arc::new(flowlink_relay::metrics::Metrics::new()),
         billing: None,
+        db: None,
     };
     (state, tmp)
 }

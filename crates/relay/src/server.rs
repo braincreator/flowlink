@@ -45,6 +45,7 @@ pub struct AppState {
     pub audit_store: Arc<AuditStore>,
     pub metrics: Arc<Metrics>,
     pub billing: Option<Arc<flowlink_billing::BillingEngine>>,
+    pub db: Option<Arc<flowlink_db::DbPool>>,
 }
 
 // ═══════════════════════════════════════════════
@@ -765,6 +766,7 @@ mod tests {
             audit_store: Arc::new(AuditStore::new(&tempfile::tempdir().unwrap().path().join("audit.jsonl"))),
             metrics: Arc::new(Metrics::new()),
             billing: None,
+            db: None,
         }
     }
 
