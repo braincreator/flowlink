@@ -15,6 +15,29 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: i32 = 1;
 
 // ═══════════════════════════════════════════════
+// Priority Levels
+// ═══════════════════════════════════════════════
+
+/// Command/message priority that controls pipeline routing.
+///
+/// - `System` messages bypass killswitch, policy, and approval checks.
+///   Used for internal operations: auto-restore, rollback, health checks,
+///   killswitch management, and other infrastructure commands.
+///
+/// - `User` messages go through the full pipeline:
+///   killswitch → policy → approval → executor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Priority {
+    /// Internal system command — bypasses all safety checks.
+    /// Only used by trusted internal components (auto-restore, health engine).
+    System,
+    /// Regular user command — full pipeline.
+    #[default]
+    User,
+}
+
+// ═══════════════════════════════════════════════
 // Message Types
 // ═══════════════════════════════════════════════
 
@@ -100,6 +123,9 @@ pub struct Message {
     pub id: String,
     #[serde(rename = "type")]
     pub msg_type: MessageType,
+    /// Message priority. System messages bypass killswitch, policy, and approval.
+    #[serde(default)]
+    pub priority: Priority,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -122,6 +148,7 @@ impl Message {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             msg_type,
+            priority: Priority::default(),
             version: Some(PROTOCOL_VERSION),
             agent_id: None,
             session_id: None,
@@ -135,6 +162,11 @@ impl Message {
 
     pub fn with_agent_id(mut self, id: impl Into<String>) -> Self {
         self.agent_id = Some(id.into());
+        self
+    }
+
+    pub fn with_priority(mut self, priority: Priority) -> Self {
+        self.priority = priority;
         self
     }
 

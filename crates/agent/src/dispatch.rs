@@ -22,6 +22,14 @@ pub fn shield_alert_count() -> u64 {
 }
 
 /// Dispatch an incoming message and return an optional response to send back.
+///
+/// **Priority routing:**
+/// - `Priority::System` → bypasses killswitch, policy, and approval.
+///   Only the executor's system semaphore applies.
+/// - `Priority::User` → full pipeline: killswitch → policy → approval → executor.
+///
+/// System priority is reserved for trusted internal operations (auto-restore,
+/// rollback, health checks). Never set by external messages.
 pub async fn dispatch(
     msg: &Message,
     policy: &PolicyEngine,
@@ -31,9 +39,13 @@ pub async fn dispatch(
     killswitch: &KillSwitch,
     skill_mgr: &SkillManager,
     _sandbox: &Sandbox,
+    executor: &Executor,
 ) -> Option<Message> {
-    // Block exec when paused/emergency
-    if killswitch.is_paused() {
+    let is_system = msg.priority == Priority::System;
+
+    // Killswitch check — only for user commands.
+    // System commands MUST always pass through (restore, rollback, etc.).
+    if !is_system && killswitch.is_paused() {
         return Some({
             let mut msg = Message::new(MessageType::Error)
                 .with_agent_id(msg.agent_id.as_deref().unwrap_or(""));
@@ -43,7 +55,7 @@ pub async fn dispatch(
     }
 
     match &msg.msg_type {
-        MessageType::ExecRequest => handle_exec(msg, policy, approval).await,
+        MessageType::ExecRequest => handle_exec(msg, policy, approval, executor, is_system).await,
 
         MessageType::Heartbeat => {
             Some(
@@ -182,6 +194,8 @@ async fn handle_exec(
     msg: &Message,
     policy: &PolicyEngine,
     approval: &ApprovalManager,
+    executor: &Executor,
+    is_system: bool,
 ) -> Option<Message> {
     let payload: ExecRequestPayload = match msg.payload.as_ref() {
         Some(p) => match serde_json::from_value(p.clone()) {
@@ -198,6 +212,17 @@ async fn handle_exec(
             return Some(error_response(msg, "MISSING_PAYLOAD", "ExecRequest requires a payload"));
         }
     };
+
+    // ── System commands: bypass policy and approval entirely ──
+    if is_system {
+        info!("[SYSTEM] Executing (bypass policy/approval): {}", payload.command);
+        match executor.exec(&payload, Priority::System).await {
+            Ok(result) => return Some(exec_done_response(msg, &result)),
+            Err(e) => return Some(error_response(msg, "EXEC_FAILED", &format!("Execution error: {e}"))),
+        }
+    }
+
+    // ── User commands: full policy pipeline ──
 
     // Policy check
     let policy_result = policy.check(&payload);
@@ -247,7 +272,7 @@ async fn handle_exec(
     }
 
     // Execute
-    match Executor::exec(&payload).await {
+    match executor.exec(&payload, Priority::User).await {
         Ok(result) => Some(exec_done_response(msg, &result)),
         Err(e) => Some(error_response(msg, "EXEC_FAILED", &format!("Execution error: {e}"))),
     }
@@ -529,6 +554,7 @@ mod tests {
         KillSwitch,
         SkillManager,
         Sandbox,
+        Executor,
     ) {
         let tmp = tempfile::tempdir().unwrap();
         let tmp_canonical = tmp.path().canonicalize().unwrap();
@@ -540,82 +566,90 @@ mod tests {
         let killswitch = KillSwitch::new();
         let skill_mgr = SkillManager::new(tmp.path().to_str().unwrap()).unwrap();
         let sandbox = Sandbox::new(vec![tmp.path().to_str().unwrap().into()], vec![], 0, 0, false);
-        (tmp, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox)
+        let executor = Executor::default_executor();
+        (tmp, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox, executor)
     }
 
     fn msg_with(t: MessageType, payload: serde_json::Value) -> Message {
         Message::new(t).with_agent_id("test-agent").with_payload(payload)
     }
 
+    fn system_msg_with(t: MessageType, payload: serde_json::Value) -> Message {
+        Message::new(t)
+            .with_agent_id("test-agent")
+            .with_payload(payload)
+            .with_priority(Priority::System)
+    }
+
     #[tokio::test]
     async fn test_ping_ack() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
         let msg = Message::new(MessageType::Heartbeat).with_agent_id("test");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::HeartbeatAck);
     }
 
     #[tokio::test]
     async fn test_exec_done() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
         let payload = serde_json::json!({
             "command": "echo hello",
             "timeout_sec": 10,
             "request_id": "e1"
         });
         let msg = msg_with(MessageType::ExecRequest, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::ExecDone);
     }
 
     #[tokio::test]
     async fn test_exec_blocked() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
         let payload = serde_json::json!({
             "command": "rm -rf /",
             "timeout_sec": 10,
             "request_id": "e2"
         });
         let msg = msg_with(MessageType::ExecRequest, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::Error);
     }
 
     #[tokio::test]
     async fn test_file_read() {
-        let (tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
         let path = tmp.path().join("test.txt");
         std::fs::write(&path, "hello").unwrap();
         let payload = serde_json::json!({ "path": path.to_str().unwrap() });
         let msg = msg_with(MessageType::FileRead, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::FileResponse);
     }
 
     #[tokio::test]
     async fn test_backup_list() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
         let msg = Message::new(MessageType::BackupList).with_agent_id("test");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::BackupListResp);
     }
 
     #[tokio::test]
     async fn test_skill_list() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
         let msg = Message::new(MessageType::SkillList).with_agent_id("test");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
         assert!(resp.is_some());
     }
 
     #[tokio::test]
-    async fn test_killswitch_blocks_exec() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+    async fn test_killswitch_blocks_user_exec() {
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
         ks.pause("test");
         let payload = serde_json::json!({
             "command": "echo hello",
@@ -623,23 +657,60 @@ mod tests {
             "request_id": "e3"
         });
         let msg = msg_with(MessageType::ExecRequest, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::Error);
     }
 
     #[tokio::test]
+    async fn test_system_bypasses_killswitch() {
+        // System priority MUST pass through even when killswitch is paused
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        ks.pause("test");
+
+        let payload = serde_json::json!({
+            "command": "echo system-restore-ok",
+            "timeout_sec": 10,
+            "request_id": "sys-1"
+        });
+        let msg = system_msg_with(MessageType::ExecRequest, payload);
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+
+        assert!(resp.is_some());
+        let r = resp.unwrap();
+        assert_eq!(r.msg_type, MessageType::ExecDone);
+    }
+
+    #[tokio::test]
+    async fn test_system_bypasses_policy() {
+        // System priority should execute even destructive commands
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+
+        let payload = serde_json::json!({
+            "command": "rm -rf /nonexistent_test_dir",
+            "timeout_sec": 5,
+            "request_id": "sys-2"
+        });
+        let msg = system_msg_with(MessageType::ExecRequest, payload);
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+
+        // Should execute (not be blocked) — even though rm -rf is normally blocked
+        assert!(resp.is_some());
+        assert_eq!(resp.unwrap().msg_type, MessageType::ExecDone);
+    }
+
+    #[tokio::test]
     async fn test_missing_payload_error() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
         let msg = Message::new(MessageType::ExecRequest).with_agent_id("test");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::Error);
     }
 
     #[tokio::test]
     async fn test_shield_alert_increments_counter() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
 
         // Reset the counter for the test
         let before = shield_alert_count();
@@ -655,7 +726,7 @@ mod tests {
             "timestamp": 1700000000
         });
         let msg = msg_with(MessageType::ShieldAlert, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
 
         // ShieldAlert handler returns None (no reply)
         assert!(resp.is_none());
@@ -665,12 +736,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_shield_alert_no_payload() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
 
         let before = shield_alert_count();
 
         let msg = Message::new(MessageType::ShieldAlert).with_agent_id("test-agent");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
 
         assert!(resp.is_none());
         // Counter still increments even without payload
@@ -679,14 +750,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_shield_alert_malformed_payload() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
 
         let before = shield_alert_count();
 
         // Payload that doesn't match ShieldAlertPayload schema
         let payload = serde_json::json!({ "garbage": true });
         let msg = msg_with(MessageType::ShieldAlert, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox).await;
+        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
 
         assert!(resp.is_none());
         assert_eq!(shield_alert_count(), before + 1);

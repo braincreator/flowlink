@@ -8,6 +8,7 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::approval::ApprovalManager;
 use crate::backup::BackupManager;
+use crate::executor::Executor;
 use crate::fileops::FileOps;
 use crate::killswitch::KillSwitch;
 use crate::policy::PolicyEngine;
@@ -26,6 +27,7 @@ pub struct Connection {
     killswitch: Arc<KillSwitch>,
     skill_mgr: SkillManager,
     sandbox: Sandbox,
+    executor: Executor,
 }
 
 impl Connection {
@@ -40,8 +42,9 @@ impl Connection {
         killswitch: Arc<KillSwitch>,
         skill_mgr: SkillManager,
         sandbox: Sandbox,
+        executor: Executor,
     ) -> Self {
-        Self { url, agent_id, token, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox }
+        Self { url, agent_id, token, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox, executor }
     }
 
     /// Connect, authenticate, run message loop with auto-reconnect + exponential backoff.
@@ -135,7 +138,7 @@ impl Connection {
             }
         };
         info!("Received: {:?}", msg.msg_type);
-        let response = crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup, &self.killswitch, &self.skill_mgr, &self.sandbox).await;
+        let response = crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup, &self.killswitch, &self.skill_mgr, &self.sandbox, &self.executor).await;
         // Drain any shield alerts queued during dispatch and send them as separate messages
         // The caller (connect_and_loop) picks these up via send_shield_alerts
         response

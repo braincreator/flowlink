@@ -77,6 +77,7 @@ impl Agent {
             killswitch,
             skill_mgr,
             sandbox,
+            crate::executor::Executor::default_executor(),
         );
         conn.run().await
     }
