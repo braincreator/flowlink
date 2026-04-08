@@ -7,6 +7,8 @@
 //! - Global rate limiting
 //! - Exponential backoff for repeated violations
 
+mod types;
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -16,6 +18,8 @@ use tracing::{debug, info, warn};
 
 use crate::config::{CircuitBreakerConfig, GlobalRateLimit, RateLimitConfig};
 use crate::types::{ActionTier, BreakerState, DenialFeedback, ExceedAction, RateBudget, RiskLevel, ToolRateLimit};
+
+use types::{CircuitBreakerInternal, ExponentialBackoffState, GlobalTracker, TierRateTracker, TempoState, ToolRateTracker};
 
 const DEFAULT_TOOL_LIMITS: &[(&str, ToolRateLimit)] = &[
     ("rm", ToolRateLimit { max_calls: 10, window_seconds: 60, on_exceed: ExceedAction::Deny }),
@@ -36,275 +40,6 @@ const DEFAULT_GLOBAL_LIMIT: GlobalRateLimit = GlobalRateLimit {
     window_seconds: 60,
     on_exceed: ExceedAction::ReadOnly,
 };
-
-#[derive(Debug)]
-struct ToolRateTracker {
-    timestamps: Vec<Instant>,
-    limit: ToolRateLimit,
-}
-
-impl ToolRateTracker {
-    fn new(limit: ToolRateLimit) -> Self {
-        Self { timestamps: Vec::new(), limit }
-    }
-
-    fn check(&mut self, now: Instant) -> Result<(), u32> {
-        self.clean_expired();
-        let count = self.count_in_window();
-        if count < self.limit.max_calls {
-            self.timestamps.push(now);
-            Ok(())
-        } else {
-            Err(count as u32)
-        }
-    }
-
-    fn clean_expired(&mut self) {
-        let cutoff = Duration::from_secs(self.limit.window_seconds);
-        let now = Instant::now();
-        self.timestamps.retain(|ts| now.duration_since(*ts) < cutoff);
-    }
-
-    fn count_in_window(&self) -> u32 {
-        self.timestamps.len() as u32
-    }
-
-    fn reset(&mut self) {
-        self.timestamps.clear();
-    }
-}
-
-#[derive(Debug)]
-struct TierRateTracker {
-    timestamps: Vec<Instant>,
-    limit: ToolRateLimit,
-}
-
-impl TierRateTracker {
-    fn new(limit: ToolRateLimit) -> Self {
-        Self { timestamps: Vec::new(), limit }
-    }
-
-    fn check(&mut self, now: Instant) -> Result<(), u32> {
-        self.clean_expired();
-        let count = self.count_in_window();
-        if count < self.limit.max_calls {
-            self.timestamps.push(now);
-            Ok(())
-        } else {
-            Err(count as u32)
-        }
-    }
-
-    fn clean_expired(&mut self) {
-        let cutoff = Duration::from_secs(self.limit.window_seconds);
-        let now = Instant::now();
-        self.timestamps.retain(|ts| now.duration_since(*ts) < cutoff);
-    }
-
-    fn count_in_window(&self) -> u32 {
-        self.timestamps.len() as u32
-    }
-
-    fn reset(&mut self) {
-        self.timestamps.clear();
-    }
-}
-
-#[derive(Debug)]
-struct GlobalTracker {
-    timestamps: Vec<Instant>,
-    limit: GlobalRateLimit,
-}
-
-impl GlobalTracker {
-    fn new(limit: GlobalRateLimit) -> Self {
-        Self { timestamps: Vec::new(), limit }
-    }
-
-    fn check(&mut self, now: Instant) -> Result<(), u32> {
-        self.clean_expired();
-        let count = self.count_in_window();
-        if count < self.limit.max_calls {
-            self.timestamps.push(now);
-            Ok(())
-        } else {
-            Err(count as u32)
-        }
-    }
-
-    fn clean_expired(&mut self) {
-        let cutoff = Duration::from_secs(self.limit.window_seconds);
-        let now = Instant::now();
-        self.timestamps.retain(|ts| now.duration_since(*ts) < cutoff);
-    }
-
-    fn count_in_window(&self) -> u32 {
-        self.timestamps.len() as u32
-    }
-
-    fn reset(&mut self) {
-        self.timestamps.clear();
-    }
-}
-
-#[derive(Debug)]
-struct FailureRecord {
-    timestamp: Instant,
-    success: bool,
-}
-
-#[derive(Debug)]
-struct CircuitBreakerInternal {
-    state: BreakerState,
-    failure_window: Vec<FailureRecord>,
-    half_open_remaining: u32,
-    last_failure_time: Option<Instant>,
-    consecutive_failures: u32,
-    config: CircuitBreakerConfig,
-}
-
-impl CircuitBreakerInternal {
-    fn new(config: &CircuitBreakerConfig) -> Self {
-        Self {
-            state: BreakerState::Closed,
-            failure_window: Vec::new(),
-            half_open_remaining: config.half_open_probes,
-            last_failure_time: None,
-            consecutive_failures: 0,
-            config: config.clone(),
-        }
-    }
-
-    fn record_success(&mut self, now: Instant) {
-        let record = FailureRecord {
-            timestamp: now,
-            success: true,
-        };
-        self.failure_window.push(record);
-        self.consecutive_failures = 0;
-        self.update_state_for_success(now);
-    }
-
-    fn record_failure(&mut self, now: Instant) {
-        let record = FailureRecord {
-            timestamp: now,
-            success: false,
-        };
-        self.failure_window.push(record);
-        self.consecutive_failures = self.failure_window.iter().filter(|r| !r.success).count() as u32;
-        self.update_state_for_failure(now);
-    }
-
-    fn update_state_for_success(&mut self, now: Instant) {
-        match self.state {
-            BreakerState::Closed => {}
-            BreakerState::HalfOpen { .. } => {
-                self.half_open_remaining = self.half_open_remaining.saturating_sub(1);
-                if self.half_open_remaining == 0 {
-                    self.transition_to_closed();
-                }
-            }
-            BreakerState::Open { since, failure_count: _ } => {
-                let elapsed: Duration = (Utc::now() - since).to_std().unwrap_or_default();
-                if elapsed >= Duration::from_secs(self.config.open_duration_seconds) {
-                    self.transition_to_half_open(now);
-                }
-            }
-        }
-    }
-
-    fn update_state_for_failure(&mut self, now: Instant) {
-        match self.state {
-            BreakerState::Closed => {
-                if self.should_open_circuit(now) {
-                    self.transition_to_open(now);
-                }
-            }
-            BreakerState::HalfOpen { .. } => {
-                self.transition_to_open(now);
-            }
-            BreakerState::Open { since, .. } => {
-                let elapsed: Duration = (Utc::now() - since).to_std().unwrap_or_default();
-                if elapsed >= Duration::from_secs(self.config.open_duration_seconds) {
-                    self.transition_to_half_open(now);
-                }
-            }
-        }
-    }
-
-    fn check_can_execute(&self, tier: ActionTier) -> bool {
-        match self.state {
-            BreakerState::Open { .. } => tier == ActionTier::ReadOnly,
-            BreakerState::HalfOpen { probe_remaining } => {
-                probe_remaining > 0 && tier != ActionTier::ReadOnly
-            }
-            BreakerState::Closed => true,
-        }
-    }
-
-    fn transition_to_open(&mut self, now: Instant) {
-        self.state = BreakerState::Open {
-            since: Utc::now(),
-            failure_count: self.failure_window.iter().filter(|r| !r.success).count() as u32,
-        };
-        self.last_failure_time = Some(now);
-        self.half_open_remaining = 0;
-        self.consecutive_failures = self.consecutive_failures.saturating_add(1);
-        warn!("Circuit breaker opened due to failure rate");
-    }
-
-    fn transition_to_half_open(&mut self, _now: Instant) {
-        self.state = BreakerState::HalfOpen {
-            probe_remaining: self.config.half_open_probes,
-        };
-        self.half_open_remaining = self.config.half_open_probes;
-        debug!("Circuit breaker transitioned to half-open state");
-    }
-
-    fn transition_to_closed(&mut self) {
-        self.state = BreakerState::Closed;
-        self.failure_window.clear();
-        self.half_open_remaining = 0;
-        self.consecutive_failures = 1;
-        debug!("Circuit breaker closed after successful recovery");
-    }
-
-    fn should_open_circuit(&self, now: Instant) -> bool {
-        if self.failure_window.len() < self.config.min_calls as usize {
-            return false;
-        }
-
-        let cutoff = Duration::from_secs(self.config.window_seconds);
-        let recent_failures: Vec<_> = self.failure_window
-            .iter()
-            .filter(|r| now.duration_since(r.timestamp) < cutoff)
-            .collect();
-
-        if recent_failures.len() < self.config.min_calls as usize {
-            return false;
-        }
-
-        let failures = recent_failures.iter().filter(|r| !r.success).count() as u32;
-        let failure_rate = (failures as f64 / recent_failures.len() as f64) * 100.0;
-
-        failure_rate > self.config.failure_threshold_percent as f64
-    }
-
-    fn get_state(&self) -> BreakerState {
-        self.state.clone()
-    }
-}
-
-#[derive(Debug)]
-struct TempoState {
-    config: RateLimitConfig,
-    breaker: CircuitBreakerInternal,
-    tool_trackers: HashMap<String, ToolRateTracker>,
-    tier_trackers: HashMap<ActionTier, TierRateTracker>,
-    global_tracker: GlobalTracker,
-    backoff_state: ExponentialBackoffState,
-}
 
 /// Main controller for rate limiting and circuit breaker
 pub struct TempoController {
@@ -363,7 +98,7 @@ impl TempoController {
                 let elapsed = now.duration_since(last_failure);
                 if elapsed < state.backoff_state.current_backoff_delay {
                     return Err(DenialFeedback {
-                        reason: format!("Backoff active for {:?} more.", 
+                        reason: format!("Backoff active for {:?} more.",
                             state.backoff_state.current_backoff_delay.saturating_sub(elapsed)),
                         risk_level: RiskLevel::High,
                         what_would_be_needed: "Wait for backoff to expire".to_string(),
@@ -563,12 +298,6 @@ impl TempoController {
             info!("TempoController reset");
         }
     }
-}
-
-#[derive(Debug, Clone, Default)]
-struct ExponentialBackoffState {
-    consecutive_violations: u32,
-    current_backoff_delay: Duration,
 }
 
 #[cfg(test)]
