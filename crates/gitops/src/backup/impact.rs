@@ -266,10 +266,9 @@ impl ImpactAnalyzer {
 
         let subcommand = args[0].to_lowercase();
         let mut components = Vec::new();
-        let mut risk_level = ImpactLevel::Medium;
         let mut description = String::from("System service operation");
 
-        match subcommand.as_str() {
+        let risk_level = match subcommand.as_str() {
             "stop" | "disable" | "mask" | "reset-failed" => {
                 for arg in args.iter().skip(1) {
                     if !arg.starts_with('-') && !arg.ends_with(".service") {
@@ -278,8 +277,8 @@ impl ImpactAnalyzer {
                         components.push(arg.clone());
                     }
                 }
-                risk_level = ImpactLevel::High;
                 description = format!("System service {} operation", subcommand);
+                ImpactLevel::High
             }
             "restart" | "reload" => {
                 for arg in args.iter().skip(1) {
@@ -287,12 +286,10 @@ impl ImpactAnalyzer {
                         components.push(arg.clone());
                     }
                 }
-                risk_level = ImpactLevel::Medium;
+                ImpactLevel::Medium
             }
-            _ => {
-                risk_level = ImpactLevel::Low;
-            }
-        }
+            _ => ImpactLevel::Low,
+        };
 
         ImpactAssessment {
             backup_type: BackupType::SystemConfig { components },
@@ -310,27 +307,24 @@ impl ImpactAnalyzer {
 
         let subcommand = args[0].to_lowercase();
         let mut components = Vec::new();
-        let mut risk_level = ImpactLevel::Medium;
         let mut description = String::from("Package management operation");
 
-        match subcommand.as_str() {
+        let risk_level = match subcommand.as_str() {
             "remove" | "purge" | "autoremove" | "erase" => {
                 for arg in args.iter().skip(1) {
                     if !arg.starts_with('-') {
                         components.push(format!("package:{}", arg));
                     }
                 }
-                risk_level = ImpactLevel::High;
                 description = String::from("Package removal");
+                ImpactLevel::High
             }
             "install" | "upgrade" | "update" | "dist-upgrade" => {
-                risk_level = ImpactLevel::Medium;
                 description = String::from("Package installation/upgrade");
+                ImpactLevel::Medium
             }
-            _ => {
-                risk_level = ImpactLevel::Low;
-            }
-        }
+            _ => ImpactLevel::Low,
+        };
 
         ImpactAssessment {
             backup_type: BackupType::SystemConfig { components },
@@ -348,22 +342,19 @@ impl ImpactAnalyzer {
 
         let subcommand = args[0].to_lowercase();
         let affected_paths = vec![PathBuf::from(".git")];
-        let mut risk_level = ImpactLevel::Medium;
         let mut description = String::from("Git operation");
 
-        match subcommand.as_str() {
+        let risk_level = match subcommand.as_str() {
             "reset" | "rebase" | "checkout" => {
-                risk_level = ImpactLevel::High;
                 description = format!("Git {} operation", subcommand);
+                ImpactLevel::High
             }
             "clean" => {
-                risk_level = ImpactLevel::High;
                 description = String::from("Git clean (removes untracked files)");
+                ImpactLevel::High
             }
-            _ => {
-                risk_level = ImpactLevel::Low;
-            }
-        }
+            _ => ImpactLevel::Low,
+        };
 
         ImpactAssessment {
             backup_type: BackupType::FileSnapshot {

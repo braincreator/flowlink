@@ -42,7 +42,7 @@ impl BillingPersist for DbPersist {
                 active: r.active,
                 payment_method: r.payment_method
                     .as_deref()
-                    .and_then(|m| parse_payment_method(m)),
+                    .and_then(parse_payment_method),
                 balance_kopecks: r.balance_kopecks,
                 cycle_start: r.cycle_start,
             })

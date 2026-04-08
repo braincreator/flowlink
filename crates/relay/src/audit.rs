@@ -82,7 +82,7 @@ impl AuditStore {
                     if ev.timestamp_nanos > until { return false; }
                 }
                 if let Some(min_risk) = filter.min_risk_score {
-                    if ev.event_type.risk_score().map_or(true, |r| r < min_risk) { return false; }
+                    if ev.event_type.risk_score().is_none_or(|r| r < min_risk) { return false; }
                 }
                 true
             })
@@ -182,11 +182,9 @@ impl AuditStore {
         if !self.journal_path.exists() { return Ok(()); }
         let file = std::fs::File::open(&self.journal_path)?;
         let reader = std::io::BufReader::new(file);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                if let Ok(event) = serde_json::from_str::<AuditEvent>(&line) {
-                    self.events.insert(event.id.clone(), event);
-                }
+        for line in reader.lines().flatten() {
+            if let Ok(event) = serde_json::from_str::<AuditEvent>(&line) {
+                self.events.insert(event.id.clone(), event);
             }
         }
         log::info!("Loaded {} audit events from journal", self.events.len());

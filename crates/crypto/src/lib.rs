@@ -97,6 +97,7 @@ impl KeyPair {
         Ok(StaticSecret::from(bytes))
     }
 
+    #[cfg(test)]
     fn public_bytes(&self) -> Result<[u8; 32]> {
         let bytes: [u8; 32] = B64
             .decode(&self.public_key)?

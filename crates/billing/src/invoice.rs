@@ -143,7 +143,7 @@ impl Invoice {
         if extra_tokens > 0 {
             items.push(InvoiceLineItem::new(
                 "Дополнительные токены (за 1K)",
-                (extra_tokens + 999) / 1000, // round up to 1K
+                extra_tokens.div_ceil(1000), // round up to 1K
                 token_price_kopecks,
             ));
         }

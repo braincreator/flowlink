@@ -37,8 +37,8 @@ pub struct AccountIdExtractor(pub String);
 impl<S: Send + Sync> axum::extract::FromRequestParts<S> for AccountIdExtractor {
     type Rejection = axum::http::StatusCode;
 
-    fn from_request_parts<'a>(
-        parts: &'a mut axum::http::request::Parts,
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
         _state: &S,
     ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
         let account = parts.extensions.get::<AccountId>().map(|a| a.0.clone())

@@ -25,7 +25,6 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tracing;
 
 /// Billing engine — central struct for all billing operations
 pub struct BillingEngine {
@@ -258,10 +257,10 @@ impl BillingEngine {
         };
 
         let current_value = match operation {
-            usage::UsageOperation::ApiRequest => current.api_requests_today as u64 + 1,
-            usage::UsageOperation::Tokens(n) => current.tokens_today as u64 + n as u64,
-            usage::UsageOperation::AgentConnect => current.active_agents as u64 + 1,
-            usage::UsageOperation::StorageBytes(n) => current.storage_bytes as u64 + n as u64,
+            usage::UsageOperation::ApiRequest => current.api_requests_today + 1,
+            usage::UsageOperation::Tokens(n) => current.tokens_today + n,
+            usage::UsageOperation::AgentConnect => current.active_agents + 1,
+            usage::UsageOperation::StorageBytes(n) => current.storage_bytes + n,
         };
 
         if limit > 0 && current_value > limit {

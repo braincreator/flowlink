@@ -347,7 +347,7 @@ async fn mcp_sysinfo(state: &AppState, id: Option<Value>, args: &Value) -> axum:
 // Helpers
 // ═══════════════════════════════════════════════
 
-fn get_arg<'a>(args: &'a Value, key: &str) -> Option<String> {
+fn get_arg(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(|v| v.as_str()).map(String::from)
 }
 

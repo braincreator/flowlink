@@ -14,18 +14,6 @@ const DESTRUCTIVE_COMMANDS: &[&str] = &[
 
 /// Shell expansion patterns that are dangerous in destructive commands
 /// Each pattern is a tuple of (pattern_name, detector_function_description)
-const SHELL_EXPANSION_PATTERNS: &[(&str, &str)] = &[
-    ("variable", "$VAR or ${VAR} - shell variable expansion"),
-    ("glob_star", "* - glob wildcard matching multiple files"),
-    ("glob_question", "? - single character glob"),
-    ("backtick", "`command` - command substitution (backticks)"),
-    ("command_sub", "$(command) - command substitution"),
-    ("and_operator", "&& - conditional AND operator"),
-    ("or_operator", "|| - conditional OR operator"),
-    ("semicolon", "; - command separator"),
-    ("pipe", "| - pipe operator"),
-];
-
 /// LiteralChecker validates that destructive commands don't contain
 /// shell expansion patterns that could lead to unintended consequences.
 #[derive(Debug, Clone)]

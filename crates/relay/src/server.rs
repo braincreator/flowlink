@@ -123,6 +123,12 @@ pub struct ShieldAlertEntry {
     pub approved: Option<bool>,
 }
 
+impl Default for ShieldAlertManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShieldAlertManager {
     pub fn new() -> Self {
         Self {
@@ -295,7 +301,7 @@ async fn sse_events(
     drop(tx); // drop our copy so the channel closes when all forwarders die
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
-        .map(|event| Ok::<Event, Infallible>(event));
+        .map(Ok::<Event, Infallible>);
 
     Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }
