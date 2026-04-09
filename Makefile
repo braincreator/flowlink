@@ -1,106 +1,68 @@
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.1.0")
-GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
-BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS = -ldflags "-X github.com/braincreator/flowlink/pkg/version.Version=$(VERSION) \
-            -X github.com/braincreator/flowlink/pkg/version.GitCommit=$(GIT_COMMIT) \
-            -X github.com/braincreator/flowlink/pkg/version.BuildDate=$(BUILD_DATE)"
+.PHONY: build test check clippy fmt lint clean docker docker-up docker-down website website-dev install run-relay run-agent run-shield release
 
-# Таргеты сборки
-.PHONY: build build-agent build-relay clean test install run-agent run-relay
+# Build release binary
+build:
+	cargo build --release
 
-# Сборка всего
-build: build-agent build-relay
-
-# Сборка агента
-build-agent:
-	@echo "Building flowlink agent..."
-	go build $(LDFLAGS) -o bin/flowlink ./cmd/agent
-
-# Сборка реле
-build-relay:
-	@echo "Building flowlink relay..."
-	go build $(LDFLAGS) -o bin/flowlink-relay ./cmd/relay
-
-# Кросс-компиляция (для релиза)
-# Кросс-компиляция (для релиза)
-build-release:
-	@echo "Building for all platforms..."
-	@mkdir -p dist
-	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o dist/flowlink_darwin_amd64 ./cmd/agent
-	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o dist/flowlink_darwin_arm64 ./cmd/agent
-	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o dist/flowlink_linux_amd64 ./cmd/agent
-	GOOS=linux   GOARCH=arm64 go build $(LDFLAGS) -o dist/flowlink_linux_arm64 ./cmd/agent
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o dist/flowlink_windows_amd64.exe ./cmd/agent
-	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o dist/flowlink_windows_arm64.exe ./cmd/agent
-	@echo "Done! Check dist/"
-
-# Полная кросс-компиляция всех компонентов
-build-all: build-all-agent build-all-relay build-all-bot
-
-build-all-agent:
-	@echo "Building agent for all platforms..."
-	@mkdir -p bin
-	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-linux-amd64 ./cmd/agent
-	GOOS=linux   GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-linux-arm64 ./cmd/agent
-	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-darwin-amd64 ./cmd/agent
-	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-darwin-arm64 ./cmd/agent
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-windows-amd64.exe ./cmd/agent
-	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-windows-arm64.exe ./cmd/agent
-
-build-all-relay:
-	@echo "Building relay for all platforms..."
-	@mkdir -p bin
-	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-relay-linux-amd64 ./cmd/relay
-	GOOS=linux   GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-relay-linux-arm64 ./cmd/relay
-	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-relay-darwin-amd64 ./cmd/relay
-	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-relay-darwin-arm64 ./cmd/relay
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-relay-windows-amd64.exe ./cmd/relay
-	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-relay-windows-arm64.exe ./cmd/relay
-
-build-all-bot:
-	@echo "Building bot for all platforms..."
-	@mkdir -p bin
-	GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-bot-linux-amd64 ./cmd/bot
-	GOOS=linux   GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-bot-linux-arm64 ./cmd/bot
-	GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-bot-darwin-amd64 ./cmd/bot
-	GOOS=darwin  GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-bot-darwin-arm64 ./cmd/bot
-	GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o bin/flowlink-bot-windows-amd64.exe ./cmd/bot
-	GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o bin/flowlink-bot-windows-arm64.exe ./cmd/bot
-
-# Тесты
+# Run all tests
 test:
-	go test ./...
+	cargo test --lib
+	cargo test --doc
 
-# Линт
-lint:
-	go vet ./...
+# Check compilation (fast)
+check:
+	cargo check --all-targets
 
-# Установка локально
-install: build-agent
-	@mkdir -p $(HOME)/.flowlink/bin
-	cp bin/flowlink $(HOME)/.flowlink/bin/flowlink
-	@echo "Installed to ~/.flowlink/bin/flowlink"
+# Clippy lints
+clippy:
+	cargo clippy --all-targets -- -D warnings
 
-# Запуск агента (dev)
-run-agent: build-agent
-	./bin/flowlink --version
-	./bin/flowlink --init || true
-	./bin/flowlink agent start
-
-# Запуск реле (dev)
-run-relay: build-relay
-	./bin/flowlink-relay --version
-	./bin/flowlink-relay --config relay.json --api-token dev-token
-
-# Очистка
-clean:
-	rm -rf bin/ dist/
-
-# Форматирование
+# Format code
 fmt:
-	go fmt ./...
+	cargo fmt
 
-# Зависимости
-deps:
-	go mod tidy
-	go mod download
+# Full lint (fmt + clippy)
+lint: fmt clippy
+
+# Clean build artifacts
+clean:
+	cargo clean
+	rm -rf website/out website/.next
+
+# Docker builds
+docker:
+	docker build -t flowlink-relay .
+	docker build -t flowlink-agent -f Dockerfile.agent .
+
+docker-up:
+	docker compose up -d
+
+docker-down:
+	docker compose down
+
+# Website
+website:
+	cd website && npm run build
+
+website-dev:
+	cd website && npm run dev
+
+# Install binary
+install:
+	cargo install --path crates/cli
+
+# Run services (dev mode)
+run-relay:
+	cargo run --bin flowlink -- relay
+
+run-agent:
+	cargo run --bin flowlink -- agent
+
+run-shield:
+	cargo run --bin flowlink -- shield
+
+# Release build with version info
+release:
+	cargo build --release --bin flowlink
+	strip target/release/flowlink 2>/dev/null || true
+	@ls -lh target/release/flowlink
