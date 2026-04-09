@@ -161,18 +161,22 @@ fn subtle_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | x ^ y) == 0
 }
 
-// ── Rate Limit Middleware (state-injected, path-aware) ──
+// ── Rate Limit Middleware (state-injected, path-aware, plan-aware) ──
 
-/// Build a rate-limit middleware layer with state injection and path skipping.
+/// Build a rate-limit middleware layer with state injection, path skipping,
+/// and billing plan awareness.
 ///
-/// Uses `Arc<RateLimiter>` shared state instead of a static, and skips
-/// whitelisted paths (e.g. `/healthz`, `/ws`) that must never be throttled.
+/// Uses `Arc<RateLimiter>` shared state and `Option<Arc<BillingEngine>>` to
+/// look up per-client rate limits from their billing plan. Falls back to
+/// the default limiter config for unauthenticated or unknown clients.
 pub fn rate_limit_layer(
     limiter: Arc<RateLimiter>,
+    billing: Option<Arc<flowlink_billing::BillingEngine>>,
     skip_paths: Vec<String>,
 ) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> + Clone {
     move |req: Request, next: Next| {
         let limiter = limiter.clone();
+        let billing = billing.clone();
         let skip_paths = skip_paths.clone();
         Box::pin(async move {
             let path = req.uri().path().to_string();
@@ -182,11 +186,10 @@ pub fn rate_limit_layer(
                 return next.run(req).await;
             }
 
-            // Extract key: prefer authenticated ClientId, then X-Forwarded-For IP, then "global"
-            let key = req
-                .extensions()
-                .get::<ClientId>()
-                .map(|c| format!("client:{}", c.0))
+            // Extract key and client_id
+            let client_id = req.extensions().get::<ClientId>().map(|c| c.0.clone());
+            let key = client_id.as_ref()
+                .map(|c| format!("client:{}", c))
                 .unwrap_or_else(|| {
                     let ip = req
                         .headers()
@@ -197,7 +200,21 @@ pub fn rate_limit_layer(
                     format!("ip:{}", ip)
                 });
 
-            if !limiter.allow(&key) {
+            // Look up plan-specific rate limit, fall back to default
+            let rpm = client_id.as_ref().and_then(|cid| {
+                billing.as_ref().and_then(|b| {
+                    let account = b.get_or_create_account(cid);
+                    let plan = b.plans().get(&account.plan_id)?;
+                    Some(plan.limits.api_rate_limit_rpm)
+                })
+            });
+
+            let allowed = match rpm {
+                Some(rpm) => limiter.allow_plan(&key, rpm),
+                None => limiter.allow(&key),
+            };
+
+            if !allowed {
                 return (
                     StatusCode::TOO_MANY_REQUESTS,
                     [(header::RETRY_AFTER, "10")],
@@ -466,7 +483,7 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limit_layer_allows_under_limit() {
         let limiter = Arc::new(RateLimiter::new(5, 1));
-        let layer = rate_limit_layer(limiter, vec![]);
+        let layer = rate_limit_layer(limiter.clone(), None, vec![]);
         let app = test_app().layer(axum::middleware::from_fn(layer));
         for _ in 0..5 {
             let resp = app.clone().oneshot(
@@ -479,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limit_layer_blocks_over_limit() {
         let limiter = Arc::new(RateLimiter::new(3, 10));
-        let layer = rate_limit_layer(limiter, vec![]);
+        let layer = rate_limit_layer(limiter.clone(), None, vec![]);
         let app = test_app().layer(axum::middleware::from_fn(layer));
         // First 3 should pass
         for _ in 0..3 {
@@ -498,7 +515,7 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limit_layer_skips_healthz() {
         let limiter = Arc::new(RateLimiter::new(1, 10)); // very strict
-        let layer = rate_limit_layer(limiter, vec!["/healthz".to_string()]);
+        let layer = rate_limit_layer(limiter.clone(), None, vec!["/healthz".to_string()]);
         let app = test_app().layer(axum::middleware::from_fn(layer));
         // First request uses the token
         let resp = app.clone().oneshot(
@@ -520,7 +537,7 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limit_layer_skips_ws() {
         let limiter = Arc::new(RateLimiter::new(1, 10));
-        let layer = rate_limit_layer(limiter, vec!["/ws".to_string()]);
+        let layer = rate_limit_layer(limiter.clone(), None, vec!["/ws".to_string()]);
         let app = test_app().layer(axum::middleware::from_fn(layer));
         // Exhaust the limit
         let resp = app.clone().oneshot(
@@ -541,7 +558,7 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limit_layer_response_body_is_json() {
         let limiter = Arc::new(RateLimiter::new(1, 10));
-        let layer = rate_limit_layer(limiter, vec![]);
+        let layer = rate_limit_layer(limiter.clone(), None, vec![]);
         let app = test_app().layer(axum::middleware::from_fn(layer));
         // First passes
         let _ = app.clone().oneshot(
@@ -559,7 +576,7 @@ mod tests {
     #[tokio::test]
     async fn test_rate_limit_layer_different_keys() {
         let limiter = Arc::new(RateLimiter::new(1, 10));
-        let layer = rate_limit_layer(limiter, vec![]);
+        let layer = rate_limit_layer(limiter.clone(), None, vec![]);
         let app = test_app().layer(axum::middleware::from_fn(layer));
         // Exhaust limit for default IP key
         let _ = app.clone().oneshot(

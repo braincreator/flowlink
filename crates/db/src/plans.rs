@@ -19,6 +19,8 @@ pub struct PlanLimits {
     pub max_file_size_mb: u64,
     pub exec_timeout_sec: u64,
     pub shield_level: String,
+    #[serde(default)]
+    pub api_rate_limit_rpm: Option<u32>,
 }
 
 /// A billing plan stored in the database
@@ -186,6 +188,7 @@ mod tests {
             max_file_size_mb: 100,
             exec_timeout_sec: 300,
             shield_level: "advanced".to_string(),
+            api_rate_limit_rpm: Some(120),
         };
         let json = serde_json::to_value(&limits).unwrap();
         let back: PlanLimits = serde_json::from_value(json).unwrap();

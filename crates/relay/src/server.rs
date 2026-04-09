@@ -354,12 +354,30 @@ async fn ws_upgrade(
         ).into_response(),
     };
 
-    info!("WS upgrade for agent {} (client {})", agent_id, client.client_id);
+    // ── Billing: check host limit before allowing connection ──
+    let client_id = client.client_id.clone();
+    if let Some(billing_engine) = &state.billing {
+        let account_billing = billing_engine.get_or_create_account(&client_id);
+        let check = billing_engine.check_and_track(
+            &account_billing,
+            flowlink_billing::usage::UsageOperation::AgentConnect,
+        );
+        if !check.allowed {
+            let reason = check.reason.unwrap_or_else(|| "Plan limit exceeded".into());
+            info!("WS upgrade denied for agent {} (client {}): {}", agent_id, client_id, reason);
+            return (
+                axum::http::StatusCode::FORBIDDEN,
+                Json(SimpleResponse { ok: false, message: Some(reason) }),
+            ).into_response();
+        }
+    }
 
-    ws.on_upgrade(move |socket| handle_ws(socket, agent_id, state))
+    info!("WS upgrade for agent {} (client {})", agent_id, client_id);
+
+    ws.on_upgrade(move |socket| handle_ws(socket, agent_id, client_id, state))
 }
 
-async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
+async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state: AppState) {
     let (mut ws_sink, mut ws_stream) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AxumMsg>(256);
 
@@ -513,6 +531,10 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
     pool.unregister(&aid);
     state.handler.remove_sender(&aid);
     state.e2ee.remove_agent_key(&aid).await;
+    // Release billing usage counter for this host
+    if let Some(billing_engine) = &state.billing {
+        billing_engine.usage().release_agent(&client_id);
+    }
     eventbus.publish("agent_disconnect", &serde_json::to_string(&serde_json::json!({"agent_id": aid})).unwrap_or_default());
 }
 
@@ -827,6 +849,7 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
 
 pub fn build_router(state: AppState) -> Router {
     let rate_limiter = state.rate_limiter.clone();
+    let billing = state.billing.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route("/health", get(health))
@@ -888,6 +911,7 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(axum::middleware::from_fn(rate_limit_layer(
             rate_limiter,
+            billing.clone(),
             vec!["/healthz".to_string(), "/ws".to_string()],
         )))
         .layer(cors_layer(vec!["*".to_string()]))

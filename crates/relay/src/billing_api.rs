@@ -54,6 +54,7 @@ pub struct BillingInfo {
     pub balance_rub: String,
     pub expires_at: Option<String>,
     pub usage: Value,
+    pub limits: Value,
     pub available_plans: Vec<Value>,
 }
 
@@ -124,6 +125,8 @@ pub async fn get_billing_info(
         }))
         .collect();
 
+    let plan_limits = plan.as_ref().map(|p| serde_json::to_value(&p.limits).unwrap_or(json!(null))).unwrap_or(json!(null));
+
     let info = BillingInfo {
         plan_id: account_billing.plan_id.clone(),
         plan_name,
@@ -133,6 +136,7 @@ pub async fn get_billing_info(
         ),
         expires_at: account_billing.expires_at.map(|dt| dt.to_rfc3339()),
         usage: serde_json::to_value(&usage).unwrap_or(json!(null)),
+        limits: plan_limits,
         available_plans,
     };
 
@@ -498,6 +502,7 @@ mod tests {
             balance_rub: "0.00 RUB".to_string(),
             expires_at: None,
             usage: json!(null),
+            limits: json!(null),
             available_plans: vec![],
         };
         let json_str = serde_json::to_string(&info).unwrap();
