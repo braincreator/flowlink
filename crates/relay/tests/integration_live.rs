@@ -46,7 +46,8 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         llm_proxy: None,
         shield_alerts: Arc::new(ShieldAlertManager::new()),
         audit_store: Arc::new(flowlink_relay::audit::AuditStore::new(
-            &tmp.path().join("audit.jsonl")
+            &tmp.path().join("audit.jsonl"),
+            None,
         )),
         metrics: Arc::new(flowlink_relay::metrics::Metrics::new()),
         billing: None,
@@ -54,6 +55,7 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         config_reloader: None,
         e2ee: Arc::new(flowlink_relay::e2ee::E2eeSessionManager::new()),
         usage_tracker: Arc::new(flowlink_relay::billing_middleware::UsageTracker::new()),
+        rate_limiter: Arc::new(flowlink_relay::ratelimit::RateLimiter::new(100, 10)),
     };
     (state, tmp)
 }

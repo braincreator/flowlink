@@ -21,7 +21,8 @@ use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;
 use crate::llm::{LlmProxy, LlmRequest};
 use crate::metrics::Metrics;
-use crate::middleware::{auth_middleware_simple, rate_limit_middleware, request_id_middleware, logging_middleware, cors_layer};
+use crate::middleware::{auth_middleware_simple, rate_limit_layer, request_id_middleware, logging_middleware, cors_layer};
+use crate::ratelimit::RateLimiter;
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
 use flowlink_core::ShieldAlertPayload;
@@ -48,6 +49,7 @@ pub struct AppState {
     pub config_reloader: Option<Arc<ConfigReloader>>,
     pub e2ee: Arc<crate::e2ee::E2eeSessionManager>,
     pub usage_tracker: Arc<crate::billing_middleware::UsageTracker>,
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
 // ═══════════════════════════════════════════════
@@ -822,6 +824,7 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
 // ═══════════════════════════════════════════════
 
 pub fn build_router(state: AppState) -> Router {
+    let rate_limiter = state.rate_limiter.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route("/health", get(health))
@@ -838,6 +841,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/devices/confirm", axum::routing::post(crate::devices::confirm_pairing))
         .route("/api/devices", axum::routing::get(crate::devices::list_devices))
         .route("/api/devices/{id}", axum::routing::delete(crate::devices::remove_device))
+        .route("/api/devices/{id}/trust", axum::routing::get(crate::devices::get_device_trust))
         .route("/api/llm", post(llm_chat))
         .route("/api/llm/backends", get(llm_backends))
         .route("/api/llm/health", get(llm_health))
@@ -871,7 +875,10 @@ pub fn build_router(state: AppState) -> Router {
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))
         .layer(axum::middleware::from_fn(request_id_middleware))
-        .layer(axum::middleware::from_fn(rate_limit_middleware))
+        .layer(axum::middleware::from_fn(rate_limit_layer(
+            rate_limiter,
+            vec!["/healthz".to_string(), "/ws".to_string()],
+        )))
         .layer(cors_layer(vec!["*".to_string()]))
         .layer(axum::middleware::from_fn(auth_middleware_simple))
 }
@@ -900,13 +907,14 @@ mod tests {
             device_manager: Arc::new(DeviceManager::new(crate::devices::PushConfig::default())),
             llm_proxy: None,
             shield_alerts: Arc::new(ShieldAlertManager::new()),
-            audit_store: Arc::new(AuditStore::new(&tempfile::tempdir().unwrap().path().join("audit.jsonl"))),
+            audit_store: Arc::new(AuditStore::new(&tempfile::tempdir().unwrap().path().join("audit.jsonl"), None)),
             metrics: Arc::new(Metrics::new()),
             billing: None,
             db: None,
             config_reloader: None,
             e2ee: Arc::new(crate::e2ee::E2eeSessionManager::new()),
             usage_tracker: Arc::new(crate::billing_middleware::UsageTracker::new()),
+            rate_limiter: Arc::new(RateLimiter::new(100, 10)),
         }
     }
 

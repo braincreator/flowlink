@@ -161,43 +161,65 @@ fn subtle_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | x ^ y) == 0
 }
 
-// ── Rate Limit Middleware ──
+// ── Rate Limit Middleware (state-injected, path-aware) ──
 
+/// Build a rate-limit middleware layer with state injection and path skipping.
+///
+/// Uses `Arc<RateLimiter>` shared state instead of a static, and skips
+/// whitelisted paths (e.g. `/healthz`, `/ws`) that must never be throttled.
+pub fn rate_limit_layer(
+    limiter: Arc<RateLimiter>,
+    skip_paths: Vec<String>,
+) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> + Clone {
+    move |req: Request, next: Next| {
+        let limiter = limiter.clone();
+        let skip_paths = skip_paths.clone();
+        Box::pin(async move {
+            let path = req.uri().path().to_string();
+
+            // Skip whitelisted paths entirely
+            if skip_paths.iter().any(|p| path == *p || path.starts_with(&format!("{}/", p))) {
+                return next.run(req).await;
+            }
+
+            // Extract key: prefer authenticated ClientId, then X-Forwarded-For IP, then "global"
+            let key = req
+                .extensions()
+                .get::<ClientId>()
+                .map(|c| format!("client:{}", c.0))
+                .unwrap_or_else(|| {
+                    let ip = req
+                        .headers()
+                        .get("x-forwarded-for")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.split(',').next())
+                        .unwrap_or("unknown");
+                    format!("ip:{}", ip)
+                });
+
+            if !limiter.allow(&key) {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [(header::RETRY_AFTER, "10")],
+                    axum::Json(serde_json::json!({
+                        "error": "rate limit exceeded",
+                        "code": "rate_limit_exceeded"
+                    })),
+                )
+                    .into_response();
+            }
+
+            next.run(req).await
+        })
+    }
+}
+
+/// Backward-compatible no-op kept for any call-sites that reference the old
+/// stateless function signature.  Prefer `rate_limit_layer` in new code.
 pub async fn rate_limit_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    // Simple per-IP rate limit (stateless — in production use shared state)
-    let key = req
-        .extensions()
-        .get::<ClientId>()
-        .map(|c| format!("client:{}", c.0))
-        .unwrap_or_else(|| {
-            let ip = req
-                .headers()
-                .get("x-forwarded-for")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.split(',').next())
-                .unwrap_or("unknown");
-            format!("ip:{}", ip)
-        });
-
-    // Use a thread-local limiter for now — production should inject via state
-    use std::sync::LazyLock;
-    static LIMITER: LazyLock<RateLimiter> = LazyLock::new(|| RateLimiter::new(60, 60));
-
-    if !LIMITER.allow(&key) {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            [(header::RETRY_AFTER, "60")],
-            axum::Json(serde_json::json!({
-                "error": "rate limit exceeded",
-                "code": "rate_limit_exceeded"
-            })),
-        )
-            .into_response();
-    }
-
     next.run(req).await
 }
 
@@ -268,7 +290,10 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_app() -> axum::Router {
-        axum::Router::new().route("/health", axum::routing::get(|| async { "ok" }))
+        axum::Router::new()
+            .route("/health", axum::routing::get(|| async { "ok" }))
+            .route("/healthz", axum::routing::get(|| async { "ok" }))
+            .route("/ws", axum::routing::get(|| async { "ok" }))
     }
 
     #[tokio::test]
@@ -434,6 +459,123 @@ mod tests {
         assert!(require_permission(&Some(roles), &flowlink_core::rbac::Permission::MetricsView));
         let roles2 = UserRoles(vec![flowlink_core::rbac::Role::Viewer]);
         assert!(!require_permission(&Some(roles2), &flowlink_core::rbac::Permission::CommandExecute));
+    }
+
+    // ── Rate limit layer tests ──
+
+    #[tokio::test]
+    async fn test_rate_limit_layer_allows_under_limit() {
+        let limiter = Arc::new(RateLimiter::new(5, 1));
+        let layer = rate_limit_layer(limiter, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        for _ in 0..5 {
+            let resp = app.clone().oneshot(
+                HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_layer_blocks_over_limit() {
+        let limiter = Arc::new(RateLimiter::new(3, 10));
+        let layer = rate_limit_layer(limiter, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        // First 3 should pass
+        for _ in 0..3 {
+            let resp = app.clone().oneshot(
+                HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+            ).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+        // 4th should be rate-limited
+        let resp = app.oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_layer_skips_healthz() {
+        let limiter = Arc::new(RateLimiter::new(1, 10)); // very strict
+        let layer = rate_limit_layer(limiter, vec!["/healthz".to_string()]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        // First request uses the token
+        let resp = app.clone().oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Second request is blocked (different path)
+        let resp = app.clone().oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        // /healthz should still pass even though we're rate-limited
+        let resp = app.oneshot(
+            HttpRequest::builder().uri("/healthz").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_layer_skips_ws() {
+        let limiter = Arc::new(RateLimiter::new(1, 10));
+        let layer = rate_limit_layer(limiter, vec!["/ws".to_string()]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        // Exhaust the limit
+        let resp = app.clone().oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = app.clone().oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        // /ws should pass
+        let resp = app.oneshot(
+            HttpRequest::builder().uri("/ws").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_layer_response_body_is_json() {
+        let limiter = Arc::new(RateLimiter::new(1, 10));
+        let layer = rate_limit_layer(limiter, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        // First passes
+        let _ = app.clone().oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        // Second is rate-limited; check body
+        let resp = app.oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(resp.headers().get("retry-after").is_some());
+        assert!(resp.headers().get("content-type").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_layer_different_keys() {
+        let limiter = Arc::new(RateLimiter::new(1, 10));
+        let layer = rate_limit_layer(limiter, vec![]);
+        let app = test_app().layer(axum::middleware::from_fn(layer));
+        // Exhaust limit for default IP key
+        let _ = app.clone().oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        let resp = app.clone().oneshot(
+            HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        // Different X-Forwarded-For should have its own bucket
+        let resp = app.oneshot(
+            HttpRequest::builder().uri("/health")
+                .header("x-forwarded-for", "1.2.3.4")
+                .body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }
 

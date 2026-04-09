@@ -3,12 +3,54 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Result;
 use base64::Engine;
 use futures::StreamExt;
-use kube::{Client, ResourceExt, api::{Api, Patch, PatchParams}, runtime::{controller, watcher, Controller}};
+use kube::{Client, ResourceExt, api::{Api, Patch, PatchParams}, runtime::{controller, watcher, Controller}, runtime::watcher::Event as KubeWatchEvent};
 use kube::api::PostParams;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::config::K8sConfig;
-use crate::crd::{FlowLinkShieldPolicy, FlowLinkShieldPolicyStatus, PolicyCondition, ShieldMode};
+use crate::crd::{FlowLinkShieldPolicy, FlowLinkShieldPolicySpec, FlowLinkShieldPolicyStatus, PolicyCondition, PolicyRule, ShieldMode};
+
+// ---------------------------------------------------------------------------
+// Reconciliation helper types
+// ---------------------------------------------------------------------------
+
+/// Result of a reconciliation pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconcileAction {
+    /// Nothing more to do — requeue later.
+    Done,
+    /// Requeue after the given duration.
+    Requeue(Duration),
+}
+
+/// Describes a single drift observation between desired and actual cluster state.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DriftEvent {
+    /// Resource identifier, e.g. "Deployment/flowlink-relay" or "ConfigMap/relay-config".
+    pub resource: String,
+    /// The field that drifted, e.g. "image" or "data.relay_url".
+    pub field: String,
+    /// Desired value.
+    pub expected: String,
+    /// Current actual value.
+    pub actual: String,
+    /// RFC 3339 timestamp of when drift was detected.
+    pub detected_at: String,
+}
+
+/// Events yielded by the policy watch stream.
+#[derive(Debug, Clone)]
+pub enum WatchEvent {
+    Added(String, String),      // (name, namespace)
+    Modified(String, String),
+    Deleted(String, String),
+    Error(String),
+}
+
+// ---------------------------------------------------------------------------
+// Operator
+// ---------------------------------------------------------------------------
 
 pub struct ShieldOperator {
     pub client: Client,
@@ -220,6 +262,215 @@ impl ShieldOperator {
         }
 
         Ok(())
+    }
+
+    /// Detect drift between desired policy spec and actual cluster state.
+    ///
+    /// Compares the CR spec fields against the live cluster resources.
+    /// Returns a list of `DriftEvent`s for each mismatch found.
+    pub async fn detect_drift(&self, name: &str, namespace: &str) -> Result<Vec<DriftEvent>> {
+        use k8s_openapi::api::core::v1::{ConfigMap, Secret};
+        use kube::ResourceExt;
+
+        let crds: Api<FlowLinkShieldPolicy> = Api::namespaced(self.client.clone(), namespace);
+        let policy = crds.get(name).await?;
+        let spec = &policy.spec;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut drifts = Vec::new();
+
+        // Check ConfigMap drift
+        let configmaps: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+        let cm_name = format!("flowlink-{}-config", name);
+        if let Ok(cm) = configmaps.get(&cm_name).await {
+            let cm_data = cm.data.unwrap_or_default();
+            let desired_mode_str = match spec.mode {
+                ShieldMode::Monitor => "monitor",
+                ShieldMode::Enforce => "enforce",
+            };
+            if cm_data.get("shield.mode").map(|s| s.as_str()) != Some(desired_mode_str) {
+                drifts.push(DriftEvent {
+                    resource: format!("ConfigMap/{}", cm_name),
+                    field: "data.shield.mode".into(),
+                    expected: match spec.mode {
+                        ShieldMode::Monitor => "monitor".into(),
+                        ShieldMode::Enforce => "enforce".into(),
+                    },
+                    actual: cm_data.get("shield.mode").cloned().unwrap_or_default(),
+                    detected_at: now.clone(),
+                });
+            }
+        } else {
+            drifts.push(DriftEvent {
+                resource: format!("ConfigMap/{}", cm_name),
+                field: "existence".into(),
+                expected: "exists".into(),
+                actual: "missing".into(),
+                detected_at: now.clone(),
+            });
+        }
+
+        // Check Secret drift for webhook certs
+        let secrets: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
+        let secret_name = "flowlink-webhook-certs";
+        if spec.admission_webhook {
+            if let Err(e) = secrets.get(secret_name).await {
+                drifts.push(DriftEvent {
+                    resource: format!("Secret/{}", secret_name),
+                    field: "existence".into(),
+                    expected: "exists".into(),
+                    actual: format!("missing ({})", e),
+                    detected_at: now.clone(),
+                });
+            }
+        }
+
+        // Check rule count drift
+        if spec.rules.is_empty() {
+            drifts.push(DriftEvent {
+                resource: format!("FlowLinkShieldPolicy/{}", name),
+                field: "spec.rules".into(),
+                expected: "non-empty".into(),
+                actual: "0 rules".into(),
+                detected_at: now,
+            });
+        }
+
+        Ok(drifts)
+    }
+
+    /// Apply the policy by creating/updating cluster resources.
+    ///
+    /// Creates ConfigMap, Secret, and optionally webhook configurations
+    /// based on the FlowLinkShieldPolicy spec.
+    pub async fn apply_policy(&self, name: &str, namespace: &str) -> Result<()> {
+        use k8s_openapi::api::core::v1::{ConfigMap, Secret};
+
+        let crds: Api<FlowLinkShieldPolicy> = Api::namespaced(self.client.clone(), namespace);
+        let policy = crds.get(name).await?;
+        let spec = &policy.spec;
+
+        // Create/update ConfigMap
+        let configmaps: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+        let cm_name = format!("flowlink-{}-config", name);
+        let cm = serde_json::from_value::<ConfigMap>(json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": {
+                "name": cm_name,
+                "namespace": namespace,
+                "labels": {
+                    "app.kubernetes.io/name": "flowlink-shield",
+                    "app.kubernetes.io/managed-by": "flowlink-operator",
+                    "flowlink.ai/policy": name,
+                },
+            },
+            "data": {
+                "shield.mode": match spec.mode {
+                    ShieldMode::Monitor => "monitor",
+                    ShieldMode::Enforce => "enforce",
+                },
+                "shield.enabled": spec.enabled.to_string(),
+                "shield.rules_count": spec.rules.len().to_string(),
+                "shield.admission_webhook": spec.admission_webhook.to_string(),
+                "rules": serde_json::to_string(&spec.rules).unwrap_or_default(),
+            }
+        }))?;
+
+        let pp = PatchParams::apply("flowlink-shield").force();
+        match configmaps.create(&PostParams::default(), &cm).await {
+            Ok(_) => log::info!("Created ConfigMap {}", cm_name),
+            Err(kube::Error::Api(e)) if e.code == 409 => {
+                configmaps.patch(&cm_name, &pp, &Patch::Apply(&cm)).await?;
+                log::info!("Updated ConfigMap {}", cm_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        // Generate and store certs if admission webhook is enabled
+        if spec.admission_webhook {
+            let (cert_pem, key_pem) = self.generate_webhook_cert(
+                "flowlink-shield-webhook",
+                namespace,
+            )?;
+            self.store_cert_secret(namespace, &cert_pem, &key_pem).await?;
+            self.ensure_webhook_config(namespace, &cert_pem).await?;
+            if spec.mode == ShieldMode::Enforce {
+                self.ensure_validating_webhook(namespace, &cert_pem).await?;
+            }
+        }
+
+        log::info!("Policy {} applied successfully", name);
+        Ok(())
+    }
+
+    /// Cleanup all resources owned by a FlowLinkShieldPolicy CR.
+    ///
+    /// Removes ConfigMaps and webhook configurations created by apply_policy.
+    pub async fn cleanup_policy(&self, name: &str, namespace: &str) -> Result<()> {
+        use k8s_openapi::api::core::v1::ConfigMap;
+
+        let configmaps: Api<ConfigMap> = Api::namespaced(self.client.clone(), namespace);
+        let cm_name = format!("flowlink-{}-config", name);
+
+        if let Err(e) = configmaps.delete(&cm_name, &DeleteParams::default()).await {
+            let is_404 = matches!(&e, kube::Error::Api(ae) if ae.code == 404);
+            if !is_404 {
+                log::warn!("Failed to delete ConfigMap {}: {}", cm_name, e);
+            }
+        }
+
+        self.remove_webhook_configs().await?;
+
+        log::info!("Policy {} cleaned up in namespace {}", name, namespace);
+        Ok(())
+    }
+
+    /// Watch FlowLinkShieldPolicy CRs and yield events.
+    ///
+    /// Returns a stream of WatchEvent for policy create/modify/delete.
+    pub async fn watch_policies(&self, namespace: &str) -> Result<Vec<WatchEvent>> {
+        let crds: Api<FlowLinkShieldPolicy> = if namespace.is_empty() {
+            Api::all(self.client.clone())
+        } else {
+            Api::namespaced(self.client.clone(), namespace)
+        };
+
+        let mut events = Vec::new();
+        let watcher = watcher(crds, watcher::Config::default());
+
+        tokio::pin!(watcher);
+        // Collect events up to a timeout
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if tokio::time::Instant::now() > deadline {
+                break;
+            }
+            match tokio::time::timeout(Duration::from_secs(1), watcher.next()).await {
+                Ok(Some(Ok(KubeWatchEvent::Apply(obj)))) => {
+                    let name = obj.name_any();
+                    let ns = obj.namespace().unwrap_or_default();
+                    events.push(WatchEvent::Modified(name, ns));
+                }
+                Ok(Some(Ok(KubeWatchEvent::Delete(obj)))) => {
+                    let name = obj.name_any();
+                    let ns = obj.namespace().unwrap_or_default();
+                    events.push(WatchEvent::Deleted(name, ns));
+                }
+                Ok(Some(Ok(KubeWatchEvent::InitApply(obj)))) => {
+                    let name = obj.name_any();
+                    let ns = obj.namespace().unwrap_or_default();
+                    events.push(WatchEvent::Added(name, ns));
+                }
+                // Ignore Init and InitDone — these are bookmark events
+                Ok(Some(Ok(KubeWatchEvent::Init | KubeWatchEvent::InitDone))) => {}
+                Ok(Some(Err(e))) => {
+                    events.push(WatchEvent::Error(format!("{}", e)));
+                }
+                Ok(None) | Err(_) => break,
+            }
+        }
+
+        Ok(events)
     }
 
     /// Remove webhook configurations (cleanup on policy deletion).
@@ -485,5 +736,75 @@ mod tests {
         assert_eq!(cfg.webhook_port, 9443);
         assert_eq!(cfg.cert_dir, "/tmp/flowlink-certs");
         assert!(cfg.exempt_namespaces.contains(&"kube-system".to_string()));
+    }
+
+    #[test]
+    fn test_drift_event_serialization() {
+        let event = DriftEvent {
+            resource: "ConfigMap/test-config".into(),
+            field: "data.shield.mode".into(),
+            expected: "enforce".into(),
+            actual: "monitor".into(),
+            detected_at: "2024-01-01T00:00:00Z".into(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("enforce"));
+        assert!(json.contains("monitor"));
+        let parsed: DriftEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.resource, "ConfigMap/test-config");
+        assert_eq!(parsed.field, "data.shield.mode");
+    }
+
+    #[test]
+    fn test_drift_event_equality() {
+        let a = DriftEvent {
+            resource: "Deployment/relay".into(),
+            field: "image".into(),
+            expected: "v2.0".into(),
+            actual: "v1.0".into(),
+            detected_at: "2024-01-01T00:00:00Z".into(),
+        };
+        let b = DriftEvent {
+            resource: "Deployment/relay".into(),
+            field: "image".into(),
+            expected: "v2.0".into(),
+            actual: "v1.0".into(),
+            detected_at: "2024-01-01T00:00:00Z".into(),
+        };
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_reconcile_action_equality() {
+        assert_eq!(ReconcileAction::Done, ReconcileAction::Done);
+        assert_eq!(
+            ReconcileAction::Requeue(Duration::from_secs(30)),
+            ReconcileAction::Requeue(Duration::from_secs(30)),
+        );
+        assert_ne!(
+            ReconcileAction::Done,
+            ReconcileAction::Requeue(Duration::from_secs(30)),
+        );
+    }
+
+    #[test]
+    fn test_watch_event_variants() {
+        let added = WatchEvent::Added("policy-a".into(), "default".into());
+        let modified = WatchEvent::Modified("policy-b".into(), "kube-system".into());
+        let deleted = WatchEvent::Deleted("policy-c".into(), "prod".into());
+        let error = WatchEvent::Error("connection refused".into());
+
+        match added {
+            WatchEvent::Added(name, ns) => {
+                assert_eq!(name, "policy-a");
+                assert_eq!(ns, "default");
+            }
+            _ => panic!("Expected Added variant"),
+        }
+        match error {
+            WatchEvent::Error(msg) => assert!(msg.contains("connection refused")),
+            _ => panic!("Expected Error variant"),
+        }
+        let _ = (modified, deleted);
     }
 }

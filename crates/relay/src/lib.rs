@@ -130,7 +130,8 @@ impl Relay {
             llm_proxy,
             shield_alerts: Arc::new(server::ShieldAlertManager::new()),
             audit_store: Arc::new(audit::AuditStore::new(
-                std::path::Path::new(&shellexpand::tilde("~/.flowlink/audit.jsonl").to_string())
+                std::path::Path::new(&shellexpand::tilde("~/.flowlink/audit.jsonl").to_string()),
+                db.clone(),
             )),
             metrics,
             billing: if self.config.billing.enabled {
@@ -144,6 +145,7 @@ impl Relay {
             config_reloader,
             e2ee: Arc::new(crate::e2ee::E2eeSessionManager::new()),
             usage_tracker: Arc::new(crate::billing_middleware::UsageTracker::new()),
+            rate_limiter: Arc::new(ratelimit::RateLimiter::new(100, 10)),
         };
 
         let app = server::build_router(state);

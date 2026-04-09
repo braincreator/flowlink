@@ -55,10 +55,23 @@ pub struct PairingCode {
     pub expires_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TrustScore {
+    /// Trust score from 0 to 100.
+    pub score: u8,
+    pub successful_pairs: u32,
+    pub failed_attempts: u32,
+    /// Unix timestamp of the last risky action, if any.
+    pub last_risky_action: Option<i64>,
+    /// Human-readable risk flags (e.g. "suspicious_ip", "brute_force").
+    pub flags: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct DeviceManager {
     devices: Arc<DashMap<String, Device>>,
     pairing_codes: Arc<DashMap<String, PairingCode>>,
+    trust_scores: Arc<DashMap<String, TrustScore>>,
     push_config: PushConfig,
 }
 
@@ -67,6 +80,7 @@ impl DeviceManager {
         Self {
             devices: Arc::new(DashMap::new()),
             pairing_codes: Arc::new(DashMap::new()),
+            trust_scores: Arc::new(DashMap::new()),
             push_config,
         }
     }
@@ -89,6 +103,8 @@ impl DeviceManager {
     }
 
     /// Confirm pairing — validates code, registers device.
+    /// After confirming, the trust score is evaluated. If the score is below 20,
+    /// the device is set to `active = false` (denied) instead of being activated.
     pub fn confirm_pairing(
         &self,
         code: &str,
@@ -105,7 +121,7 @@ impl DeviceManager {
             return Err("pairing code expired".to_string());
         }
 
-        let device = Device {
+        let mut device = Device {
             id: pc.device_id,
             user_id: pc.user_id,
             name: name.to_string(),
@@ -116,8 +132,25 @@ impl DeviceManager {
             active: true,
         };
 
+        // Record the successful pairing and evaluate trust
+        self.record_successful_pair(&device.id);
+        let trust = self.evaluate_trust(&device);
+
+        // Auto-deny devices with trust score below 20
+        if trust.score < 20 {
+            device.active = false;
+            info!(
+                "Device {} ({}) auto-denied: trust score {} < 20",
+                device.name, device.id, trust.score
+            );
+        } else {
+            info!(
+                "Device {} ({}) paired with trust score {}",
+                device.name, device.id, trust.score
+            );
+        }
+
         self.devices.insert(device.id.clone(), device.clone());
-        info!("Device paired: {} ({})", device.name, device.id);
         Ok(device)
     }
 
@@ -132,8 +165,120 @@ impl DeviceManager {
         if self.devices.remove(device_id).is_none() {
             return Err("device not found".to_string());
         }
+        self.trust_scores.remove(device_id);
         info!("Device removed: {device_id}");
         Ok(())
+    }
+
+    // ═══════════════════════════════════════════════
+    // Trust scoring
+    // ═══════════════════════════════════════════════
+
+    /// Evaluate the trust score for a device based on pairing history, time, and risk flags.
+    ///
+    /// Scoring:
+    /// - Base score for new device: 30
+    /// - +10 per successful_pair (max +50 from this)
+    /// - -15 per failed_attempt
+    /// - +1 per day since paired (max +20)
+    /// - -20 per suspicious flag
+    /// - Clamped to 0–100
+    pub fn evaluate_trust(&self, device: &Device) -> TrustScore {
+        let existing = self.trust_scores.get(&device.id).map(|e| e.value().clone());
+
+        let successful_pairs = existing.as_ref().map_or(0, |t| t.successful_pairs);
+        let failed_attempts = existing.as_ref().map_or(0, |t| t.failed_attempts);
+        let flags = existing.as_ref().map_or(Vec::new(), |t| t.flags.clone());
+        let last_risky_action = existing.as_ref().and_then(|t| t.last_risky_action);
+
+        let mut score: i32 = 30; // base score for new device
+
+        // +10 per successful_pair, max +50
+        score += (successful_pairs as i32 * 10).min(50);
+
+        // -15 per failed_attempt
+        score -= failed_attempts as i32 * 15;
+
+        // +1 per day since paired, max +20
+        let days_since_paired = (chrono::Utc::now().timestamp() - device.paired_at) / 86400;
+        score += (days_since_paired.max(0) as i32).min(20);
+
+        // -20 per suspicious flag
+        score -= flags.len() as i32 * 20;
+
+        // Clamp to 0-100
+        let score = score.clamp(0, 100) as u8;
+
+        TrustScore {
+            score,
+            successful_pairs,
+            failed_attempts,
+            last_risky_action,
+            flags,
+        }
+    }
+
+    /// Record a failed pairing attempt for a device, updating its trust score.
+    pub fn record_failed_attempt(&self, device_id: &str) {
+        let device_id_owned = device_id.to_string();
+        {
+            let mut entry = self.trust_scores.entry(device_id_owned.clone()).or_default();
+            let ts = entry.value_mut();
+            ts.failed_attempts += 1;
+            ts.last_risky_action = Some(chrono::Utc::now().timestamp());
+        }
+        // Recalculate score outside the write lock to avoid deadlock
+        if let Some(device) = self.devices.get(&device_id_owned) {
+            let fresh = self.evaluate_trust(&device);
+            if let Some(mut ts) = self.trust_scores.get_mut(&device_id_owned) {
+                ts.score = fresh.score;
+            }
+        }
+        let score = self.trust_scores.get(&device_id_owned).map(|e| e.score).unwrap_or(0);
+        info!(
+            "Failed attempt recorded for device {device_id}: score={score}"
+        );
+    }
+
+    /// Record a successful pairing for a device, updating its trust score.
+    pub fn record_successful_pair(&self, device_id: &str) {
+        let device_id_owned = device_id.to_string();
+        {
+            let mut entry = self.trust_scores.entry(device_id_owned.clone()).or_default();
+            let ts = entry.value_mut();
+            ts.successful_pairs += 1;
+        }
+        // Recalculate score outside the write lock to avoid deadlock
+        if let Some(device) = self.devices.get(&device_id_owned) {
+            let fresh = self.evaluate_trust(&device);
+            if let Some(mut ts) = self.trust_scores.get_mut(&device_id_owned) {
+                ts.score = fresh.score;
+            }
+        }
+        let score = self.trust_scores.get(&device_id_owned).map(|e| e.score).unwrap_or(0);
+        let pairs = self.trust_scores.get(&device_id_owned).map(|e| e.successful_pairs).unwrap_or(0);
+        info!(
+            "Successful pair recorded for device {device_id}: score={score}, successful_pairs={pairs}"
+        );
+    }
+
+    /// Get the current trust score for a device, if one exists.
+    pub fn get_trust_score(&self, device_id: &str) -> Option<TrustScore> {
+        self.trust_scores.get(device_id).map(|e| e.value().clone())
+    }
+
+    /// Check whether a device is considered trusted (score >= 50).
+    /// Devices without a trust score are evaluated fresh and considered untrusted
+    /// unless the evaluated score meets the threshold.
+    pub fn is_device_trusted(&self, device_id: &str) -> bool {
+        if let Some(device) = self.devices.get(device_id) {
+            let score = self.trust_scores.get(device_id)
+                .map(|e| e.value().clone())
+                .unwrap_or_else(|| self.evaluate_trust(&device));
+            score.score >= 50
+        } else {
+            false
+        }
     }
 
     /// Send a push notification to a device.
@@ -364,6 +509,19 @@ pub async fn remove_device(
     }
 }
 
+pub async fn get_device_trust(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.device_manager.get_trust_score(&id) {
+        Some(trust) => Json(trust).into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "device trust score not found" })),
+        ).into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,5 +635,238 @@ mod tests {
         }
         let err = dm.send_push(&device.id, "notification").await.unwrap_err();
         assert_eq!(err, "device not active");
+    }
+
+    // ═══════════════════════════════════════════════
+    // Trust scoring tests
+    // ═══════════════════════════════════════════════
+
+    /// Helper: create a DeviceManager with a paired device and return (dm, device).
+    fn setup_paired_device() -> (DeviceManager, Device) {
+        let dm = DeviceManager::new(PushConfig::default());
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+        (dm, device)
+    }
+
+    #[test]
+    fn test_evaluate_trust_base_score() {
+        let (dm, device) = setup_paired_device();
+        let trust = dm.evaluate_trust(&device);
+        // Base score = 30 + 10 (1 successful pair) = 40
+        assert_eq!(trust.score, 40);
+        assert_eq!(trust.successful_pairs, 1);
+        assert_eq!(trust.failed_attempts, 0);
+        assert!(trust.flags.is_empty());
+    }
+
+    #[test]
+    fn test_evaluate_trust_successful_pairs_caps_at_50() {
+        let dm = DeviceManager::new(PushConfig::default());
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+
+        // Manually set successful_pairs to 10 (would give +100, but cap at +50)
+        if let Some(mut ts) = dm.trust_scores.get_mut(&device.id) {
+            ts.successful_pairs = 10;
+        }
+
+        let trust = dm.evaluate_trust(&device);
+        // 30 (base) + 50 (capped successful) = 80
+        assert_eq!(trust.score, 80);
+    }
+
+    #[test]
+    fn test_record_failed_attempt_decreases_score() {
+        let (dm, device) = setup_paired_device();
+
+        // Record 2 failed attempts
+        dm.record_failed_attempt(&device.id);
+        dm.record_failed_attempt(&device.id);
+
+        let trust = dm.get_trust_score(&device.id).unwrap();
+        // After 1 successful pair (+10) and 2 failures (-30):
+        // 30 + 10 - 30 = 10
+        assert_eq!(trust.score, 10);
+        assert_eq!(trust.failed_attempts, 2);
+        assert!(trust.last_risky_action.is_some());
+    }
+
+    #[test]
+    fn test_record_successful_pair_increases_score() {
+        let (dm, device) = setup_paired_device();
+        let initial_score = dm.get_trust_score(&device.id).unwrap().score;
+
+        // Record additional successful pair
+        dm.record_successful_pair(&device.id);
+        let trust = dm.get_trust_score(&device.id).unwrap();
+        assert!(trust.score > initial_score);
+        assert_eq!(trust.successful_pairs, 2);
+    }
+
+    #[test]
+    fn test_evaluate_trust_flags_penalty() {
+        let (dm, device) = setup_paired_device();
+
+        // Add a suspicious flag
+        if let Some(mut ts) = dm.trust_scores.get_mut(&device.id) {
+            ts.flags.push("suspicious_ip".to_string());
+        }
+
+        let trust = dm.evaluate_trust(&device);
+        // 30 (base) + 10 (1 successful pair) - 20 (1 flag) = 20
+        assert_eq!(trust.score, 20);
+    }
+
+    #[test]
+    fn test_evaluate_trust_multiple_flags_deny() {
+        let (dm, device) = setup_paired_device();
+
+        // Add two suspicious flags
+        if let Some(mut ts) = dm.trust_scores.get_mut(&device.id) {
+            ts.flags.push("suspicious_ip".to_string());
+            ts.flags.push("brute_force".to_string());
+        }
+
+        let trust = dm.evaluate_trust(&device);
+        // 30 + 10 - 40 = 0
+        assert_eq!(trust.score, 0);
+    }
+
+    #[test]
+    fn test_evaluate_trust_clamps_to_0() {
+        let dm = DeviceManager::new(PushConfig::default());
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+
+        // Set high failed_attempts and flags to push below 0
+        if let Some(mut ts) = dm.trust_scores.get_mut(&device.id) {
+            ts.failed_attempts = 10;
+            ts.flags.push("suspicious_ip".to_string());
+            ts.flags.push("brute_force".to_string());
+        }
+
+        let trust = dm.evaluate_trust(&device);
+        assert_eq!(trust.score, 0, "score should be clamped to 0, got {}", trust.score);
+    }
+
+    #[test]
+    fn test_evaluate_trust_clamps_to_100() {
+        let dm = DeviceManager::new(PushConfig::default());
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+
+        // Set high successful_pairs and old paired_at
+        if let Some(mut ts) = dm.trust_scores.get_mut(&device.id) {
+            ts.successful_pairs = 100;
+        }
+        {
+            let mut dev = dm.devices.get_mut(&device.id).unwrap();
+            // Set paired_at to 60 days ago for +20 time bonus
+            dev.paired_at = chrono::Utc::now().timestamp() - (60 * 86400);
+        }
+
+        // Fetch the updated device from the map
+        let device = dm.devices.get(&device.id).unwrap().value().clone();
+        let trust = dm.evaluate_trust(&device);
+        assert_eq!(trust.score, 100, "score should be clamped to 100, got {}", trust.score);
+    }
+
+    #[test]
+    fn test_auto_deny_low_trust() {
+        let dm = DeviceManager::new(PushConfig::default());
+
+        // Pre-seed a trust score with 3 failed attempts before pairing
+        // We'll pair, then manually manipulate trust to simulate low-trust on next pair
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+
+        // Manually push score below 20 via failed attempts and flags
+        if let Some(mut ts) = dm.trust_scores.get_mut(&device.id) {
+            ts.failed_attempts = 3;
+            ts.flags.push("suspicious_ip".to_string());
+        }
+
+        // Now pair a second device and seed it with a pre-existing low trust entry
+        let code2 = dm.generate_pairing_code("user-1");
+        let pc = dm.pairing_codes.remove(&code2).unwrap().1;
+        let device2 = Device {
+            id: pc.device_id,
+            user_id: pc.user_id,
+            name: "Evil Phone".to_string(),
+            device_type: "ios".to_string(),
+            push_token: None,
+            paired_at: chrono::Utc::now().timestamp(),
+            last_seen: chrono::Utc::now().timestamp(),
+            active: true,
+        };
+
+        // Pre-seed the trust score for device2 with low values
+        dm.trust_scores.insert(device2.id.clone(), TrustScore {
+            score: 0,
+            successful_pairs: 0,
+            failed_attempts: 5,
+            last_risky_action: Some(chrono::Utc::now().timestamp()),
+            flags: vec!["suspicious_ip".to_string(), "brute_force".to_string()],
+        });
+
+        dm.devices.insert(device2.id.clone(), device2.clone());
+        dm.record_successful_pair(&device2.id);
+        let trust = dm.evaluate_trust(&device2);
+
+        // Score should be < 20 due to heavy penalties
+        assert!(
+            trust.score < 20,
+            "expected score < 20 for high-risk device, got {}",
+            trust.score
+        );
+    }
+
+    #[test]
+    fn test_is_device_trusted_true() {
+        let (dm, device) = setup_paired_device();
+        // Freshly paired device with 1 successful pair: score = 40
+        // Not >= 50, so not trusted initially. Let's add another successful pair.
+        dm.record_successful_pair(&device.id);
+        // Now: 30 + 20 (2 successful) = 50 => trusted
+        assert!(dm.is_device_trusted(&device.id));
+    }
+
+    #[test]
+    fn test_is_device_trusted_false() {
+        let (dm, device) = setup_paired_device();
+        // Score = 40, which is < 50
+        assert!(!dm.is_device_trusted(&device.id));
+    }
+
+    #[test]
+    fn test_is_device_trusted_nonexistent() {
+        let dm = DeviceManager::new(PushConfig::default());
+        assert!(!dm.is_device_trusted("nonexistent"));
+    }
+
+    #[test]
+    fn test_get_trust_score_none_for_unknown() {
+        let dm = DeviceManager::new(PushConfig::default());
+        assert!(dm.get_trust_score("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_evaluate_trust_time_bonus() {
+        let dm = DeviceManager::new(PushConfig::default());
+        let code = dm.generate_pairing_code("user-1");
+        let device = dm.confirm_pairing(&code, "Phone", "ios", None).unwrap();
+
+        // Set paired_at to 25 days ago — should give max +20 time bonus
+        {
+            let mut dev = dm.devices.get_mut(&device.id).unwrap();
+            dev.paired_at = chrono::Utc::now().timestamp() - (25 * 86400);
+        }
+
+        // Fetch the updated device from the map
+        let device = dm.devices.get(&device.id).unwrap().value().clone();
+        let trust = dm.evaluate_trust(&device);
+        // 30 (base) + 10 (1 successful pair) + 20 (time, capped) = 60
+        assert_eq!(trust.score, 60);
     }
 }
