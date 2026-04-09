@@ -15,6 +15,7 @@ use std::sync::Arc;
 // StreamExt comes from futures_util (re-exported via axum)
 
 use crate::approval::{ApprovalDecision, ApprovalQueue};
+use crate::config_reload::ConfigReloader;
 use crate::devices::DeviceManager;
 use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub billing: Option<Arc<flowlink_billing::BillingEngine>>,
     pub db: Option<Arc<flowlink_db::DbPool>>,
+    pub config_reloader: Option<Arc<ConfigReloader>>,
 }
 
 // ═══════════════════════════════════════════════
@@ -430,6 +432,10 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
                             flowlink_core::MessageType::SysInfo => {
                                 eventbus.publish("sysinfo", &text_str);
                             }
+                            flowlink_core::MessageType::ConfigAck => {
+                                eventbus.publish("config_ack", &text_str);
+                                log::info!("Agent {aid}: config acknowledged");
+                            }
                             flowlink_core::MessageType::Disconnect => break,
                             other => {
                                 log::info!("Agent {aid}: {:?}", other);
@@ -691,6 +697,79 @@ async fn canary_alert_handler(State(state): State<AppState>, Json(alert): Json<s
 }
 
 // ═══════════════════════════════════════════════
+// Config Reload Endpoints
+// ═══════════════════════════════════════════════
+
+/// Reload relay config from disk and broadcast to all agents.
+async fn config_reload(State(state): State<AppState>) -> impl IntoResponse {
+    let reloader = match &state.config_reloader {
+        Some(r) => r,
+        None => return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(SimpleResponse { ok: false, message: Some("Config hot-reload not enabled (no config path)".into()) }),
+        ).into_response(),
+    };
+
+    match reloader.reload().await {
+        Ok(result) => Json(result).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(SimpleResponse { ok: false, message: Some(format!("Reload failed: {e}")) }),
+        ).into_response(),
+    }
+}
+
+/// Push current config to a specific agent.
+async fn config_push_agent(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> impl IntoResponse {
+    let reloader = match &state.config_reloader {
+        Some(r) => r,
+        None => return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(SimpleResponse { ok: false, message: Some("Config hot-reload not enabled".into()) }),
+        ).into_response(),
+    };
+
+    let result = reloader.push_to_agent(&agent_id).await.unwrap_or_else(|e| crate::config_reload::PushResult {
+        ok: false,
+        message: e.to_string(),
+        pushed_to: vec![],
+        failed: vec![(agent_id.clone(), e.to_string())],
+        timestamp: chrono::Utc::now().timestamp(),
+    });
+    Json(result).into_response()
+}
+
+/// Get current relay config (read-only).
+async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
+    let reloader = match &state.config_reloader {
+        Some(r) => r,
+        None => return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(SimpleResponse { ok: false, message: Some("Config hot-reload not enabled".into()) }),
+        ).into_response(),
+    };
+
+    let config = reloader.get_config().await;
+    // Mask sensitive fields
+    let masked = serde_json::json!({
+        "client_name": config.client_name,
+        "http_addr": config.http_addr.to_string(),
+        "wss_addr": config.wss_addr.to_string(),
+        "llm_enabled": config.llm.enabled,
+        "llm_backends": config.llm.backends.len(),
+        "billing_enabled": config.billing.enabled,
+        "registry_data_path": config.registry.data_path,
+        "registry_max_agents": config.registry.max_agents,
+        "database_url": config.database_url.as_ref().map(|_| "***"),
+        "reload_count": reloader.reload_count(),
+    });
+    Json(masked).into_response()
+}
+
+// ═══════════════════════════════════════════════
 // Router Builder
 // ═══════════════════════════════════════════════
 
@@ -726,6 +805,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/audit/export", get(audit_export))
         .route("/api/audit/event", post(audit_ingest))
         .route("/api/shield/canary", post(canary_alert_handler))
+        // Config hot-reload routes
+        .route("/api/config/reload", post(config_reload))
+        .route("/api/config", get(config_get))
+        .route("/api/config/push/{agent_id}", post(config_push_agent))
         // Billing routes
         .route("/api/billing", axum::routing::get(crate::billing_api::get_billing_info))
         .route("/api/billing/usage", axum::routing::get(crate::billing_api::get_usage))
@@ -772,6 +855,7 @@ mod tests {
             metrics: Arc::new(Metrics::new()),
             billing: None,
             db: None,
+            config_reloader: None,
         }
     }
 
@@ -1011,5 +1095,70 @@ mod tests {
         let app = build_router(test_state());
         let resp = app.oneshot(HttpRequest::builder().uri("/nonexistent").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_config_reload_not_enabled() {
+        let app = build_router(test_state());
+        let resp = app.oneshot(HttpRequest::builder().method("POST").uri("/api/config/reload")
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_config_get_not_enabled() {
+        let app = build_router(test_state());
+        let resp = app.oneshot(HttpRequest::builder().uri("/api/config")
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_config_push_agent_not_enabled() {
+        let app = build_router(test_state());
+        let resp = app.oneshot(HttpRequest::builder().method("POST").uri("/api/config/push/a1")
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_config_reload_with_reloader() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        std::fs::write(&config_path, r#"{"api_token":"tok","http_addr":"0.0.0.0:9090"}"#).unwrap();
+
+        let config = flowlink_core::config::RelayConfig::load(config_path.to_str().unwrap()).unwrap();
+        let shared_config = Arc::new(tokio::sync::RwLock::new(config));
+        let handler = Arc::new(RelayHandler::new(
+            Arc::new(AgentPool::new()),
+            Arc::new(AuthManager::new()),
+            Arc::new(EventBus::new()),
+            Arc::new(ApprovalQueue::new()),
+        ));
+        let metrics = Arc::new(Metrics::new());
+        let reloader = Arc::new(crate::config_reload::ConfigReloader::new(
+            config_path, shared_config, handler, metrics,
+        ));
+
+        let mut state = test_state();
+        state.config_reloader = Some(reloader.clone());
+
+        // GET config
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().uri("/api/config")
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["http_addr"], "0.0.0.0:9090");
+        assert_eq!(json["reload_count"], 0);
+
+        // POST reload
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().method("POST").uri("/api/config/reload")
+            .body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["reload_count"], 1);
     }
 }

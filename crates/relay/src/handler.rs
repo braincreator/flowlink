@@ -48,6 +48,11 @@ impl RelayHandler {
         self.ws_senders.remove(agent_id);
     }
 
+    /// List all currently connected agent IDs.
+    pub fn connected_agents(&self) -> Vec<String> {
+        self.ws_senders.iter().map(|r| r.key().clone()).collect()
+    }
+
     /// Send a message to a specific connected agent.
     pub async fn send_to_agent(&self, agent_id: &str, msg: Message) -> anyhow::Result<()> {
         let json = serde_json::to_string(&msg)?;

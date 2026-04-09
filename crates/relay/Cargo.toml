@@ -36,6 +36,7 @@ tower = { version = "0.5", features = ["util"] }
 thiserror = "2"
 prometheus = "0.13"
 regex = "1"
+notify = "7"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
