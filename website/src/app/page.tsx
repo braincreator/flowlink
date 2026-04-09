@@ -28,7 +28,7 @@ export default function Home() {
       <section className="hero container">
         <div className="hero-badge">
           <span className="dot"></span>
-          AI-native · E2EE · BSL 1.1
+          Open Source Agent · E2EE
         </div>
 
         <h1>
@@ -375,7 +375,8 @@ export default function Home() {
         <p>
           <a href="/playground">Демо</a>{" · "}
           <a href="/pricing">Тарифы</a>{" · "}
-          BSL 1.1 License · FlowMasters © 2026
+          <a href="https://github.com/braincreator/flowlink" target="_blank" rel="noopener noreferrer">GitHub</a>{" · "}
+          Agent: MIT · FlowMasters © 2026
         </p>
       </footer>
     </div>

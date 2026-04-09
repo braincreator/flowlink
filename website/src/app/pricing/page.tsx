@@ -89,7 +89,7 @@ export default function PricingPage() {
 
       <footer className="container">
         <p>
-          <a href="/">← На главную</a> · BSL 1.1 License · FlowMasters © 2026
+          <a href="/">← На главную</a> · Agent: MIT · FlowMasters © 2026
         </p>
       </footer>
     </div>

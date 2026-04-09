@@ -1,107 +1,37 @@
-Business Source License 1.1
+MIT License
 
-Licensor: FlowMasters (Aleksandr Yudin)
+Copyright (c) 2026 FlowMasters (Aleksandr Yudin)
 
-Change Date: 2029-04-05
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-Product: FlowLink — AI Agent Relay & Management Platform
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-1. Definitions
-
-   "License" means the terms and conditions for use, reproduction, and Distribution
-   as defined by this document.
-
-   "Licensor" means the copyright owner of the Work.
-
-   "You" (and "Your") means any individual or entity exercising permissions granted
-   by this License.
-
-   "Derivative Works" means works that are based upon the Work or upon other works
-   that are based on the Work.
-
-   "Distribution" means conveying copies of the Work to any party.
-
-   "Work" means the FlowLink software, including all source code, documentation,
-   and related files.
-
-   "Change Date" means the date after which this License converts to a perpetual
-   open source license, as specified below.
-
-   "Competing Product" means any product or service that offers the same or
-   substantially similar functionality as the Work and is made available to third
-   parties as a cloud service or managed service.
-
-2. Grant of License
-
-   Subject to the terms and conditions of this License, the Licensor hereby grants
-   You a non-exclusive, worldwide, non-sublicensable, royalty-free license to:
-
-   a) Use the Work for internal business purposes;
-   b) Modify the Work to create Derivative Works;
-   c) Distribute the Work or Derivative Works, provided that You distribute under
-      the terms of this License.
-
-   This License does NOT grant You the right to:
-
-   d) Use the Work to provide a Competing Product;
-   e) Remove, obscure, or alter any license notices in the Work;
-   f) Grant any rights to any third party that are not granted under this License.
-
-3. Conditions
-
-   a) If You Distribute the Work or Derivative Works, You must:
-      - Include a copy of this License;
-      - Retain all copyright, patent, trademark, and attribution notices;
-      - Provide prominent notice of any modifications You have made.
-
-   b) You must not use the names, logos, or trademarks of the Licensor to endorse
-      or promote Your Derivative Works without prior written permission.
-
-4. Term
-
-   This License is effective as of the date You first use the Work and continues
-   until terminated.
-
-   a) Automatic Termination: This License terminates automatically if You breach
-      any of its terms.
-   b) Reinstatement: If You cure a breach within 30 days of becoming aware of it,
-      Your license is reinstated retroactively.
-
-5. Change Date — Conversion to Open Source
-
-   On or after the Change Date (April 5, 2029), this License automatically converts
-   to the GNU General Public License v3.0 (GPL-3.0). From that point forward, the
-   Work is available under GPL-3.0 terms in perpetuity.
-
-6. Patent Grant
-
-   Subject to the terms and conditions of this License, each Contributor hereby
-   grants You a non-exclusive, worldwide, royalty-free patent license to make,
-   have made, use, sell, offer for sale, import, and otherwise transfer the Work,
-   where such license applies only to those patent claims that are necessarily
-   infringed by their Contribution(s) alone or by combination of their
-   Contribution(s) with the Work to which such Contribution(s) was submitted.
-
-7. Disclaimer of Warranty
-
-   THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-   INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-   PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-   COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-   IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-   CONNECTION WITH THE WORK OR THE USE OR OTHER DEALINGS IN THE WORK.
-
-8. Limitation of Liability
-
-   IN NO EVENT SHALL THE LICENSOR OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
-   INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-   BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
-   OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS WORK,
-   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ---
 
-For more information on the Business Source License, visit:
-https://mariadb.com/bsl11/
+FlowLink Licensing Notice
+
+The FlowLink project uses a split license model:
+
+  Agent (crates/agent, crates/core) — MIT License
+    Open source. You can audit, modify, and self-host the agent.
+
+  Relay & Server (crates/relay, crates/billing, crates/db, crates/gitops, crates/k8s)
+    Proprietary. Source available for review. Redistribution requires a commercial license.
+
+  Dashboard (website/) — Proprietary.
+
+For commercial licensing inquiries: hello@flowlink.app
