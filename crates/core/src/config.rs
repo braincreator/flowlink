@@ -210,8 +210,44 @@ pub struct RelayConfig {
     #[serde(default)]
     pub registry: RegistryConfig,
     #[serde(default)]
-    pub database_url: Option<String>,
+    pub database: DatabaseConfig,
 }
+
+/// Database connection configuration.
+/// Supports primary/replica topology for read scalability.
+/// - `primary`: required for writes and migrations (direct connection)
+/// - `replicas`: optional, one or more read replicas (load-balanced round-robin)
+/// - On dev: single local PostgreSQL
+/// - On VPS: single container PostgreSQL
+/// - In prod: managed service (Neon, Supabase Cloud, RDS) with read replicas
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseConfig {
+    /// Primary connection string (write + read fallback + migrations)
+    #[serde(default)]
+    pub primary: Option<String>,
+    /// Read replica connection strings (optional, for read scaling)
+    #[serde(default)]
+    pub replicas: Vec<String>,
+    /// Max connections in the pool
+    #[serde(default = "default_db_pool_size")]
+    pub pool_size: u32,
+    /// Run migrations on startup
+    #[serde(default = "default_true")]
+    pub migrate_on_start: bool,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            primary: None,
+            replicas: vec![],
+            pool_size: default_db_pool_size(),
+            migrate_on_start: true,
+        }
+    }
+}
+
+fn default_db_pool_size() -> u32 { 10 }
 
 fn default_relay_name() -> String { "FlowLink Relay".into() }
 fn default_wss_addr() -> SocketAddr { "0.0.0.0:8443".parse().unwrap() }
@@ -413,13 +449,14 @@ mod tests {
             llm: LlmConfig::default(),
             billing: BillingConfig::default(),
             registry: RegistryConfig::default(),
-            database_url: None,
+            database: DatabaseConfig::default(),
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: RelayConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.api_token, "tok");
         assert_eq!(back.wss_addr.to_string(), "0.0.0.0:9443");
-        assert!(back.database_url.is_none());
+        assert!(back.database.primary.is_none());
+        assert!(back.database.replicas.is_empty());
     }
 
     #[test]

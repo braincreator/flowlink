@@ -77,13 +77,23 @@ impl Relay {
             None
         };
 
-        // Database (optional — Supabase PostgreSQL)
-        let db = if let Some(url) = &self.config.database_url {
-            match flowlink_db::DbPool::open(url).await {
+        // Database (optional — PostgreSQL)
+        let db_config = &self.config.database;
+        let db = if let Some(url) = &db_config.primary {
+            match flowlink_db::DbPool::open(url, &db_config.replicas).await {
                 Ok(pool) => {
-                    pool.run_migrations().await?;
-                    log::info!("Database connected (PostgreSQL/Supabase)");
-                    Some(Arc::new(pool))
+                    if db_config.migrate_on_start {
+                        if let Err(e) = pool.run_migrations().await {
+                            log::warn!("Database migrations failed: {e}. Continuing without DB.");
+                            None
+                        } else {
+                            log::info!("Database connected & migrations applied");
+                            Some(Arc::new(pool))
+                        }
+                    } else {
+                        log::info!("Database connected (migrations skipped)");
+                        Some(Arc::new(pool))
+                    }
                 }
                 Err(e) => {
                     log::warn!("Database connection failed: {e}. Running without DB.");

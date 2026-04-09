@@ -813,7 +813,8 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
         "billing_enabled": config.billing.enabled,
         "registry_data_path": config.registry.data_path,
         "registry_max_agents": config.registry.max_agents,
-        "database_url": config.database_url.as_ref().map(|_| "***"),
+        "database_primary": config.database.primary.as_ref().map(|_| "***"),
+        "database_replicas": config.database.replicas.len(),
         "reload_count": reloader.reload_count(),
     });
     Json(masked).into_response()

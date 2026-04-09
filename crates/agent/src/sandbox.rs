@@ -354,7 +354,11 @@ fn create_dev_node(chroot_root: &Path, name: &str, dev_type: u32, major_minor: (
     let mode = (dev_type | 0o666) as libc::mode_t;
 
     unsafe {
-        let ret = libc::mknod(path_cstr.as_ptr(), mode, libc::makedev(major_minor.0, major_minor.1));
+        #[cfg(target_os = "macos")]
+        let dev = libc::makedev(major_minor.0 as i32, major_minor.1 as i32);
+        #[cfg(not(target_os = "macos"))]
+        let dev = libc::makedev(major_minor.0 as libc::c_uint, major_minor.1 as libc::c_uint);
+        let ret = libc::mknod(path_cstr.as_ptr(), mode, dev);
         if ret != 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
             if errno != libc::EEXIST as i32 {
