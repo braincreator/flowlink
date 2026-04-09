@@ -13,6 +13,7 @@ export default function Home() {
           <a href="#features">Возможности</a>
           <a href="#pricing">Цены</a>
           <a href="#faq">FAQ</a>
+          <a href="/playground">Демо 🛡️</a>
           <a
             href="https://github.com/braincreator/flowlink"
             target="_blank"
@@ -40,8 +41,8 @@ export default function Home() {
         </p>
 
         <div className="hero-buttons">
-          <a href="#install" className="btn btn-primary">
-            Попробуй в терминале →
+          <a href="/playground" className="btn btn-primary">
+            Попробуй демо 🛡️
           </a>
           <a href="#how" className="btn btn-secondary">
             Как это работает
