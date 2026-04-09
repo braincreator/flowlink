@@ -47,8 +47,8 @@ mod tests {
         (tmp, repo)
     }
 
-    fn make_signature() -> Signature {
-        Signature::now("Test User", "test@test.com").unwrap()
+    fn make_signature() -> git2::Signature<'static> {
+        git2::Signature::new("Test User", "test@test.com", &git2::Time::new(0, 0)).unwrap()
     }
 
     fn create_initial_commit(repo: &Repository) -> Oid {
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn test_create_commit_initial() {
         let (_tmp, repo) = init_test_repo();
-        let mgr = CommitManager::new(repo.try_clone().unwrap());
+        let mgr = CommitManager::new(Repository::open(_tmp.path()).unwrap());
         let sig = make_signature();
 
         // Create an empty tree
@@ -85,11 +85,11 @@ mod tests {
 
     #[test]
     fn test_create_commit_with_parent() {
-        let (_tmp, repo) = init_test_repo();
+        let (tmp, repo) = init_test_repo();
         let initial_oid = create_initial_commit(&repo);
-        let initial_commit = repo.find_commit(initial_oid).unwrap();
 
-        let mgr = CommitManager::new(repo.try_clone().unwrap());
+        // Use the same repo handle to avoid cross-handle commit issues
+        let mgr = CommitManager::new(repo);
         let sig = make_signature();
 
         let tree_id = {
@@ -97,6 +97,8 @@ mod tests {
             index.write_tree().unwrap()
         };
 
+        // Look up the parent commit from the same repo handle
+        let initial_commit = mgr.repo.find_commit(initial_oid).unwrap();
         let oid = mgr.create_commit("second commit", &sig, tree_id, &[&initial_commit]).unwrap();
         let commit = mgr.repo.find_commit(oid).unwrap();
         assert_eq!(commit.message().unwrap(), "second commit");
@@ -107,7 +109,7 @@ mod tests {
     #[test]
     fn test_create_commit_with_metadata_in_message() {
         let (_tmp, repo) = init_test_repo();
-        let mgr = CommitManager::new(repo.try_clone().unwrap());
+        let mgr = CommitManager::new(Repository::open(_tmp.path()).unwrap());
         let sig = make_signature();
 
         let tree_id = {
@@ -129,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_create_commit_multiple_parents() {
-        let (_tmp, repo) = init_test_repo();
+        let (tmp, repo) = init_test_repo();
         let first_oid = create_initial_commit(&repo);
 
         // Create a second branch
@@ -145,10 +147,13 @@ mod tests {
             &[],
         ).unwrap();
 
-        let first_commit = repo.find_commit(first_oid).unwrap();
-        let second_commit = repo.find_commit(second_oid).unwrap();
+        // Use the same repo handle to avoid cross-handle commit issues
+        let mgr = CommitManager::new(repo);
 
-        let mgr = CommitManager::new(repo.try_clone().unwrap());
+        // Look up parent commits from the same repo handle
+        let first_commit = mgr.repo.find_commit(first_oid).unwrap();
+        let second_commit = mgr.repo.find_commit(second_oid).unwrap();
+
         let merge_oid = mgr.create_commit(
             "merge commit",
             &sig,
@@ -156,14 +161,14 @@ mod tests {
             &[&first_commit, &second_commit],
         ).unwrap();
 
-        let merge_commit = repo.find_commit(merge_oid).unwrap();
+        let merge_commit = mgr.repo.find_commit(merge_oid).unwrap();
         assert_eq!(merge_commit.parent_count(), 2);
     }
 
     #[test]
     fn test_commit_author_info_preserved() {
         let (_tmp, repo) = init_test_repo();
-        let mgr = CommitManager::new(repo.try_clone().unwrap());
+        let mgr = CommitManager::new(Repository::open(_tmp.path()).unwrap());
         let sig = make_signature();
 
         let tree_id = {

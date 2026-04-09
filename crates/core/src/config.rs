@@ -494,6 +494,7 @@ mod tests {
                 id: "pro".into(), name: "Pro".into(), price: 999,
                 period: "monthly".into(), features: Default::default(),
             }],
+            tochka_jwt_token: None,
         };
         let json = serde_json::to_string(&billing).unwrap();
         let back: BillingConfig = serde_json::from_str(&json).unwrap();

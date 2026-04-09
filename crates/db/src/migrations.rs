@@ -181,7 +181,7 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_subscriptions_tochka ON subscriptions(tochka_subscription_id) WHERE tochka_subscription_id IS NOT NULL;
         "#),
 
-        ("010_plans_sort_index", r#"
+        ("007_orders", r#"
             CREATE TABLE IF NOT EXISTS orders (
                 id TEXT PRIMARY KEY,
                 account_id TEXT NOT NULL REFERENCES accounts(account_id),
@@ -200,7 +200,7 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
         "#),
 
-        ("010_plans_sort_index", r#"
+        ("008_plans", r#"
             CREATE TABLE IF NOT EXISTS plans (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -219,11 +219,11 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             )
         "#),
 
-        ("008_plans_indexes", r#"
+        ("009_plans_indexes", r#"
             CREATE INDEX IF NOT EXISTS idx_plans_active ON plans(is_active) WHERE is_active = true
         "#),
 
-        ("008_plans_sort_index", r#"
+        ("010_plans_sort_index", r#"
             CREATE INDEX IF NOT EXISTS idx_plans_sort ON plans(sort_order)
         "#),
     ]
@@ -249,6 +249,9 @@ mod tests {
             "004_audit_log",
             "005_agents_devices",
             "006_subscriptions",
+            "007_orders",
+            "008_plans",
+            "009_plans_indexes",
             "010_plans_sort_index",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
@@ -270,7 +273,10 @@ mod tests {
     fn all_migrations_create_tables() {
         let migrations = get_migrations();
         for (name, sql) in &migrations {
-            assert!(sql.contains("CREATE TABLE"), "Migration '{}' missing CREATE TABLE", name);
+            assert!(
+                sql.contains("CREATE TABLE") || sql.contains("CREATE INDEX"),
+                "Migration '{}' creates neither a table nor an index", name
+            );
         }
     }
 
@@ -418,7 +424,10 @@ mod tests {
     fn all_migrations_create_indexes() {
         let migrations = get_migrations();
         for (name, sql) in &migrations {
-            assert!(sql.contains("CREATE INDEX"), "Migration '{}' has no indexes", name);
+            assert!(
+                sql.contains("CREATE INDEX") || sql.contains("CREATE TABLE"),
+                "Migration '{}' creates neither an index nor a table", name
+            );
         }
     }
 

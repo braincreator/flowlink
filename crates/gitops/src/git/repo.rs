@@ -34,8 +34,12 @@ mod tests {
 
         // Verify it's a valid git repo
         let _repo = Repository::open(&repo_path).unwrap();
-        // Verify the internal repo is the same path
-        assert!(mgr.repo.path().starts_with(repo_path.parent().unwrap()));
+        // Verify the internal repo workdir points to the right location
+        // Use canonicalize to handle macOS /var -> /private/var symlinks
+        assert_eq!(
+            mgr.repo.workdir().unwrap().canonicalize().unwrap(),
+            repo_path.canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -57,7 +61,8 @@ mod tests {
 
         // Open it via RepositoryManager
         let mgr = RepositoryManager::new(&repo_path).unwrap();
-        assert!(!mgr.repo.is_empty().unwrap_or(true));
+        // A freshly initialized repo has no commits, so it's empty
+        assert!(mgr.repo.is_empty().unwrap());
     }
 
     #[test]
@@ -86,7 +91,11 @@ mod tests {
 
         // Verify we can reopen it
         let mgr2 = RepositoryManager::new(&nested).unwrap();
-        assert!(mgr2.repo.path().starts_with(nested.parent().unwrap()));
+        // Use canonicalize to handle macOS /var -> /private/var symlinks
+        assert_eq!(
+            mgr2.repo.workdir().unwrap().canonicalize().unwrap(),
+            nested.canonicalize().unwrap()
+        );
     }
 
     #[test]
