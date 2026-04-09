@@ -304,7 +304,7 @@ export default function Playground() {
                         padding: "2px 8px", borderRadius: 4, fontSize: 11,
                         background: (CATEGORY_COLORS[m.category] || "#888") + "22",
                         color: CATEGORY_COLORS[m.category] || "#888",
-                        border: `1px solid ${(CATEGORY_COLORS[m.category] || "#888") + "44`,
+                        border: `1px solid ${(CATEGORY_COLORS[m.category] || "#888") + "44"}`,
                       }}
                     >
                       {m.desc}
@@ -322,7 +322,7 @@ export default function Playground() {
           background: "#12121a", border: "1px solid #1e1e2e",
           fontSize: 12, color: "#666",
         }}>
-          <strong style={{ color: "#888">ℹ️ Это демо.</strong>{" "}
+          <strong style={{ color: "#888" }}>ℹ️ Это демо.</strong>{" "}
           Production FlowLink Shield включает: kernel-level eBPF перехват, AST-анализ обфускации,
           auto-бэкап перед угрозой, approval workflow, audit log.{" "}
           <a href="/" style={{ color: "#2563eb" }}>← На главную</a>
