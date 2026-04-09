@@ -50,6 +50,7 @@ pub struct AppState {
     pub e2ee: Arc<crate::e2ee::E2eeSessionManager>,
     pub usage_tracker: Arc<crate::billing_middleware::UsageTracker>,
     pub rate_limiter: Arc<RateLimiter>,
+    pub control_plane: crate::control_plane::ControlPlaneState,
 }
 
 // ═══════════════════════════════════════════════
@@ -876,6 +877,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/billing/orders", axum::routing::get(crate::billing_api::list_orders).post(crate::billing_api::create_order))
         .route("/api/billing/webhook/tochka", axum::routing::post(crate::billing_api::tochka_webhook))
         .route("/metrics", axum::routing::get(crate::metrics::metrics_handler))
+        // Control Plane API
+        .route("/api/v1/signup", axum::routing::post(crate::control_plane::signup))
+        .route("/api/v1/heartbeat", axum::routing::post(crate::control_plane::heartbeat))
+        .route("/api/v1/agents", axum::routing::get(crate::control_plane::list_agents))
+        .route("/api/v1/agents/{id}", axum::routing::get(crate::control_plane::get_agent))
         .with_state(state)
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))
@@ -920,6 +926,7 @@ mod tests {
             e2ee: Arc::new(crate::e2ee::E2eeSessionManager::new()),
             usage_tracker: Arc::new(crate::billing_middleware::UsageTracker::new()),
             rate_limiter: Arc::new(RateLimiter::new(100, 10)),
+            control_plane: crate::control_plane::ControlPlaneState::new(),
         }
     }
 

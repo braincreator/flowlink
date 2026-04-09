@@ -20,6 +20,7 @@ pub mod billing_middleware;
 
 pub mod config_reload;
 pub mod e2ee;
+pub mod control_plane;
 
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -161,6 +162,7 @@ impl Relay {
             e2ee: Arc::new(crate::e2ee::E2eeSessionManager::new()),
             usage_tracker: Arc::new(crate::billing_middleware::UsageTracker::new()),
             rate_limiter: Arc::new(ratelimit::RateLimiter::new(100, 10)),
+            control_plane: crate::control_plane::ControlPlaneState::new(),
         };
 
         let app = server::build_router(state);
