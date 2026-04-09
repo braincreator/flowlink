@@ -373,6 +373,8 @@ export default function Home() {
       {/* ═══ FOOTER ═══ */}
       <footer className="container">
         <p>
+          <a href="/playground">Демо</a>{" · "}
+          <a href="/pricing">Тарифы</a>{" · "}
           BSL 1.1 License · FlowMasters © 2026
         </p>
       </footer>
