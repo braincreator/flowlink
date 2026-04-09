@@ -314,12 +314,12 @@ pub struct RegistryConfig {
     #[serde(default = "default_registry_path")]
     pub data_path: String,
     #[serde(default)]
-    pub max_agents: u32,
+    pub max_hosts: u32,
 }
 
 impl Default for RegistryConfig {
     fn default() -> Self {
-        Self { data_path: default_registry_path(), max_agents: 100 }
+        Self { data_path: default_registry_path(), max_hosts: 100 }
     }
 }
 
@@ -491,21 +491,21 @@ mod tests {
             enabled: true,
             currency: "USD".into(),
             plans: vec![PlanConfig {
-                id: "starter".into(), name: "Individual".into(), price: 1999,
+                id: "starter".into(), name: "Starter".into(), price: 2990,
                 period: "monthly".into(), features: Default::default(),
             }],
             tochka_jwt_token: None,
         };
         let json = serde_json::to_string(&billing).unwrap();
         let back: BillingConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.plans[0].price, 1999);
+        assert_eq!(back.plans[0].price, 2990);
     }
 
     #[test]
     fn test_registry_defaults() {
         let reg = RegistryConfig::default();
         assert_eq!(reg.data_path, "~/.flowlink/relay");
-        assert_eq!(reg.max_agents, 100);
+        assert_eq!(reg.max_hosts, 100);
     }
 
     #[test]
@@ -577,7 +577,7 @@ mod tests {
         assert!(!cfg.billing.enabled);
         assert_eq!(cfg.billing.currency, "RUB");
         assert_eq!(cfg.registry.data_path, "~/.flowlink/relay");
-        assert_eq!(cfg.registry.max_agents, 100);
+        assert_eq!(cfg.registry.max_hosts, 100);
     }
 
     #[test]
@@ -651,12 +651,12 @@ mod tests {
     #[test]
     fn test_plan_config_features() {
         let plan = PlanConfig {
-            id: "starter".into(), name: "Individual".into(), price: 1999, period: "monthly".into(),
-            features: [("max_agents".into(), serde_json::json!(10))].into_iter().collect(),
+            id: "starter".into(), name: "Starter".into(), price: 2990, period: "monthly".into(),
+            features: [("max_hosts".into(), serde_json::json!(10))].into_iter().collect(),
         };
         let json = serde_json::to_string(&plan).unwrap();
         let back: PlanConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.features["max_agents"], 10);
+        assert_eq!(back.features["max_hosts"], 10);
     }
 
     #[test]

@@ -493,7 +493,7 @@ mod tests {
     fn test_billing_info_serialization() {
         let info = BillingInfo {
             plan_id: "trial".to_string(),
-            plan_name: "Free".to_string(),
+            plan_name: "Trial".to_string(),
             active: true,
             balance_rub: "0.00 RUB".to_string(),
             expires_at: None,

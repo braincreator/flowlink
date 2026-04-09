@@ -21,15 +21,15 @@ pub struct RegisteredClient {
     pub email: String,
     pub created_at: DateTime<Utc>,
     pub active: bool,
-    #[serde(default = "default_max_agents")]
-    pub max_agents: u32,
+    #[serde(default = "default_max_hosts")]
+    pub max_hosts: u32,
     #[serde(default)]
     pub exec_count: i64,
     #[serde(default)]
     pub last_activity: Option<DateTime<Utc>>,
 }
 
-fn default_max_agents() -> u32 { 10 }
+fn default_max_hosts() -> u32 { 10 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisteredAgent {
@@ -87,7 +87,7 @@ impl Registry {
             email,
             created_at: Utc::now(),
             active: true,
-            max_agents: default_max_agents(),
+            max_hosts: default_max_hosts(),
             exec_count: 0,
             last_activity: None,
         };
@@ -133,8 +133,8 @@ impl Registry {
         let agent_count = self.agents.iter()
             .filter(|r| r.value().client_id == client_id && r.value().active)
             .count() as u32;
-        if agent_count >= client.max_agents {
-            anyhow::bail!("Agent limit reached ({}/{})", agent_count, client.max_agents);
+        if agent_count >= client.max_hosts {
+            anyhow::bail!("Agent limit reached ({}/{})", agent_count, client.max_hosts);
         }
 
         let agent = RegisteredAgent {

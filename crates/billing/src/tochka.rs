@@ -834,7 +834,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_sbp_payment() {
         let c = client();
-        let p = c.create_sbp_payment("INV-0001", 199900, "Individual подписка").await.unwrap();
+        let p = c.create_sbp_payment("INV-0001", 299000, "Starter подписка").await.unwrap();
         assert_eq!(p.payment_id, "pay_123");
         assert!(p.payment_url.is_some());
     }
@@ -842,7 +842,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_card_payment() {
         let c = client();
-        let p = c.create_card_payment("INV-0002", 199900, "Individual подписка").await.unwrap();
+        let p = c.create_card_payment("INV-0002", 299000, "Starter подписка").await.unwrap();
         assert_eq!(p.payment_id, "card_789");
         assert!(p.payment_url.is_some());
     }

@@ -813,7 +813,7 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
         "llm_backends": config.llm.backends.len(),
         "billing_enabled": config.billing.enabled,
         "registry_data_path": config.registry.data_path,
-        "registry_max_agents": config.registry.max_agents,
+        "registry_max_hosts": config.registry.max_hosts,
         "database_primary": config.database.primary.as_ref().map(|_| "***"),
         "database_replicas": config.database.replicas.len(),
         "reload_count": reloader.reload_count(),
