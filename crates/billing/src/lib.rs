@@ -7,9 +7,9 @@
 //! - Subscriptions API (рекуррентные автосписания)
 //!
 //! # Plans
-//! - Free: 1 host, pattern blocking
-//! - Individual: 3 hosts, AST analysis
-//! - Business: 25 hosts, eBPF
+//! - Trial: 1 host, pattern blocking (7 days)
+//! - Starter: 3 hosts, AST analysis
+//! - Pro: 20 hosts, eBPF
 
 pub mod plans;
 pub mod usage;
