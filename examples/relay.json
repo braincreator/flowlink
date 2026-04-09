@@ -1,32 +1,69 @@
 {
-  "client_name": "My FlowLink Relay",
-  "client_email": "admin@example.com",
-  "api_token": "relay-secret-token-here",
+  "client_name": "FlowLink Relay",
+  "api_token": "change-me-to-a-secret-token",
+
   "wss_addr": "0.0.0.0:8443",
   "http_addr": "0.0.0.0:8080",
+
   "tls": {
     "insecure": false,
-    "cert_pinning": true,
-    "ca_cert": "/etc/flowlink/ca.pem"
+    "cert_pinning": false
   },
+
   "llm": {
     "enabled": true,
+    "timeout_sec": 30,
     "backends": [
       {
         "name": "openai",
         "provider": "openai",
-        "model": "gpt-4",
-        "api_key": "sk-...",
-        "base_url": "https://api.openai.com/v1"
+        "model": "gpt-4o",
+        "api_key": "sk-..."
+      },
+      {
+        "name": "anthropic",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-20250514",
+        "api_key": "sk-ant-..."
+      },
+      {
+        "name": "ollama-local",
+        "provider": "ollama",
+        "model": "llama3",
+        "base_url": "http://localhost:11434"
       }
-    ],
-    "timeout_sec": 30
+    ]
   },
+
   "billing": {
-    "enabled": false,
+    "enabled": true,
     "currency": "RUB",
-    "plans": []
+    "plans": [
+      {
+        "id": "free",
+        "name": "Free",
+        "price": 0,
+        "period": "monthly",
+        "features": {
+          "max_agents": 1,
+          "max_requests_per_day": 100
+        }
+      },
+      {
+        "id": "pro",
+        "name": "Pro",
+        "price": 199000,
+        "period": "monthly",
+        "features": {
+          "max_agents": 10,
+          "max_requests_per_day": 10000
+        }
+      }
+    ]
   },
+
+  "database_url": "postgres://flowlink:password@localhost:5432/flowlink",
+
   "registry": {
     "data_path": "~/.flowlink/relay",
     "max_agents": 100

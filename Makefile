@@ -53,10 +53,10 @@ install:
 
 # Run services (dev mode)
 run-relay:
-	cargo run --bin flowlink -- relay
+	cargo run --bin flowlink -- relay --config examples/relay.json
 
 run-agent:
-	cargo run --bin flowlink -- agent
+	cargo run --bin flowlink -- agent --config examples/agent.json
 
 run-shield:
 	cargo run --bin flowlink -- shield

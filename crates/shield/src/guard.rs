@@ -1,5 +1,5 @@
 // FlowLink Shield — Core guard pipeline
-// Intercept → Snapshot → Notify → Approve/Kill
+// Intercept → Snapshot → GitOps L3 → Notify → Approve/Kill
 
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc, oneshot};
@@ -15,6 +15,8 @@ use crate::snapshot::{SnapshotBackend, create_snapshot};
 use crate::audit::{AuditLog, AuditEntry};
 use crate::notifier::Notifier;
 use crate::relay_client::RelayClient;
+#[cfg(feature = "gitops")]
+use crate::gitops_integration::GitOpsLayer;
 
 /// Guard configuration
 #[derive(Debug, Clone)]
@@ -112,6 +114,8 @@ pub struct ShieldGuard {
     approval_rx: Arc<RwLock<Option<mpsc::Receiver<ApprovalResponse>>>>,
     stats: Arc<RwLock<ShieldStats>>,
     relay_client: Option<RelayClient>,
+    #[cfg(feature = "gitops")]
+    gitops_layer: Option<GitOpsLayer>,
 }
 
 impl ShieldGuard {
@@ -154,7 +158,21 @@ impl ShieldGuard {
             approval_rx: Arc::new(RwLock::new(Some(rx))),
             stats: Arc::new(RwLock::new(ShieldStats::default())),
             relay_client,
+            #[cfg(feature = "gitops")]
+            gitops_layer: None,
         }
+    }
+
+    /// Attach a GitOps L3 layer for pipeline evaluation
+    #[cfg(feature = "gitops")]
+    pub fn with_gitops_layer(mut self, layer: GitOpsLayer) -> Self {
+        if layer.is_enabled() {
+            info!("GitOps L3 layer attached — pipeline evaluation enabled");
+        } else {
+            warn!("GitOps L3 layer attached but not enabled (no orchestrator)");
+        }
+        self.gitops_layer = Some(layer);
+        self
     }
 
     /// Get allowed UIDs for kernel-level bypass
@@ -295,6 +313,58 @@ impl ShieldGuard {
                     snap.as_deref(),
                 ).await;
             });
+        }
+
+        // Step 4c: GitOps L3 pipeline evaluation (if enabled)
+        #[cfg(feature = "gitops")]
+        if let Some(ref gitops) = self.gitops_layer {
+            let gitops_verdict = gitops.evaluate(
+                &cmd.binary,
+                &cmd.args,
+                Some(&threat),
+            ).await;
+
+            info!(
+                "🔍 GitOps L3 verdict for PID {}: allowed={}, tier={}, reason={}",
+                pid, gitops_verdict.allowed,
+                gitops_verdict.tier.as_deref().unwrap_or("N/A"),
+                gitops_verdict.reason
+            );
+
+            // GitOps says block → immediate kill with GitOps reason
+            if !gitops_verdict.allowed {
+                info!("🚫 GitOps L3 blocked PID {} — {}", pid, gitops_verdict.reason);
+                let _ = sigkill(pid);
+                self.audit_log(&proc_info, "blocked", &threat.name, snapshot.clone(), "gitops_blocked").await;
+                {
+                    let mut stats = self.stats.write().await;
+                    stats.blocked += 1;
+                }
+                // Notify relay about GitOps block
+                if let Some(ref relay) = self.relay_client {
+                    let reason = gitops_verdict.reason.clone();
+                    let relay = relay.clone();
+                    let audit_id = gitops_verdict.audit_id.clone();
+                    tokio::spawn(async move {
+                        let _ = relay.report_interception(
+                            &audit_id.unwrap_or_default(), pid, 0,
+                            "gitops", &reason, "gitops_blocked",
+                            "blocked", None,
+                        ).await;
+                    });
+                }
+                return InterceptResult::Blocked {
+                    pid,
+                    reason: format!("GitOps L3: {}", gitops_verdict.reason),
+                    forensic,
+                };
+            }
+
+            // GitOps allowed but wants backup → log it
+            if gitops_verdict.backup_id.is_some() {
+                info!("📦 GitOps L3 backup created for PID {}: backup_id={}",
+                    pid, gitops_verdict.backup_id.as_deref().unwrap_or(""));
+            }
         }
 
         // Step 5: Auto-kill critical threats

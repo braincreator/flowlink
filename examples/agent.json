@@ -1,0 +1,45 @@
+{
+  "agent_id": "my-agent-001",
+  "token": "change-me-to-match-relay-token",
+  "relay_url": "ws://localhost:8443",
+  "heartbeat_sec": 30,
+  "label": "Development Agent",
+
+  "sandbox": {
+    "allowed_dirs": ["/home/user/workspace", "/tmp"],
+    "blocked_patterns": ["/etc/shadow", "/etc/passwd", "/root/*"],
+    "max_file_size": 104857600,
+    "max_exec_timeout": 300,
+    "allow_sudo": false
+  },
+
+  "approval": {
+    "mode": "soft_ask",
+    "soft_ask_notify": true,
+    "hard_ask_timeout_sec": 3600,
+    "max_retries": 3
+  },
+
+  "backup": {
+    "enabled": true,
+    "max_snapshots": 50,
+    "max_total_size": 5368709120,
+    "retention_days": 7,
+    "backup_dir": "~/.flowlink/backups",
+    "compression": "gzip"
+  },
+
+  "shield": {
+    "enabled": true,
+    "enable_ast": true,
+    "enable_interpreter": true,
+    "rules_path": "~/.flowlink/shield-rules.json",
+    "auto_deny_timeout": 60,
+    "audit_log": "/var/log/flowlink-shield.jsonl"
+  },
+
+  "tls": {
+    "insecure": false,
+    "cert_pinning": false
+  }
+}
