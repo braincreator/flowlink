@@ -7,9 +7,9 @@
 //! - Subscriptions API (рекуррентные автосписания)
 //!
 //! # Plans
-//! - Free: 100 req/day, 1 agent, 100MB storage
-//! - Pro: 10K req/day, 10 agents, 10GB storage
-//! - Enterprise: unlimited, custom limits
+//! - Free: 1 host, pattern blocking
+//! - Individual: 3 hosts, AST analysis
+//! - Business: 25 hosts, eBPF
 
 pub mod plans;
 pub mod usage;
@@ -63,6 +63,12 @@ pub struct AccountBilling {
     pub balance_kopecks: i64,
     /// Current billing cycle start
     pub cycle_start: DateTime<Utc>,
+    /// Whether account is in trial mode
+    pub is_trial: bool,
+    /// Trial start date
+    pub trial_start: Option<DateTime<Utc>>,
+    /// Trial end date
+    pub trial_end: Option<DateTime<Utc>>,
 }
 
 impl AccountBilling {
@@ -78,6 +84,9 @@ impl AccountBilling {
             payment_method: None,
             balance_kopecks: 0,
             cycle_start: now,
+            is_trial: false,
+            trial_start: None,
+            trial_end: None,
         }
     }
 }
@@ -248,30 +257,32 @@ impl BillingEngine {
         // Get current usage
         let current = self.usage.get_snapshot(&billing.account_id);
 
-        // Check limits
-        let limit = match operation {
-            usage::UsageOperation::ApiRequest => plan.limits.api_requests_per_day,
-            usage::UsageOperation::Tokens(_n) => plan.limits.tokens_per_day,
-            usage::UsageOperation::AgentConnect => plan.limits.max_agents,
-            usage::UsageOperation::StorageBytes(_n) => plan.limits.storage_mb * 1_048_576,
-        };
-
-        let current_value = match operation {
-            usage::UsageOperation::ApiRequest => current.api_requests_today + 1,
-            usage::UsageOperation::Tokens(n) => current.tokens_today + n,
-            usage::UsageOperation::AgentConnect => current.active_agents + 1,
-            usage::UsageOperation::StorageBytes(n) => current.storage_bytes + n,
-        };
-
-        if limit > 0 && current_value > limit {
-            return BillingCheck {
-                allowed: false,
-                reason: Some(format!(
-                    "Plan limit exceeded: {}/{}",
-                    current_value, limit
-                )),
-                usage_after: None,
-            };
+        // Check limits — only AgentConnect has a limit (max_hosts)
+        // ApiRequest and Tokens are not limited per PRD
+        match operation {
+            usage::UsageOperation::AgentConnect => {
+                let limit = plan.limits.max_hosts;
+                let current_value = current.active_agents + 1;
+                if limit > 0 && current_value > limit {
+                    return BillingCheck {
+                        allowed: false,
+                        reason: Some(format!(
+                            "Host limit exceeded: {}/{}",
+                            current_value, limit
+                        )),
+                        usage_after: None,
+                    };
+                }
+            }
+            usage::UsageOperation::ApiRequest => {
+                // No limit on API requests per PRD — always allow
+            }
+            usage::UsageOperation::Tokens(_n) => {
+                // No limit on tokens per PRD — always allow
+            }
+            usage::UsageOperation::StorageBytes(_n) => {
+                // No storage limit per PRD — always allow
+            }
         }
 
         // Track usage
@@ -307,11 +318,21 @@ impl BillingEngine {
         billing.plan_id = new_plan_id.to_string();
         billing.activated_at = now;
         billing.cycle_start = now;
+
+        // Use billing_period from plan config to determine expiry
+        let days = if plan.billing_period == "year" { 365 } else { 30 };
         billing.expires_at = if plan.tier == 0 {
             None // Free plan never expires
         } else {
-            Some(now + chrono::Duration::days(30))
+            Some(now + chrono::Duration::days(days))
         };
+
+        // Set trial if plan has trial_days
+        if let Some(trial_days) = plan.trial_days {
+            billing.is_trial = true;
+            billing.trial_start = Some(now);
+            billing.trial_end = Some(now + chrono::Duration::days(trial_days as i64));
+        }
 
         self.update_account(billing);
 
@@ -339,11 +360,21 @@ impl BillingEngine {
         billing.plan_id = new_plan_id.to_string();
         billing.activated_at = now;
         billing.cycle_start = now;
+
+        // Use billing_period from plan config to determine expiry
+        let days = if plan.billing_period == "year" { 365 } else { 30 };
         billing.expires_at = if plan.tier == 0 {
             None
         } else {
-            Some(now + chrono::Duration::days(30))
+            Some(now + chrono::Duration::days(days))
         };
+
+        // Set trial if plan has trial_days
+        if let Some(trial_days) = plan.trial_days {
+            billing.is_trial = true;
+            billing.trial_start = Some(now);
+            billing.trial_end = Some(now + chrono::Duration::days(trial_days as i64));
+        }
 
         self.update_account(billing);
 
@@ -414,6 +445,9 @@ mod tests {
         assert_eq!(billing.plan_id, "free");
         assert!(billing.active);
         assert!(billing.payment_method.is_none());
+        assert!(!billing.is_trial);
+        assert!(billing.trial_start.is_none());
+        assert!(billing.trial_end.is_none());
     }
 
     #[test]
@@ -421,16 +455,11 @@ mod tests {
         let engine = test_engine();
         let billing = AccountBilling::new("acc-1");
 
-        // Free plan: 100 req/day — first 100 should be allowed
-        for i in 0..100 {
+        // Free plan: no API request limit per PRD — all allowed
+        for i in 0..200 {
             let check = engine.check_and_track(&billing, usage::UsageOperation::ApiRequest);
             assert!(check.allowed, "Request {} should be allowed", i);
         }
-
-        // 101st should be denied
-        let check = engine.check_and_track(&billing, usage::UsageOperation::ApiRequest);
-        assert!(!check.allowed);
-        assert!(check.reason.unwrap().contains("limit exceeded"));
     }
 
     #[test]
@@ -438,12 +467,13 @@ mod tests {
         let engine = test_engine();
         let billing = AccountBilling::new("acc-1");
 
-        // Free plan: 1 agent
+        // Free plan: 1 host (max_hosts = 1)
         let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
         assert!(check.allowed);
 
         let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
         assert!(!check.allowed);
+        assert!(check.reason.unwrap().contains("Host limit exceeded"));
     }
 
     #[test]
@@ -451,9 +481,11 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "pro").unwrap();
-        assert_eq!(billing.plan_id, "pro");
+        engine.upgrade_plan(&mut billing, "individual").unwrap();
+        assert_eq!(billing.plan_id, "individual");
         assert!(billing.expires_at.is_some());
+        assert!(billing.is_trial);
+        assert!(billing.trial_end.is_some());
     }
 
     #[test]
@@ -461,10 +493,10 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "pro").unwrap();
+        engine.upgrade_plan(&mut billing, "individual").unwrap();
         let result = engine.upgrade_plan(&mut billing, "free");
         assert!(result.is_err());
-        assert_eq!(billing.plan_id, "pro"); // unchanged
+        assert_eq!(billing.plan_id, "individual"); // unchanged
     }
 
     #[test]
@@ -472,7 +504,7 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "pro").unwrap();
+        engine.upgrade_plan(&mut billing, "individual").unwrap();
         engine.change_plan(&mut billing, "free").unwrap();
         assert_eq!(billing.plan_id, "free");
     }

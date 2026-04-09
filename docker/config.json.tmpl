@@ -1,0 +1,19 @@
+{
+  "agent_id": "${FLOWLINK_AGENT_ID}",
+  "relay_url": "${FLOWLINK_RELAY_URL:-wss://control.flowlink.app/ws}",
+  "token": "${FLOWLINK_TOKEN}",
+  "backup": {
+    "enabled": true,
+    "backup_dir": "/var/lib/flowlink/backups",
+    "max_snapshots": 50,
+    "retention_days": 30,
+    "compression": "gzip"
+  },
+  "sandbox": {
+    "allowed_dirs": ["/"],
+    "blocked_patterns": [],
+    "max_file_size": 104857600,
+    "max_exec_timeout": 300,
+    "allow_sudo": false
+  }
+}

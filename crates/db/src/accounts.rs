@@ -147,7 +147,7 @@ mod tests {
         let now = Utc::now();
         AccountRow {
             account_id: "acc-123".into(),
-            plan_id: "pro".into(),
+            plan_id: "individual".into(),
             active: true,
             balance_kopecks: 10_000,
             payment_method: Some("card".into()),
@@ -163,7 +163,7 @@ mod tests {
     fn account_row_construction() {
         let acc = make_account();
         assert_eq!(acc.account_id, "acc-123");
-        assert_eq!(acc.plan_id, "pro");
+        assert_eq!(acc.plan_id, "individual");
         assert!(acc.active);
         assert_eq!(acc.balance_kopecks, 10_000);
         assert_eq!(acc.payment_method.as_deref(), Some("card"));
@@ -183,7 +183,7 @@ mod tests {
         let acc = make_account();
         let debug_str = format!("{:?}", acc);
         assert!(debug_str.contains("acc-123"));
-        assert!(debug_str.contains("pro"));
+        assert!(debug_str.contains("individual"));
     }
 
     #[test]

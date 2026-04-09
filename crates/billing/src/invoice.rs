@@ -320,19 +320,19 @@ mod tests {
 
     #[test]
     fn test_invoice_for_plan() {
-        let plan = Plan::pro();
+        let plan = Plan::individual();
         let store = make_store();
         let invoice = store.create(Invoice::for_plan("acc-1", &plan));
 
         assert_eq!(invoice.items.len(), 1);
-        assert_eq!(invoice.subtotal_kopecks, 29_990);
-        assert!(invoice.total_kopecks > 29_990); // with tax
+        assert_eq!(invoice.subtotal_kopecks, 199_900);
+        assert!(invoice.total_kopecks > 199_900); // with tax
     }
 
     #[test]
     fn test_mark_paid() {
         let store = make_store();
-        let mut invoice = store.create(Invoice::for_plan("acc-1", &Plan::pro()));
+        let mut invoice = store.create(Invoice::for_plan("acc-1", &Plan::individual()));
         invoice.mark_paid(PaymentMethod::Sbp);
         store.update(invoice.clone());
 
@@ -344,8 +344,8 @@ mod tests {
     #[test]
     fn test_list_for_account() {
         let store = make_store();
-        store.create(Invoice::for_plan("acc-1", &Plan::pro()));
-        store.create(Invoice::for_plan("acc-1", &Plan::pro()));
+        store.create(Invoice::for_plan("acc-1", &Plan::individual()));
+        store.create(Invoice::for_plan("acc-1", &Plan::individual()));
         store.create(Invoice::for_plan("acc-2", &Plan::free()));
 
         assert_eq!(store.list_for_account("acc-1").len(), 2);
@@ -375,14 +375,14 @@ mod tests {
     fn test_total_revenue() {
         let store = make_store();
 
-        let mut inv1 = store.create(Invoice::for_plan("acc-1", &Plan::pro()));
+        let mut inv1 = store.create(Invoice::for_plan("acc-1", &Plan::individual()));
         inv1.mark_paid(PaymentMethod::Card);
         store.update(inv1);
 
-        let _inv2 = store.create(Invoice::for_plan("acc-2", &Plan::pro()));
+        let _inv2 = store.create(Invoice::for_plan("acc-2", &Plan::individual()));
         // inv2 is pending, not counted
 
-        assert_eq!(store.total_revenue(), 35_988); // 29990 + 20% NDS
+        assert_eq!(store.total_revenue(), 239_880); // 199900 + 20% NDS
     }
 
     #[test]

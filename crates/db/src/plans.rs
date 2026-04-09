@@ -10,17 +10,15 @@ use serde::{Deserialize, Serialize};
 /// Plan limits stored as JSONB
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PlanLimits {
-    pub api_requests_per_day: u64,
-    pub tokens_per_day: u64,
-    pub max_agents: u64,
-    pub storage_mb: u64,
-    pub max_payload_kb: u64,
-    pub max_agents_total: u64,
-    pub webhook_rate_per_min: u64,
-    pub mcp_tools_per_agent: u64,
+    pub max_hosts: u64,
+    pub max_users: u64,
+    pub backup_storage_mb: u64,
+    pub max_snapshots: u64,
+    pub retention_days: u16,
     pub audit_retention_days: u64,
-    pub priority_support: bool,
-    pub custom_domain: bool,
+    pub max_file_size_mb: u64,
+    pub exec_timeout_sec: u64,
+    pub shield_level: String,
 }
 
 /// A billing plan stored in the database
@@ -172,28 +170,27 @@ mod tests {
     #[test]
     fn test_plan_limits_default() {
         let limits = PlanLimits::default();
-        assert_eq!(limits.api_requests_per_day, 0);
-        assert!(!limits.priority_support);
+        assert_eq!(limits.max_hosts, 0);
+        assert_eq!(limits.shield_level, "");
     }
 
     #[test]
     fn test_plan_limits_serialization() {
         let limits = PlanLimits {
-            api_requests_per_day: 100,
-            tokens_per_day: 50000,
-            max_agents: 1,
-            storage_mb: 100,
-            max_payload_kb: 512,
-            max_agents_total: 1,
-            webhook_rate_per_min: 10,
-            mcp_tools_per_agent: 5,
-            audit_retention_days: 7,
-            priority_support: false,
-            custom_domain: false,
+            max_hosts: 3,
+            max_users: 2,
+            backup_storage_mb: 5120,
+            max_snapshots: 50,
+            retention_days: 14,
+            audit_retention_days: 30,
+            max_file_size_mb: 100,
+            exec_timeout_sec: 300,
+            shield_level: "advanced".to_string(),
         };
         let json = serde_json::to_value(&limits).unwrap();
         let back: PlanLimits = serde_json::from_value(json).unwrap();
-        assert_eq!(back.api_requests_per_day, 100);
-        assert_eq!(back.max_agents, 1);
+        assert_eq!(back.max_hosts, 3);
+        assert_eq!(back.max_users, 2);
+        assert_eq!(back.shield_level, "advanced");
     }
 }

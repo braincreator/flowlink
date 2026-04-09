@@ -27,22 +27,21 @@ export default function Home() {
       <section className="hero container">
         <div className="hero-badge">
           <span className="dot"></span>
-          AI-native · Open Source · E2EE
+          AI-native · E2EE · BSL 1.1
         </div>
 
         <h1>
-          <span className="accent">Ctrl+Z</span> для{" "}
-          <span className="command">rm -rf</span>
+          <span className="accent">Защита серверов</span> с{" "}
+          <span className="command">AI-агентами</span>
         </h1>
 
         <p className="hero-sub">
-          AI автоматически бекапит только то, что может сломаться — и
-          восстанавливает за секунды. Поставил — забыл.
+          Перехватывает, анализирует и блокирует опасные команды на kernel-level. E2EE, GitOps rollback, K8s operator.
         </p>
 
         <div className="hero-buttons">
           <a href="#install" className="btn btn-primary">
-            Установить бесплатно →
+            Попробуй в терминале →
           </a>
           <a href="#how" className="btn btn-secondary">
             Как это работает
@@ -65,100 +64,41 @@ export default function Home() {
 
       {/* ═══ CHAPTER 1: PROBLEM → SOLUTION ═══ */}
       <section className="problem-section container">
-        <h2>Знакомо?</h2>
+        <h2>AI-агенты — новая угроза</h2>
         <p className="section-sub">
-          Каждый девелопер хотя бы раз ломал сервер командой
+          Каждый день AI-агенты ломают продакшен
         </p>
 
         <div className="problems-grid">
           <div className="problem-card">
             <span className="emoji">💀</span>
-            <h3>rm -rf без бекапа</h3>
+            <h3>AI удалил продакшен базу</h3>
             <p>
-              Удалил конфиг, базу, логи — и паника. Полный бекап делать долго,
-              а надо было вчера.
+              Claude Code выполнил rm -rf /app/data. Без подтверждения, без бэкапа. Сервер мёртв.
             </p>
           </div>
           <div className="problem-card">
             <span className="emoji">⏰</span>
-            <h3>Часы на восстановление</h3>
+            <h3>Обфускация прошла мимо</h3>
             <p>
-              Полный бекап VPS — 10-100 GB. Восстановление = даунтайм. Клиенты
-              видят 500.
+              Команда cmd=$(echo cm0gLXJm | base64 -d); $cmd не распознаётся базовым pattern matching.
             </p>
           </div>
           <div className="problem-card">
             <span className="emoji">🧠</span>
-            <h3>Расписание = забыл</h3>
+            <h3>Кто что сделал?</h3>
             <p>
-              Cron на 3:00 ночи. Сервер упал в 2:59. Бекап не успел. Данные
-              потеряны навсегда.
+              5 AI-агентов на одном сервере. DROP TABLE, chmod 777, docker rm — кто виноват?
             </p>
           </div>
         </div>
 
         <div className="solution-box">
-          <h3>FlowLink = Undo для продакшена</h3>
+          <h3>FlowLink = AI Security Shield</h3>
           <p>
-            Перед каждой опасной командой — мгновенный снапшот только затронутых
-            файлов. Килобайты вместо гигабайт. Восстановление за секунды.
+            Kernel-level перехват опасных команд. AST-анализ обфускации. Auto-бэкап перед каждой угрозой. Восстановление за секунды.
           </p>
         </div>
-      </section>
-
-      {/* ═══ COMPARISON — why not regular backup ═══ */}
-      <section className="container">
-        <h2>FlowLink vs Обычный бекап</h2>
-        <p className="section-sub">
-          Целевое снапшотирование вместо полного образа диска
-        </p>
-
-        <table className="comparison-table">
-          <thead>
-            <tr>
-              <th></th>
-              <th className="fl">FlowLink</th>
-              <th className="old">Обычный бекап</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Размер снапшота</td>
-              <td className="fl">10KB — 50MB</td>
-              <td className="old">10 — 100 GB</td>
-            </tr>
-            <tr>
-              <td>Время создания</td>
-              <td className="fl">Миллисекунды</td>
-              <td className="old">Минуты — часы</td>
-            </tr>
-            <tr>
-              <td>Восстановление</td>
-              <td className="fl">Секунды</td>
-              <td className="old">Часы</td>
-            </tr>
-            <tr>
-              <td>Что хранит</td>
-              <td className="fl">Только уязвимые файлы</td>
-              <td className="old">Всё (включая мусор)</td>
-            </tr>
-            <tr>
-              <td>Когда бекапит</td>
-              <td className="fl">Перед опасной командой</td>
-              <td className="old">По расписанию</td>
-            </tr>
-            <tr>
-              <td>Автоматический</td>
-              <td className="fl">✓ AI определяет</td>
-              <td className="old">~ Ручной cron</td>
-            </tr>
-            <tr>
-              <td>E2EE</td>
-              <td className="fl">✓ X25519 + AES-256</td>
-              <td className="old">~ Зависит от решения</td>
-            </tr>
-          </tbody>
-        </table>
       </section>
 
       {/* ═══ CHAPTER 2: HOW IT WORKS ═══ */}
@@ -169,25 +109,23 @@ export default function Home() {
         <div className="steps">
           <div className="step">
             <div className="step-number">1</div>
-            <h3>Установил агента</h3>
+            <h3>Установи за 30 сек</h3>
             <p>Одна строка — и FlowLink на сервере</p>
-            <span className="step-code">curl -fsSL ... | bash</span>
+            <span className="step-code">curl -fsSL get.flowlink.sh | bash</span>
           </div>
           <div className="step">
             <div className="step-number">2</div>
-            <h3>AI бекапит автоматически</h3>
+            <h3>FlowLink мониторит</h3>
             <p>
-              Policy Engine перехватывает опасные команды (50+ паттернов) и
-              создаёт targeted snapshot
+              Анализирует каждую команду: 50+ паттернов, AST-парсинг, eBPF на kernel-level
             </p>
           </div>
           <div className="step">
             <div className="step-number">3</div>
-            <h3>Восстановил за секунды</h3>
+            <h3>Опасное = заблокировано</h3>
             <p>
-              Что-то сломалось? Одна команда — и всё на месте
+              Risk score 0-10. Авто-бэкап перед угрозой. Approval для ambiguous.
             </p>
-            <span className="step-code">flowlink undo</span>
           </div>
         </div>
       </section>
@@ -196,95 +134,62 @@ export default function Home() {
       <section className="container" id="features">
         <h2>Возможности</h2>
         <p className="section-sub">
-          Всё что нужно для безопасного управления серверами
+          Всё что нужно для защиты серверов с AI-агентами
         </p>
 
         <div className="features-grid">
           <div className="feature-card">
             <span className="icon">⏪</span>
-            <h3>Targeted Undo</h3>
+            <h3>Shield</h3>
             <p>
-              Бекапит НЕ весь VPS, а только файлы под угрозой. Килобайты вместо
-              гигабайт. Восстановление за секунды.
+              Kernel-level перехват. 50+ паттернов, AST-анализ, eBPF syscall interception. Risk score 0-10.
+            </p>
+            <span className="tag tag-amber">Security</span>
+          </div>
+
+          <div className="feature-card">
+            <span className="icon">🔄</span>
+            <h3>Smart Backup</h3>
+            <p>
+              Auto-бэкап перед каждой опасной командой. Diff-based, dedup. Килобайты вместо гигабайт.
             </p>
             <span className="tag tag-green">Core</span>
           </div>
 
           <div className="feature-card">
-            <span className="icon">🤖</span>
-            <h3>AI Policy Engine</h3>
-            <p>
-              Автоматически определяет опасные команды: rm, DROP, systemctl,
-              docker rm, git reset — 50+ паттернов в 4 категориях.
-            </p>
-            <span className="tag tag-blue">AI-native</span>
-          </div>
-
-          <div className="feature-card">
-            <span className="icon">🔇</span>
-            <h3>Set &amp; Forget</h3>
-            <p>
-              После первичной настройки — не надо помнить IP, ключи,
-              расписания. Агент работает автономно на каждом сервере.
-            </p>
-            <span className="tag tag-green">Zero-ops</span>
-          </div>
-
-          <div className="feature-card">
             <span className="icon">🔐</span>
-            <h3>E2EE Encryption</h3>
+            <h3>E2EE</h3>
             <p>
-              X25519 + AES-256-GCM. Приватные ключи только на агенте. Даже
-              relay не может расшифровать данные.
+              X25519 + AES-256-GCM. Приватные ключи только на агенте. Relay не может расшифровать.
             </p>
             <span className="tag tag-amber">Security</span>
           </div>
 
           <div className="feature-card">
-            <span className="icon">📱</span>
-            <h3>Telegram Control</h3>
+            <span className="icon">📊</span>
+            <h3>GitOps</h3>
             <p>
-              Управляй серверами из Telegram: выполнение команд, просмотр
-              статуса, undo — всё из чата.
+              Auto-rollback при config drift. Semantic diff. Circuit breaker для каскадных сбоев.
             </p>
+            <span className="tag tag-blue">Infrastructure</span>
           </div>
 
           <div className="feature-card">
-            <span className="icon">🛡️</span>
-            <h3>Sandbox + Approval</h3>
+            <span className="icon">☸️</span>
+            <h3>K8s Operator</h3>
             <p>
-              Ограничение команд, путей и таймаутов. Опасные команды требуют
-              подтверждения перед выполнением.
+              CRD FlowLinkShieldPolicy, sidecar injection, admission webhook. Нативная интеграция.
             </p>
-            <span className="tag tag-amber">Security</span>
+            <span className="tag tag-blue">Infrastructure</span>
           </div>
 
           <div className="feature-card">
             <span className="icon">📋</span>
-            <h3>Audit Log</h3>
+            <h3>Audit</h3>
             <p>
-              HMAC-верифицированный лог всех команд. Кто, что, когда — полная
-              прозрачность и compliance.
+              HMAC-верифицированный лог. 1-90 дней retention. SIEM export (CEF/LEEF/JSON).
             </p>
             <span className="tag tag-blue">Compliance</span>
-          </div>
-
-          <div className="feature-card">
-            <span className="icon">🚀</span>
-            <h3>One-line Install</h3>
-            <p>
-              curl | bash — и агент на сервере. Ubuntu, Debian, CentOS, Arch.
-              Автообновление включено.
-            </p>
-          </div>
-
-          <div className="feature-card">
-            <span className="icon">🖥️</span>
-            <h3>Web Dashboard</h3>
-            <p>
-              Тёмная тема, мониторинг агентов, просмотр снапшотов, биллинг —
-              всё в одном интерфейсе.
-            </p>
           </div>
         </div>
       </section>
@@ -293,29 +198,29 @@ export default function Home() {
       <section className="container">
         <h2>Кому нужен FlowLink</h2>
         <p className="section-sub">
-          Если у тебя есть хотя бы один сервер — тебе это нужно
+          Если на серверах работают AI-агенты — тебе это нужно
         </p>
 
         <div className="audience-grid">
           <div className="audience-card">
             <span className="emoji">👨‍💻</span>
             <h3>Девелоперы</h3>
-            <p>Фрилансеры с 3-20 VPS. Боты, сайты, API</p>
+            <p>Фрилансеры с Claude Code, Codex, GPT на VPS. 1-3 сервера.</p>
           </div>
           <div className="audience-card">
             <span className="emoji">🔧</span>
             <h3>DevOps-команды</h3>
-            <p>1-5 человек. Стандарт, аудит, approval</p>
+            <p>Стандарт, аудит, approval workflow. Multi-server управление.</p>
           </div>
           <div className="audience-card">
             <span className="emoji">🤖</span>
-            <h3>Владельцы ботов</h3>
-            <p>TG-боты на VPS. Управление из Telegram</p>
+            <h3>AI-боты</h3>
+            <p>Автономные AI-агенты на продакшене. Protection от саморазрушения.</p>
           </div>
           <div className="audience-card">
             <span className="emoji">🏢</span>
-            <h3>SaaS</h3>
-            <p>Self-hosted проекты. Undo для деплоев</p>
+            <h3>SaaS-стартапы</h3>
+            <p>Production safety, compliance, SLA. K8s + GitOps.</p>
           </div>
         </div>
       </section>
@@ -331,22 +236,31 @@ export default function Home() {
             <div className="price">0 ₽</div>
             <div className="price-note">навсегда</div>
             <ul>
-              <li>1 сервер</li>
-              <li>Unlimited undo</li>
-              <li>Policy Engine</li>
-              <li>Community support</li>
+              <li>1 host</li>
+              <li>1 user</li>
+              <li>Pattern blocking</li>
+              <li>Manual backup</li>
+              <li>500MB storage</li>
+              <li>Basic sandbox</li>
+              <li>E2EE</li>
             </ul>
           </div>
 
           <div className="pricing-card">
-            <h3>Starter</h3>
-            <div className="price">990 ₽</div>
+            <h3>Individual</h3>
+            <div className="price">1 990 ₽</div>
             <div className="price-note">/мес</div>
+            <p className="price-yearly">1 592 ₽ /год (-20%)</p>
             <ul>
-              <li>3 сервера</li>
-              <li>Telegram bot</li>
-              <li>Web dashboard</li>
-              <li>Email support</li>
+              <li>3 hosts</li>
+              <li>2 users</li>
+              <li>14 day trial</li>
+              <li>AST analysis</li>
+              <li>Approval workflow</li>
+              <li>Auto backup</li>
+              <li>5GB storage</li>
+              <li>Device trust</li>
+              <li>MCP protocol</li>
             </ul>
           </div>
 
@@ -354,28 +268,24 @@ export default function Home() {
             <h3>Business</h3>
             <div className="price">4 990 ₽</div>
             <div className="price-note">/мес</div>
+            <p className="price-yearly">3 992 ₽ /год (-20%)</p>
             <ul>
-              <li>25 серверов</li>
-              <li>E2EE encryption</li>
-              <li>Audit log + HMAC</li>
-              <li>Priority support</li>
-              <li>Approval workflow</li>
-            </ul>
-          </div>
-
-          <div className="pricing-card">
-            <h3>Enterprise</h3>
-            <div className="price">Custom</div>
-            <div className="price-note">свяжитесь с нами</div>
-            <ul>
-              <li>Unlimited серверов</li>
-              <li>Self-hosted relay</li>
-              <li>SLA 99.9%</li>
-              <li>Dedicated support</li>
-              <li>Custom integrations</li>
+              <li>25 hosts</li>
+              <li>10 users</li>
+              <li>14 day trial</li>
+              <li>eBPF kernel-level</li>
+              <li>K8s operator</li>
+              <li>GitOps</li>
+              <li>SIEM export</li>
+              <li>RBAC</li>
+              <li>20GB storage</li>
             </ul>
           </div>
         </div>
+
+        <p className="pricing-enterprise">
+          Нужен безлимит? <a href="mailto:hello@flowlink.app">Свяжитесь с нами</a>
+        </p>
       </section>
 
       {/* ═══ FAQ ═══ */}
@@ -385,12 +295,9 @@ export default function Home() {
 
         <div className="faq-list">
           <div className="faq-item">
-            <h3>Чем FlowLink отличается от Time Machine / Borg / Restic?</h3>
+            <h3>Зачем FlowLink, если есть Falco / OPA / sudo?</h3>
             <p>
-              FlowLink бекапит НЕ весь диск, а только файлы под угрозой от
-              конкретной команды. Типичный снапшот — 10KB-50MB вместо 10-100GB.
-              Бекап создаётся автоматически перед опасной командой, а не по
-              расписанию. Восстановление — секунды, а не часы.
+              Falco = runtime alerting (не блокирует). OPA = policy как код (сложно). sudo = insufficient для AI. FlowLink = AI-native: понимает контекст, блокирует на kernel-level, auto-бэкапит.
             </p>
           </div>
 
@@ -405,37 +312,32 @@ export default function Home() {
           </div>
 
           <div className="faq-item">
-            <h3>Сколько места занимают снапшоты?</h3>
+            <h3>Сколько ресурсов жрёт агент?</h3>
             <p>
-              Typical snapshot — 10KB-50MB (tar.gz только затронутых файлов).
-              Автоматическая очистка: retention 7 дней, max 50 снапшотов, 5GB
-              общий лимит. Всё настраивается.
+              Rust binary: ~15MB RAM idle, ~50MB при пике. CPU: &lt;1% при мониторинге. E2EE: 0 overhead на relay.
             </p>
           </div>
 
           <div className="faq-item">
             <h3>Что если агент упадёт?</h3>
             <p>
-              Снапшоты хранятся локально на сервере в ~/.flowlink/backups/.
-              Даже если агент недоступен, все бекапы на месте. Восстановление
+              Локальные бэкапы хранятся на сервере в ~/.flowlink/backups/.
+              Даже если агент или relay недоступен, все бэкапы на месте. Восстановление
               вручную: tar -xzf snapshot.tar.gz.
             </p>
           </div>
 
           <div className="faq-item">
-            <h3>Какие команды считаются опасными?</h3>
+            <h3>Какие команды блокируются?</h3>
             <p>
-              50+ паттернов в 4 категориях: system_destroy (rm -rf /, mkfs),
-              data_destroy (DROP TABLE, git reset --hard), service_disrupt
-              (systemctl stop, docker rm), security_bypass (chmod 777).
+              50+ паттернов в 4 категориях + AST-анализ обфускации + eBPF syscall interception. Free: pattern matching. Individual: + AST. Business: + eBPF.
             </p>
           </div>
 
           <div className="faq-item">
-            <h3>Можно ли использовать без relay?</h3>
+            <h3>Как trial работает?</h3>
             <p>
-              Да. Free-план работает локально с одним сервером. Relay нужен для
-              multi-server управления, Telegram-бота и web dashboard.
+              14 дней бесплатно на Individual и Business. Без карты. После trial — автоматический переход на Free или оплата.
             </p>
           </div>
         </div>
@@ -455,12 +357,10 @@ export default function Home() {
           </div>
           <div className="terminal-body">
             <code>
-              curl -fsSL
-              https://raw.githubusercontent.com/braincreator/flowlink/main/scripts/install.sh
-              | bash
+              curl -fsSL https://get.flowlink.sh | bash
             </code>
             <CopyButton
-              text="curl -fsSL https://raw.githubusercontent.com/braincreator/flowlink/main/scripts/install.sh | bash"
+              text="curl -fsSL https://get.flowlink.sh | bash"
             />
           </div>
         </div>
@@ -472,14 +372,7 @@ export default function Home() {
       {/* ═══ FOOTER ═══ */}
       <footer className="container">
         <p>
-          <a
-            href="https://github.com/braincreator/flowlink"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            GitHub
-          </a>{" "}
-          · MIT License · FlowMasters © 2026
+          BSL 1.1 License · FlowMasters © 2026
         </p>
       </footer>
     </div>

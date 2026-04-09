@@ -3,7 +3,7 @@
 //! Two payment modes:
 //! 1. **Subscriptions API** — рекуррентные автосписания (основная подписка)
 //!    - SBP/карта привязывается один раз
-//!    - Автосписание по расписанию (месяц, квартал, год)
+//!    - Автосписание по расписанию (месяц, год)
 //! 2. **Acquiring API** — разовые платежи (доп.услуги, top-up)
 //!    - SBP QR / hosted checkout для карт
 //!
@@ -24,8 +24,6 @@ use super::payment::{PaymentStatus, SbpConfig};
 pub enum BillingPeriod {
     /// Monthly
     Month,
-    /// Quarterly (3 months)
-    Quarter,
     /// Yearly (12 months)
     Year,
     /// Custom days
@@ -37,7 +35,6 @@ impl BillingPeriod {
     pub fn days(&self) -> u16 {
         match self {
             BillingPeriod::Month => 30,
-            BillingPeriod::Quarter => 90,
             BillingPeriod::Year => 365,
             BillingPeriod::Days(d) => *d,
         }
@@ -47,7 +44,6 @@ impl BillingPeriod {
     pub fn display_name(&self) -> &str {
         match self {
             BillingPeriod::Month => "Месяц",
-            BillingPeriod::Quarter => "Квартал",
             BillingPeriod::Year => "Год",
             BillingPeriod::Days(_) => "Пользовательский",
         }
@@ -57,7 +53,6 @@ impl BillingPeriod {
     pub fn as_str(&self) -> &str {
         match self {
             BillingPeriod::Month => "month",
-            BillingPeriod::Quarter => "quarter",
             BillingPeriod::Year => "year",
             BillingPeriod::Days(_) => "custom",
         }
@@ -67,7 +62,6 @@ impl BillingPeriod {
     pub fn from_str_opt(s: &str) -> Option<Self> {
         match s {
             "month" | "monthly" => Some(BillingPeriod::Month),
-            "quarter" | "quarterly" => Some(BillingPeriod::Quarter),
             "year" | "yearly" | "annual" => Some(BillingPeriod::Year),
             _ => None,
         }
@@ -82,8 +76,7 @@ impl BillingPeriod {
     pub fn price_multiplier(&self) -> f64 {
         match self {
             BillingPeriod::Month => 1.0,
-            BillingPeriod::Quarter => 2.7,       // 10% discount vs 3x monthly
-            BillingPeriod::Year => 10.0,         // 17% discount vs 12x monthly
+            BillingPeriod::Year => 10.0,
             BillingPeriod::Days(d) => *d as f64 / 30.0,
         }
     }
@@ -692,7 +685,7 @@ mod tests {
             .with("/subscriptions", r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
-                "plan_id": "pro",
+                "plan_id": "individual",
                 "status": "active",
                 "period": "month",
                 "amount": 29990,
@@ -703,7 +696,7 @@ mod tests {
             .with("/subscriptions/sub_abc123", r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
-                "plan_id": "pro",
+                "plan_id": "individual",
                 "status": "paused",
                 "period": "month",
                 "amount": 29990
@@ -711,7 +704,7 @@ mod tests {
             .with("/subscriptions/sub_abc123/pause", r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
-                "plan_id": "pro",
+                "plan_id": "individual",
                 "status": "paused",
                 "period": "month",
                 "amount": 29990
@@ -719,7 +712,7 @@ mod tests {
             .with("/subscriptions/sub_abc123/resume", r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
-                "plan_id": "pro",
+                "plan_id": "individual",
                 "status": "active",
                 "period": "month",
                 "amount": 29990
@@ -751,14 +744,12 @@ mod tests {
     #[test]
     fn test_billing_period_days() {
         assert_eq!(BillingPeriod::Month.days(), 30);
-        assert_eq!(BillingPeriod::Quarter.days(), 90);
         assert_eq!(BillingPeriod::Year.days(), 365);
         assert_eq!(BillingPeriod::Days(14).days(), 14);
     }
 
     #[test]
     fn test_billing_period_multiplier() {
-        assert!((BillingPeriod::Quarter.price_multiplier() - 2.7).abs() < 0.01);
         assert!((BillingPeriod::Year.price_multiplier() - 10.0).abs() < 0.01);
         assert_eq!(BillingPeriod::Month.price_multiplier(), 1.0);
     }
@@ -766,7 +757,6 @@ mod tests {
     #[test]
     fn test_billing_period_parse() {
         assert_eq!(BillingPeriod::from_str_opt("month"), Some(BillingPeriod::Month));
-        assert_eq!(BillingPeriod::from_str_opt("quarterly"), Some(BillingPeriod::Quarter));
         assert_eq!(BillingPeriod::from_str_opt("annual"), Some(BillingPeriod::Year));
         assert_eq!(BillingPeriod::from_str_opt("weekly"), None);
     }
@@ -812,11 +802,11 @@ mod tests {
         let c = client();
         let req = CreateSubscriptionRequest {
             customer_id: "acc-1".into(),
-            plan_id: "pro".into(),
+            plan_id: "individual".into(),
             period: BillingPeriod::Month,
             amount: 29990,
             payment_method: SubscriptionPaymentMethod::Sbp { phone: "+79001234567".into() },
-            description: "FlowLink Pro".into(),
+            description: "FlowLink Individual".into(),
             start_date: None,
             trial_days: 0,
         };
@@ -844,7 +834,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_sbp_payment() {
         let c = client();
-        let p = c.create_sbp_payment("INV-0001", 29990, "Pro подписка").await.unwrap();
+        let p = c.create_sbp_payment("INV-0001", 199900, "Individual подписка").await.unwrap();
         assert_eq!(p.payment_id, "pay_123");
         assert!(p.payment_url.is_some());
     }
@@ -852,7 +842,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_card_payment() {
         let c = client();
-        let p = c.create_card_payment("INV-0002", 29990, "Pro подписка").await.unwrap();
+        let p = c.create_card_payment("INV-0002", 199900, "Individual подписка").await.unwrap();
         assert_eq!(p.payment_id, "card_789");
         assert!(p.payment_url.is_some());
     }

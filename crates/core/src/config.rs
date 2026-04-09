@@ -491,14 +491,14 @@ mod tests {
             enabled: true,
             currency: "USD".into(),
             plans: vec![PlanConfig {
-                id: "pro".into(), name: "Pro".into(), price: 999,
+                id: "individual".into(), name: "Individual".into(), price: 1999,
                 period: "monthly".into(), features: Default::default(),
             }],
             tochka_jwt_token: None,
         };
         let json = serde_json::to_string(&billing).unwrap();
         let back: BillingConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.plans[0].price, 999);
+        assert_eq!(back.plans[0].price, 1999);
     }
 
     #[test]
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn test_plan_config_features() {
         let plan = PlanConfig {
-            id: "pro".into(), name: "Pro".into(), price: 999, period: "monthly".into(),
+            id: "individual".into(), name: "Individual".into(), price: 1999, period: "monthly".into(),
             features: [("max_agents".into(), serde_json::json!(10))].into_iter().collect(),
         };
         let json = serde_json::to_string(&plan).unwrap();

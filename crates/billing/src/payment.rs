@@ -16,8 +16,6 @@ pub enum PaymentMethod {
     Card,
     /// Bank transfer invoice (для юрлиц/ИП)
     BankTransfer,
-    /// Internal balance
-    Balance,
     /// Manual/admin adjustment
     Admin,
 }
@@ -28,7 +26,6 @@ impl PaymentMethod {
             PaymentMethod::Sbp => "sbp",
             PaymentMethod::Card => "card",
             PaymentMethod::BankTransfer => "bank_transfer",
-            PaymentMethod::Balance => "balance",
             PaymentMethod::Admin => "admin",
         }
     }
@@ -38,7 +35,6 @@ impl PaymentMethod {
             PaymentMethod::Sbp => "СБП",
             PaymentMethod::Card => "Банковская карта",
             PaymentMethod::BankTransfer => "Банковский перевод",
-            PaymentMethod::Balance => "Баланс",
             PaymentMethod::Admin => "Административный",
         }
     }
@@ -143,8 +139,9 @@ impl Default for PaymentConfig {
 impl PaymentConfig {
     /// Get list of available payment methods
     pub fn available_methods(&self) -> Vec<PaymentMethod> {
-        let mut methods = vec![PaymentMethod::Balance]; // always available
+        let mut methods = vec![];
         if self.enabled {
+            methods.push(PaymentMethod::Card);
             if self.sbp.is_some() {
                 methods.push(PaymentMethod::Sbp);
             }
@@ -158,7 +155,6 @@ impl PaymentConfig {
     /// Check if a payment method is available
     pub fn is_available(&self, method: PaymentMethod) -> bool {
         match method {
-            PaymentMethod::Balance => true,
             PaymentMethod::Sbp => self.enabled && self.sbp.is_some(),
             PaymentMethod::Card => self.enabled,
             PaymentMethod::BankTransfer => self.enabled && self.bank_details.is_some(),
@@ -194,7 +190,7 @@ mod tests {
     fn test_default_config() {
         let config = PaymentConfig::default();
         assert!(!config.enabled);
-        assert_eq!(config.available_methods().len(), 1); // only Balance
+        assert_eq!(config.available_methods().len(), 0); // no methods when disabled
     }
 
     #[test]
@@ -223,10 +219,10 @@ mod tests {
         };
 
         let methods = config.available_methods();
-        assert_eq!(methods.len(), 3); // Balance + SBP + BankTransfer
+        assert_eq!(methods.len(), 3); // Card + SBP + BankTransfer
         assert!(config.is_available(PaymentMethod::Sbp));
         assert!(config.is_available(PaymentMethod::BankTransfer));
-        assert!(config.is_available(PaymentMethod::Balance));
+        assert!(config.is_available(PaymentMethod::Card));
     }
 
     #[test]

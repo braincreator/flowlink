@@ -10,43 +10,55 @@ const plans: Plan[] = [
     name: "Free",
     monthlyPrice: 0,
     annualPrice: 0,
-    features: ["1 агент", "100 запросов/день", "50K токенов", "Community support"],
+    features: [
+      "1 хост",
+      "1 пользователь",
+      "Pattern blocking (50+ паттернов)",
+      "Ручной бэкап",
+      "500MB backup storage",
+      "Basic sandbox",
+      "E2EE (X25519 + AES-256)",
+    ],
     cta: "Начать бесплатно",
     ctaHref: "/signup",
   },
   {
-    id: "pro",
-    name: "Pro",
-    monthlyPrice: 299.9,
-    annualPrice: 2999,
+    id: "individual",
+    name: "Individual",
+    monthlyPrice: 1990,
+    annualPrice: 15920,
     features: [
-      "10 агентов",
-      "10 000 запросов/день",
-      "5M токенов",
-      "Telegram бот",
-      "Web dashboard",
-      "Priority support",
+      "До 3 хостов",
+      "До 2 пользователей",
+      "AST + Interpreter анализ",
+      "Approval workflow",
+      "Auto backup + Smart backup",
+      "5GB backup storage",
+      "Device trust",
+      "MCP protocol",
+      "14 дней trial",
     ],
     popular: true,
-    cta: "Выбрать план",
+    cta: "Начать trial",
     ctaHref: "/checkout",
   },
   {
-    id: "enterprise",
-    name: "Enterprise",
-    monthlyPrice: 999.9,
-    annualPrice: 9999,
+    id: "business",
+    name: "Business",
+    monthlyPrice: 4990,
+    annualPrice: 39920,
     features: [
-      "Безлимит агентов",
-      "Безлимит запросов",
-      "Безлимит токенов",
-      "E2EE шифрование",
-      "Audit log",
-      "Self-hosted relay",
-      "SLA 99.9%",
-      "Dedicated support",
+      "До 25 хостов",
+      "До 10 пользователей",
+      "eBPF kernel-level shield",
+      "K8s operator",
+      "GitOps drift detection",
+      "SIEM export (CEF/LEEF/JSON)",
+      "RBAC",
+      "20GB backup storage",
+      "14 дней trial",
     ],
-    cta: "Выбрать план",
+    cta: "Начать trial",
     ctaHref: "/checkout",
   },
 ];
@@ -69,11 +81,15 @@ export default function PricingPage() {
             <PlanCard key={p.id} plan={p} annual={annual} />
           ))}
         </div>
+
+        <p style={{ textAlign: "center", marginTop: 32, opacity: 0.7 }}>
+          Нужен безлимит? <a href="mailto:hello@flowlink.app">Свяжитесь с нами</a>
+        </p>
       </section>
 
       <footer className="container">
         <p>
-          <a href="/">← На главную</a> · FlowMasters © 2026
+          <a href="/">← На главную</a> · BSL 1.1 License · FlowMasters © 2026
         </p>
       </footer>
     </div>

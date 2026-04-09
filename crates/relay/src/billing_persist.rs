@@ -45,6 +45,9 @@ impl BillingPersist for DbPersist {
                     .and_then(parse_payment_method),
                 balance_kopecks: r.balance_kopecks,
                 cycle_start: r.cycle_start,
+                is_trial: false,
+                trial_start: None,
+                trial_end: None,
             })
             .collect();
 
@@ -101,7 +104,6 @@ fn parse_payment_method(s: &str) -> Option<flowlink_billing::payment::PaymentMet
         "sbp" => Some(flowlink_billing::payment::PaymentMethod::Sbp),
         "card" => Some(flowlink_billing::payment::PaymentMethod::Card),
         "bank_transfer" => Some(flowlink_billing::payment::PaymentMethod::BankTransfer),
-        "balance" => Some(flowlink_billing::payment::PaymentMethod::Balance),
         "admin" => Some(flowlink_billing::payment::PaymentMethod::Admin),
         _ => None,
     }
