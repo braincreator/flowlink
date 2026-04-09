@@ -199,7 +199,7 @@ fn pattern_matches(pattern: &str, command: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flowlink_core::rbac::RbacUser;
+    use flowlink_core::rbac::{RbacUser, Role};
     use std::collections::HashMap;
 
     fn make_user(id: &str, username: &str, roles: Vec<Role>) -> RbacUser {

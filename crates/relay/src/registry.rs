@@ -202,6 +202,7 @@ impl Registry {
     }
 
     /// Blocking save — use in tests or shutdown hooks.
+    #[allow(dead_code)]
     fn flush_clients(&self) -> Result<()> {
         self.save_clients_sync()
     }
@@ -241,6 +242,7 @@ impl Registry {
     }
 
     /// Blocking save — use in tests or shutdown hooks.
+    #[allow(dead_code)]
     fn flush_agents(&self) -> Result<()> {
         self.save_agents_sync()
     }

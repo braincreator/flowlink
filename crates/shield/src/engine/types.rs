@@ -4,18 +4,12 @@ use serde::Serialize;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub enum ThreatLevel { Critical, High, Medium, Low }
+pub enum ThreatLevel { Critical, High, Medium, #[allow(dead_code)] Low }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Threat {
     pub id: String, pub name: String, pub description: String,
     pub level: ThreatLevel, pub snapshot: bool, pub timeout_secs: u64,
-}
-
-macro_rules! threat {
-    ($method:ident, $id:expr, $name:expr, $desc:expr) => {
-        Threat::$method($id, $name, $desc.to_string())
-    };
 }
 
 impl Threat {
@@ -48,6 +42,7 @@ pub struct Command { pub binary: String, pub args: Vec<String>, pub raw: String 
 
 pub struct AnalysisResult { pub threat: Option<Threat>, pub level_used: u8, pub safe: bool }
 
+#[allow(dead_code)]
 pub struct PolicyAwareResult {
     pub allowed: bool,
     pub threat: Option<Threat>,

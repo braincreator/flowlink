@@ -39,6 +39,7 @@ impl Default for HybridConfig {
 }
 
 /// Whether the hybrid guard is using ES (macOS) or eBPF (Linux)
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum KernelBackend {
     /// macOS Endpoint Security Framework
@@ -172,6 +173,7 @@ impl HybridGuard {
 }
 
 /// Handle a single kernel event through the hybrid pipeline
+#[allow(dead_code)]
 async fn handle_kernel_event(guard: &HybridGuard, event: &KernelEvent) -> Result<()> {
     info!(
         "🛡 Kernel caught: pid={} uid={} comm={} args={:.80}",

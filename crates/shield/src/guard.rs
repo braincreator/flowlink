@@ -52,6 +52,7 @@ pub struct PendingAction {
     pub pid: u32,
     pub threat: crate::engine::Threat,
     pub process_info: ProcessInfo,
+    #[allow(dead_code)]
     pub forensic: Option<ForensicContext>,
     pub snapshot: Option<String>,
     pub intercepted_at: chrono::DateTime<chrono::Utc>,
@@ -107,6 +108,7 @@ pub struct ShieldGuard {
     pending: Arc<DashMap<u32, PendingAction>>,
     config: ShieldGuardConfig,
     approval_tx: mpsc::Sender<ApprovalResponse>,
+    #[allow(dead_code)]
     approval_rx: Arc<RwLock<Option<mpsc::Receiver<ApprovalResponse>>>>,
     stats: Arc<RwLock<ShieldStats>>,
     relay_client: Option<RelayClient>,
@@ -452,6 +454,7 @@ impl ShieldGuard {
     }
 
     /// Send an AuditEvent to the relay's audit channel (plaintext, non-blocking)
+    #[allow(dead_code)]
     async fn send_audit_event(&self, agent_id: &str, event: flowlink_core::channels::AuditEvent) {
         if let Some(ref relay) = self.relay_client {
             let _agent_id = agent_id.to_string();

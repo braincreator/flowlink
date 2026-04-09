@@ -1,5 +1,6 @@
 // FlowLink Shield — Canary Token Monitoring
 // Honeypot file system: detect unauthorized access to decoy files
+#![allow(dead_code)]
 
 use std::fs;
 use std::path::{Path, PathBuf};

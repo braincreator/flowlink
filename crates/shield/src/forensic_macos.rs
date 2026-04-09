@@ -1,4 +1,5 @@
 // FlowLink Shield — macOS-specific forensic collectors using ps / sysctl
+#![allow(dead_code)]
 
 use anyhow::Result;
 use std::process::Command;

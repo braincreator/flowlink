@@ -19,6 +19,7 @@ pub struct SnapshotMeta {
 pub struct BackupManager {
     backup_dir: String,
     max_snapshots: u32,
+    #[allow(dead_code)]
     retention_days: u32,
 }
 

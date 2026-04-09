@@ -1,5 +1,6 @@
 // FlowLink Shield — Audit logger
 // Writes structured JSON audit trail
+#![allow(dead_code)]
 
 use chrono::Utc;
 use serde::{Serialize, Deserialize};

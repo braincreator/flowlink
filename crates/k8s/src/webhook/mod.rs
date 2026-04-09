@@ -11,7 +11,9 @@ use crate::sidecar::ShieldSidecar;
 
 pub struct AdmissionWebhook {
     config: K8sConfig,
+    #[allow(dead_code)]
     relay_url: String,
+    #[allow(dead_code)]
     mode: ShieldMode,
     policy_rules: Vec<PolicyRule>,
 }
@@ -126,6 +128,7 @@ impl AdmissionWebhook {
 mod tests {
     use super::*;
     use crate::config::K8sConfig;
+    use serde_json::json;
 
     fn default_config() -> K8sConfig {
         K8sConfig::default()

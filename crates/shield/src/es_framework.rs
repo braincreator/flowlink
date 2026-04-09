@@ -1,5 +1,6 @@
 // FlowLink Shield — macOS Endpoint Security Framework bindings
 // Low-level wrapper around the ES API for race-free process interception.
+#![allow(dead_code)]
 
 use anyhow::Result;
 

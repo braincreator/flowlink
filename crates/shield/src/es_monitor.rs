@@ -13,6 +13,7 @@ use crate::es_framework::EsClient;
 #[derive(Debug, Clone)]
 pub struct EsConfig {
     /// Dangerous patterns for L1 matching (same as eBPF)
+    #[allow(dead_code)]
     pub patterns: Vec<DangerousPattern>,
     /// Try AUTH_EXEC first (can block), fall back to NOTIFY_EXEC (observe only)
     pub prefer_auth: bool,
@@ -50,6 +51,7 @@ impl EsMonitor {
     }
 
     /// Check if the given binary matches any L1 dangerous pattern
+    #[allow(dead_code)]
     pub fn matches_l1_pattern(binary: &str, args: &str, patterns: &[DangerousPattern]) -> bool {
         let basename = binary.rsplit('/').next().unwrap_or(binary);
         for pat in patterns {

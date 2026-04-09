@@ -1,5 +1,6 @@
 // FlowLink Shield — Notifier
 // Sends alerts via webhook (relay → Telegram bot)
+#![allow(dead_code)]
 
 use serde::Serialize;
 use log::{info, warn};

@@ -120,8 +120,8 @@ fn l1_db(b: &str, args: &[String]) -> Option<Threat> {
 
 fn l1_git(args: &[String]) -> Option<Threat> {
     if args.len() < 2 { return None; }
-    /// Check if any arg is an exact match or contains the char in a combined short-flag group.
-    /// e.g. has_flag(args, "-f") matches "-f", "--force", and "-fdx" (contains 'f').
+    // Check if any arg is an exact match or contains the char in a combined short-flag group.
+    // e.g. has_flag(args, "-f") matches "-f", "--force", and "-fdx" (contains 'f').
     let has_flag = |flag: &str| -> bool {
         args.iter().any(|a| {
             if a == flag { return true; }

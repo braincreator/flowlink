@@ -1,5 +1,6 @@
 // FlowLink Shield — Process interceptor
 // SIGSTOP/SIGKILL/SIGCONT management + /proc reader
+#![allow(dead_code)]
 
 use anyhow::Result;
 use std::fs;

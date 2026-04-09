@@ -747,6 +747,7 @@ pub fn build_router(state: AppState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthManager;
     use axum::body::Body;
     use axum::http::{Request as HttpRequest, StatusCode};
     use http_body_util::BodyExt;

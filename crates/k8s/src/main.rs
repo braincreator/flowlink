@@ -47,9 +47,11 @@ struct Cli {
 #[derive(Clone)]
 struct AppState {
     webhook: Arc<AdmissionWebhook>,
+    #[allow(dead_code)]
     config: K8sConfig,
 }
 
+#[allow(non_snake_case)]
 #[derive(Debug, Serialize, Deserialize)]
 struct AdmissionReview {
     apiVersion: String,

@@ -24,6 +24,7 @@ pub struct LlmResponse {
 pub struct RemoteLlm {
     relay_url: String,
     api_token: String,
+    #[allow(dead_code)]
     timeout: Duration,
     client: reqwest::Client,
 }

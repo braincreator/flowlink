@@ -14,9 +14,12 @@ use crate::pool::AgentPool;
 type WsSender = mpsc::Sender<AxumMsg>;
 
 pub struct RelayHandler {
+    #[allow(dead_code)]
     pool: Arc<AgentPool>,
     pub auth: Arc<AuthManager>,
+    #[allow(dead_code)]
     eventbus: Arc<EventBus>,
+    #[allow(dead_code)]
     approvals: Arc<ApprovalQueue>,
     ws_senders: Arc<DashMap<String, WsSender>>,
 }

@@ -243,6 +243,7 @@ impl Sandbox {
         );
 
         // Convert to owned path — tempdir is moved into the Option
+        #[allow(deprecated)]
         let path = root.into_path();
 
         // Perform the actual chroot

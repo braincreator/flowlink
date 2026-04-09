@@ -183,6 +183,7 @@ mod real_kernel {
 // ═══════════════════════════════════════════
 
 #[cfg(not(all(target_os = "linux", feature = "ebpf")))]
+#[allow(unused_imports)]
 pub use stub::*;
 
 #[cfg(not(all(target_os = "linux", feature = "ebpf")))]
@@ -190,9 +191,11 @@ mod stub {
     use super::*;
 
     /// Stub kernel monitor — no-op on non-Linux platforms
+    #[allow(dead_code)]
     pub struct EbpfKernelMonitor;
 
     impl EbpfKernelMonitor {
+        #[allow(dead_code)]
         pub async fn load(
             _patterns: Vec<DangerousPattern>,
             _allowed_uids: Vec<u32>,

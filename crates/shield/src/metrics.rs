@@ -115,6 +115,7 @@ impl Default for ShieldMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prometheus::core::Collector;
 
     #[test]
     fn test_interception_counter() {

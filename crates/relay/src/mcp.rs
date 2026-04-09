@@ -16,6 +16,7 @@ use crate::server::AppState;
 
 #[derive(Deserialize)]
 pub struct McpRequest {
+    #[allow(dead_code)]
     jsonrpc: String,
     #[serde(default)]
     id: Option<Value>,

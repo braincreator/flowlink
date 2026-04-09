@@ -204,6 +204,7 @@ pub async fn metrics_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prometheus::core::Collector;
 
     fn setup() -> Metrics {
         Metrics::new()

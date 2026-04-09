@@ -6,6 +6,7 @@ mod level1;
 mod level2;
 mod level3;
 
+#[allow(unused_imports)]
 pub use types::{Command, AnalysisResult, PolicyAwareResult, Threat, ThreatLevel};
 
 use crate::policy_dsl::{PolicyEngine, EvalContext as PolicyEvalContext};
@@ -32,6 +33,7 @@ impl AnalysisEngine {
 
     /// Analyze command, then evaluate against policy engine.
     /// Policy can override threat analysis (e.g., L1 threat but policy says allow).
+    #[allow(dead_code)]
     pub fn analyze_with_policy(&self, cmd: &Command, policy: &PolicyEngine, policy_ctx: &PolicyEvalContext) -> PolicyAwareResult {
         let analysis = self.analyze(cmd);
         let decision = policy.evaluate(&cmd.raw, policy_ctx);

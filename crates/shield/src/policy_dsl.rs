@@ -1,5 +1,6 @@
 // FlowLink Shield — YAML-based Policy DSL
 // Configurable security rules with priorities, conditions, and time-based access.
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;

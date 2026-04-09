@@ -283,6 +283,7 @@ pub struct CardPaymentRequest {
     pub fail_url: Option<String>,
 }
 
+#[allow(dead_code)]
 fn default_ru() -> String { "ru".to_string() }
 
 /// Card payment response

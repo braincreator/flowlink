@@ -1,5 +1,6 @@
 // FlowLink Shield — Forensic metadata collection
 // WHO executed it, WHERE it came from, WHEN it happened
+#![allow(dead_code)]
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

@@ -25,6 +25,7 @@ impl SnapshotBackend {
     }
 }
 
+#[allow(dead_code)]
 /// Create a snapshot with timestamp tag
 pub fn create_snapshot(dataset: &str, tag: &str, backend: SnapshotBackend) -> Result<String> {
     let snapshot_name = format!(
