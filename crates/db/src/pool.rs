@@ -1,5 +1,6 @@
 //! Database connection pool — PostgreSQL via sqlx
 
+use std::str::FromStr;
 use sqlx::PgPool;
 
 /// Database pool wrapper
@@ -10,12 +11,17 @@ pub struct DbPool {
 impl DbPool {
     /// Open a new database connection pool
     pub async fn open(database_url: &str) -> anyhow::Result<Self> {
+        // Parse URL and disable prepared statements (required for Supavisor/pooler
+        // and for multi-statement migrations via sqlx::query)
+        let mut opts = sqlx::postgres::PgConnectOptions::from_str(database_url)?;
+        opts = opts.statement_cache_capacity(0);
+
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(10)
             .min_connections(2)
             .acquire_timeout(std::time::Duration::from_secs(5))
             .idle_timeout(std::time::Duration::from_secs(600))
-            .connect(database_url)
+            .connect_with(opts)
             .await?;
 
         tracing::info!("📦 Database connected (PostgreSQL/Supabase)");

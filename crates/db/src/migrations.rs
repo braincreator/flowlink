@@ -8,7 +8,7 @@ pub async fn run(pool: &PgPool) -> Result<()> {
     let migrations = get_migrations();
 
     // Create migrations tracking table
-    sqlx::query(r#"
+    sqlx::raw_sql(r#"
         CREATE TABLE IF NOT EXISTS _migrations (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
@@ -26,7 +26,7 @@ pub async fn run(pool: &PgPool) -> Result<()> {
 
         if !applied {
             tracing::info!("📦 Migration: {}", name);
-            sqlx::query(sql).execute(pool).await?;
+            sqlx::raw_sql(sql).execute(pool).await?;
             sqlx::query("INSERT INTO _migrations (name) VALUES ($1)")
                 .bind(name)
                 .execute(pool)
