@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::config::K8sConfig;
-use crate::crd::{FlowLinkShieldPolicy, FlowLinkShieldPolicySpec, FlowLinkShieldPolicyStatus, PolicyCondition, PolicyRule, ShieldMode};
+use crate::crd::{FlowLinkShieldPolicy, FlowLinkShieldPolicyStatus, PolicyCondition, ShieldMode};
 
 // ---------------------------------------------------------------------------
 // Reconciliation helper types
@@ -270,7 +270,6 @@ impl ShieldOperator {
     /// Returns a list of `DriftEvent`s for each mismatch found.
     pub async fn detect_drift(&self, name: &str, namespace: &str) -> Result<Vec<DriftEvent>> {
         use k8s_openapi::api::core::v1::{ConfigMap, Secret};
-        use kube::ResourceExt;
 
         let crds: Api<FlowLinkShieldPolicy> = Api::namespaced(self.client.clone(), namespace);
         let policy = crds.get(name).await?;
@@ -343,7 +342,7 @@ impl ShieldOperator {
     /// Creates ConfigMap, Secret, and optionally webhook configurations
     /// based on the FlowLinkShieldPolicy spec.
     pub async fn apply_policy(&self, name: &str, namespace: &str) -> Result<()> {
-        use k8s_openapi::api::core::v1::{ConfigMap, Secret};
+        use k8s_openapi::api::core::v1::ConfigMap;
 
         let crds: Api<FlowLinkShieldPolicy> = Api::namespaced(self.client.clone(), namespace);
         let policy = crds.get(name).await?;
