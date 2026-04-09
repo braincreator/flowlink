@@ -52,8 +52,6 @@ pub struct PlanLimits {
     pub exec_timeout_sec: u64,
     /// Shield level: "basic", "advanced", "enterprise"
     pub shield_level: String,
-    /// API rate limit: requests per minute (0 = no rate limit)
-    pub api_rate_limit_rpm: u32,
 }
 
 /// A billing plan
@@ -105,7 +103,6 @@ impl Plan {
                 max_file_size_mb: 10,
                 exec_timeout_sec: 60,
                 shield_level: "basic".to_string(),
-                api_rate_limit_rpm: 30,
             },
             features: vec![
                 "1 host".to_string(),
@@ -141,7 +138,6 @@ impl Plan {
                 max_file_size_mb: 100,
                 exec_timeout_sec: 300,
                 shield_level: "advanced".to_string(),
-                api_rate_limit_rpm: 120,
             },
             features: vec![
                 "3 hosts".to_string(),
@@ -181,7 +177,6 @@ impl Plan {
                 max_file_size_mb: 0, // configurable
                 exec_timeout_sec: 0, // configurable
                 shield_level: "enterprise".to_string(),
-                api_rate_limit_rpm: 600,
             },
             features: vec![
                 "20 hosts".to_string(),
@@ -241,7 +236,6 @@ impl Plan {
                 max_file_size_mb: db.limits.max_file_size_mb,
                 exec_timeout_sec: db.limits.exec_timeout_sec,
                 shield_level: db.limits.shield_level.clone(),
-                api_rate_limit_rpm: db.limits.api_rate_limit_rpm.unwrap_or(30),
             },
             features: db.features,
             available: db.is_active,

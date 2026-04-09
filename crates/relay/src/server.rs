@@ -849,7 +849,6 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
 
 pub fn build_router(state: AppState) -> Router {
     let rate_limiter = state.rate_limiter.clone();
-    let billing = state.billing.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route("/health", get(health))
@@ -911,7 +910,6 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(axum::middleware::from_fn(rate_limit_layer(
             rate_limiter,
-            billing.clone(),
             vec!["/healthz".to_string(), "/ws".to_string()],
         )))
         .layer(cors_layer(vec!["*".to_string()]))
