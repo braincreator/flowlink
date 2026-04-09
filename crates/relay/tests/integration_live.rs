@@ -15,6 +15,7 @@ use flowlink_relay::handler::RelayHandler;
 use flowlink_relay::pool::{AgentInfo, AgentPool};
 use flowlink_relay::registry::Registry;
 use flowlink_relay::server::{build_router, AppState, ShieldAlertManager};
+use flowlink_relay::control_plane::ControlPlaneState;
 
 // ── helpers ──────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         e2ee: Arc::new(flowlink_relay::e2ee::E2eeSessionManager::new()),
         usage_tracker: Arc::new(flowlink_relay::billing_middleware::UsageTracker::new()),
         rate_limiter: Arc::new(flowlink_relay::ratelimit::RateLimiter::new(100, 10)),
+        control_plane: ControlPlaneState::new(),
     };
     (state, tmp)
 }

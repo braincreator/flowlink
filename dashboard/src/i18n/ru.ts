@@ -206,11 +206,24 @@ const ru: typeof import('./en').default = {
     open_terminal_settings: 'Открыть настройки терминала',
   },
   billing: {
-    title: 'Тарифы', plan: 'Бесплатный тариф', usage: 'Использование', agents_count: 'Агентов подключено',
-    commands_count: 'API вызовы', storage: 'Хранилище', upgrade: 'Перейти на Pro',
-    plan_desc: 'До 3 агентов · 1,000 API вызовов/мес',
-    coming_soon: 'Тарифы скоро',
-    coming_soon_desc: 'Отслеживание использования, счета и управление тарифами появятся в будущем обновлении.',
+    title: 'Тарифы', current_plan: 'Текущий тариф', current_plan_desc: 'Trial — 7 дней',
+    usage: 'Использование', hosts_connected: 'Хостов подключено', team_members: 'Участников команды',
+    log_retention: 'Хранение логов', upgrade: 'Уменьшить тариф',
+    trial_name: 'Trial', trial_price: 'Бесплатно · 7 дней',
+    trial_features: [
+      '1 хост', '1 юзер', '3 дня логов', 'Pattern blocking', 'Manual backup', 'E2EE',
+    ],
+    starter_name: 'Starter', starter_price: '2 990 ₽/мес',
+    starter_features: [
+      '3 хоста', '3 юзера', '14 дней логов', 'AST-анализ', 'Canary honeypots',
+      'Approval workflow', 'Custom policies (до 10)', 'Smart backup + dedup', 'Device trust', 'MCP protocol',
+    ],
+    pro_name: 'Pro', pro_price: '7 990 ₽/мес',
+    pro_features: [
+      '20 хостов', '10 юзеров', '90 дней логов', 'eBPF kernel-level', 'Policy DSL',
+      'Forensics', 'K8s operator', 'GitOps', 'SIEM export', 'RBAC',
+      'Telegram approval', 'Auto restore', 'LLM failover', 'Global kill switch',
+    ],
   },
   onboarding: {
     welcome: 'Добро пожаловать в FlowLink Shield', welcome_desc: 'Мониторинг команд и принудительное применение политик в реальном времени для ваших инфраструктурных агентов. Давайте настроим всё за несколько минут.',

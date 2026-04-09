@@ -7,7 +7,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.80+-orange?logo=rust)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-1187 passing-green)]()
 [![Crates](https://img.shields.io/badge/crates-10-blue)]()
-[![License](https://img.shields.io/badge/license-BSL_1.1-blue)](LICENSE)
+[![SaaS](https://img.shields.io/badge/type-Cloud_SaaS-blue)](https://flowlink.flow-masters.ru)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)]()
 
 *WebSocket relay · E2EE · RBAC · Shield · K8s operator · Billing*
@@ -101,10 +101,10 @@ docker compose up -d
 - **Auto cleanup** — Garbage-collected on CR deletion
 
 ### 💰 Billing
-- **Plans** — Free, Pro, Enterprise tiers
-- **Usage tracking** — Per-agent counters (requests, tokens, commands)
-- **Invoicing** — Auto-generated with PostgreSQL persistence
-- **API keys** — Hashed, scoped, rate-limited
+- **Plans** — Trial (7 days), Starter, Pro
+- **Scale metric** — hosts × users × log retention
+- **No agent limits** — unlimited agents per host
+- **No request limits** — FlowLink is a security gateway, not an LLM provider
 
 ---
 
@@ -177,4 +177,4 @@ kubectl apply -f config/policy.yaml
 
 ## License
 
-BSL 1.1 — see [LICENSE](LICENSE) for details.
+Proprietary — © 2026 FlowMasters. [Website](https://flowlink.flow-masters.ru)

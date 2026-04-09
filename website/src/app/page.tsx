@@ -14,13 +14,6 @@ export default function Home() {
           <a href="#pricing">Цены</a>
           <a href="#faq">FAQ</a>
           <a href="/playground">Демо 🛡️</a>
-          <a
-            href="https://github.com/braincreator/flowlink"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            GitHub ↗
-          </a>
         </div>
       </nav>
 
@@ -28,7 +21,7 @@ export default function Home() {
       <section className="hero container">
         <div className="hero-badge">
           <span className="dot"></span>
-          Open Source Agent · E2EE
+          AI Security Shield · E2EE
         </div>
 
         <h1>
@@ -105,20 +98,19 @@ export default function Home() {
       {/* ═══ CHAPTER 2: HOW IT WORKS ═══ */}
       <section className="container" id="how">
         <h2>Как это работает</h2>
-        <p className="section-sub">Три шага — и твой сервер под защитой</p>
+        <p className="section-sub">Подключи сервер — и он под защитой</p>
 
         <div className="steps">
           <div className="step">
             <div className="step-number">1</div>
-            <h3>Установи за 30 сек</h3>
-            <p>Одна строка — и FlowLink на сервере</p>
-            <span className="step-code">curl -fsSL get.flowlink.sh | bash</span>
+            <h3>Зарегистрируйся</h3>
+            <p>Создай аккаунт — бесплатно, без карты</p>
           </div>
           <div className="step">
             <div className="step-number">2</div>
-            <h3>FlowLink мониторит</h3>
+            <h3>Подключи сервер</h3>
             <p>
-              Анализирует каждую команду: 50+ паттернов, AST-парсинг, eBPF на kernel-level
+              Установи агента одной командой через дашборд. Ubuntu, Debian, CentOS, Arch.
             </p>
           </div>
           <div className="step">
@@ -229,60 +221,58 @@ export default function Home() {
       {/* ═══ PRICING ═══ */}
       <section className="container" id="pricing">
         <h2>Тарифы</h2>
-        <p className="section-sub">Начни бесплатно — масштабируйся когда нужно</p>
+        <p className="section-sub">Платишь за масштаб инфраструктуры — а не за запросы</p>
 
         <div className="pricing-grid">
           <div className="pricing-card">
-            <h3>Free</h3>
+            <h3>Trial</h3>
             <div className="price">0 ₽</div>
-            <div className="price-note">навсегда</div>
+            <div className="price-note">7 дней</div>
             <ul>
-              <li>1 host</li>
-              <li>1 user</li>
+              <li>1 хост</li>
+              <li>1 юзер</li>
+              <li>3 дня логов</li>
               <li>Pattern blocking</li>
               <li>Manual backup</li>
-              <li>500MB storage</li>
-              <li>Basic sandbox</li>
               <li>E2EE</li>
             </ul>
           </div>
 
           <div className="pricing-card">
-            <h3>Individual</h3>
-            <div className="price">1 990 ₽</div>
+            <h3>Starter</h3>
+            <div className="price">2 990 ₽</div>
             <div className="price-note">/мес</div>
-            <p className="price-yearly">15 920 ₽ /год (-20%)</p>
+            <p className="price-yearly">23 920 ₽ /год (-33%)</p>
             <ul>
-              <li>3 hosts</li>
-              <li>2 users</li>
-              <li>14 day trial</li>
-              <li>AST analysis</li>
+              <li>3 хоста</li>
+              <li>3 юзера</li>
+              <li>14 дней логов</li>
+              <li>AST-анализ</li>
               <li>Canary honeypots</li>
               <li>Approval workflow</li>
-              <li>Custom policies (up to 10)</li>
+              <li>Custom policies (до 10)</li>
               <li>Smart backup + dedup</li>
               <li>Device trust</li>
               <li>MCP protocol</li>
-              <li>Multi-backend LLM (up to 3)</li>
             </ul>
           </div>
 
           <div className="pricing-card featured">
-            <h3>Business</h3>
-            <div className="price">4 990 ₽</div>
+            <h3>Pro</h3>
+            <div className="price">7 990 ₽</div>
             <div className="price-note">/мес</div>
-            <p className="price-yearly">39 920 ₽ /год (-20%)</p>
+            <p className="price-yearly">63 920 ₽ /год (-33%)</p>
             <ul>
-              <li>25 hosts</li>
-              <li>10 users</li>
-              <li>14 day trial</li>
+              <li>20 хостов</li>
+              <li>10 юзеров</li>
+              <li>90 дней логов</li>
               <li>eBPF kernel-level</li>
               <li>Policy DSL</li>
               <li>Forensics</li>
               <li>K8s operator</li>
               <li>GitOps</li>
               <li>SIEM export</li>
-              <li>RBAC (10 users)</li>
+              <li>RBAC</li>
               <li>Telegram approval</li>
               <li>Auto restore</li>
               <li>LLM failover</li>
@@ -292,7 +282,7 @@ export default function Home() {
         </div>
 
         <p className="pricing-enterprise">
-          Нужен безлимит? <a href="mailto:hello@flowlink.app">Свяжитесь с нами</a>
+          Больше 20 хостов? <a href="mailto:hello@flowlink.app">Свяжитесь с нами</a>
         </p>
       </section>
 
@@ -329,61 +319,41 @@ export default function Home() {
           <div className="faq-item">
             <h3>Что если агент упадёт?</h3>
             <p>
-              Локальные бэкапы хранятся на сервере в ~/.flowlink/backups/.
-              Даже если агент или relay недоступен, все бэкапы на месте. Восстановление
-              вручную: tar -xzf snapshot.tar.gz.
+              Локальные бэкапы хранятся на сервере. Даже если relay недоступен, все бэкапы на месте. Восстановление через дашборд или вручную.
             </p>
           </div>
 
           <div className="faq-item">
             <h3>Какие команды блокируются?</h3>
             <p>
-              50+ паттернов в 4 категориях + AST-анализ обфускации + eBPF syscall interception. Free: pattern matching. Individual: + AST. Business: + eBPF.
+              50+ паттернов в 4 категориях + AST-анализ обфускации + eBPF syscall interception. Starter: pattern + AST. Pro: + eBPF kernel-level.
+            </p>
+          </div>
+
+          <div className="faq-item">
+            <h3>Сколько агентов можно подключить?</h3>
+            <p>
+              Без ограничений. FlowLink защищает хосты, а не агенты. Сколько угодно AI-агентов на одном или нескольких хостах — тариф зависит только от количества серверов и глубины защиты.
             </p>
           </div>
 
           <div className="faq-item">
             <h3>Как trial работает?</h3>
             <p>
-              14 дней бесплатно на Individual и Business. Без карты. После trial — автоматический переход на Free или оплата.
+              7 дней бесплатно: 1 хост, pattern blocking, E2EE. Без карты. После trial — переход на Starter или Free (ограниченный просмотр логов).
             </p>
           </div>
         </div>
-      </section>
-
-      {/* ═══ INSTALL ═══ */}
-      <section className="container" id="install">
-        <h2>Быстрый старт</h2>
-        <p className="section-sub">Одна команда — и твой сервер под защитой</p>
-
-        <div className="install-block">
-          <div className="terminal-topbar">
-            <span className="terminal-dot red"></span>
-            <span className="terminal-dot yellow"></span>
-            <span className="terminal-dot green"></span>
-            <span className="terminal-title">~ install flowlink</span>
-          </div>
-          <div className="terminal-body">
-            <code>
-              curl -fsSL https://get.flowlink.sh | bash
-            </code>
-            <CopyButton
-              text="curl -fsSL https://get.flowlink.sh | bash"
-            />
-          </div>
-        </div>
-        <p className="install-note">
-          Ubuntu · Debian · CentOS · Arch Linux · Автообновление включено
-        </p>
       </section>
 
       {/* ═══ FOOTER ═══ */}
       <footer className="container">
         <p>
           <a href="/playground">Демо</a>{" · "}
-          <a href="/pricing">Тарифы</a>{" · "}
-          <a href="https://github.com/braincreator/flowlink" target="_blank" rel="noopener noreferrer">GitHub</a>{" · "}
-          Agent: MIT · FlowMasters © 2026
+          <a href="#pricing">Тарифы</a>{" · "}
+          <a href="/privacy">Конфиденциальность</a>{" · "}
+          <a href="/terms">Условия</a>{" · "}
+          FlowMasters © 2026
         </p>
       </footer>
     </div>

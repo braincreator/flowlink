@@ -202,9 +202,13 @@ impl Registry {
     }
 
     /// Blocking save — use in tests or shutdown hooks.
+    /// In production, prefer save_clients() (non-blocking).
     #[allow(dead_code)]
     fn flush_clients(&self) -> Result<()> {
-        self.save_clients_sync()
+        let clients: Vec<_> = self.clients.iter().map(|r| r.value().clone()).collect();
+        let json = serde_json::to_string_pretty(&clients)?;
+        std::fs::write(self.data_dir.join("clients.json"), json)?;
+        Ok(())
     }
 
     /// Save clients to disk without blocking the caller.
@@ -301,7 +305,8 @@ mod tests {
             let reg = Registry::new(dir.path()).unwrap();
             let c = reg.register_client("Persist".into(), String::new()).unwrap();
             id = c.id;
-            reg.flush_clients().unwrap();
+            // Use sync save — register_client fires async save_clients()
+            reg.save_clients_sync().unwrap();
         }
         let reg2 = Registry::new(dir.path()).unwrap();
         assert!(reg2.get_client(&id).is_some());
