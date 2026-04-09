@@ -129,7 +129,8 @@ mod tests {
     fn test_write_and_read() {
         let dir = tempfile::tempdir().unwrap();
         let ops = unrestricted_ops(dir.path().to_str().unwrap());
-        let full = dir.path().join("test.txt");
+        let canonical = dir.path().canonicalize().unwrap();
+        let full = canonical.join("test.txt");
         ops.write(full.to_str().unwrap(), b"hello world").unwrap();
         let data = ops.read(full.to_str().unwrap()).unwrap();
         assert_eq!(data, b"hello world");
@@ -171,9 +172,10 @@ mod tests {
     #[test]
     fn test_size_limit_read() {
         let dir = tempfile::tempdir().unwrap();
-        let big_file = dir.path().join("big.txt");
-        std::fs::write(&big_file, vec![0u8; 100]).unwrap();
         let canonical = dir.path().canonicalize().unwrap();
+        let big_file = canonical.join("big.txt");
+        std::fs::write(&big_file, vec![0u8; 100]).unwrap();
+        let ops = unrestricted_ops(canonical.to_str().unwrap());
         let ops = FileOps::new(vec![canonical.to_str().unwrap().into()], 50);
         let result = ops.read(big_file.to_str().unwrap());
         assert!(result.is_err());
