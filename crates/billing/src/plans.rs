@@ -212,11 +212,43 @@ impl Plan {
     pub fn format_monthly(&self) -> String {
         Self::format_price(self.price_kopecks)
     }
+
+    /// Convert from database plan
+    pub fn from_db_plan(db: flowlink_db::plans::DbPlan) -> Self {
+        Self {
+            id: db.id,
+            name: db.name,
+            description: db.description,
+            tier: db.tier as u32,
+            price_kopecks: db.price_kopecks as u64,
+            annual_price_kopecks: db.annual_price_kopecks.map(|v| v as u64),
+            limits: PlanLimits {
+                api_requests_per_day: db.limits.api_requests_per_day,
+                tokens_per_day: db.limits.tokens_per_day,
+                max_agents: db.limits.max_agents,
+                storage_mb: db.limits.storage_mb,
+                max_payload_kb: db.limits.max_payload_kb,
+                max_agents_total: db.limits.max_agents_total,
+                webhook_rate_per_min: db.limits.webhook_rate_per_min,
+                mcp_tools_per_agent: db.limits.mcp_tools_per_agent,
+                audit_retention_days: db.limits.audit_retention_days,
+                priority_support: db.limits.priority_support,
+                custom_domain: db.limits.custom_domain,
+            },
+            features: db.features,
+            available: db.is_active,
+            legacy: false,
+        }
+    }
 }
 
 /// Plan registry — stores all available plans
+///
+/// Loads from database on startup, falls back to built-in defaults if DB unavailable.
 pub struct PlanRegistry {
     plans: RwLock<HashMap<String, Plan>>,
+    /// Last time plans were loaded from DB
+    last_loaded: std::sync::Mutex<std::time::Instant>,
 }
 
 impl PlanRegistry {
@@ -229,6 +261,29 @@ impl PlanRegistry {
 
         Self {
             plans: RwLock::new(plans),
+            last_loaded: std::sync::Mutex::new(std::time::Instant::now()),
+        }
+    }
+
+    /// Load plans from database, replacing in-memory cache.
+    /// Falls back to built-in defaults if DB query fails.
+    pub async fn load_from_db(&self, pool: &flowlink_db::DbPool) {
+        match flowlink_db::plans::DbPlan::list_active(pool.write_pool()).await {
+            Ok(db_plans) if !db_plans.is_empty() => {
+                let mut plans = self.plans.write().unwrap();
+                plans.clear();
+                for dp in db_plans {
+                    plans.insert(dp.id.clone(), Plan::from_db_plan(dp));
+                }
+                tracing::info!("📦 Loaded {} plans from database", plans.len());
+                *self.last_loaded.lock().unwrap() = std::time::Instant::now();
+            }
+            Ok(_) => {
+                tracing::warn!("📦 No plans in database, using built-in defaults");
+            }
+            Err(e) => {
+                tracing::warn!("📦 Failed to load plans from DB: {e}. Using built-in defaults.");
+            }
         }
     }
 

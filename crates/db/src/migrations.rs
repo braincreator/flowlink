@@ -181,7 +181,7 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_subscriptions_tochka ON subscriptions(tochka_subscription_id) WHERE tochka_subscription_id IS NOT NULL;
         "#),
 
-        ("007_orders", r#"
+        ("010_plans_sort_index", r#"
             CREATE TABLE IF NOT EXISTS orders (
                 id TEXT PRIMARY KEY,
                 account_id TEXT NOT NULL REFERENCES accounts(account_id),
@@ -199,6 +199,33 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_orders_account ON orders(account_id);
             CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
         "#),
+
+        ("010_plans_sort_index", r#"
+            CREATE TABLE IF NOT EXISTS plans (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                tier INT NOT NULL DEFAULT 0,
+                price_kopecks BIGINT NOT NULL DEFAULT 0,
+                annual_price_kopecks BIGINT,
+                period TEXT NOT NULL DEFAULT 'month',
+                currency TEXT NOT NULL DEFAULT 'RUB',
+                limits JSONB NOT NULL DEFAULT '{}',
+                features JSONB NOT NULL DEFAULT '[]',
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                sort_order INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        "#),
+
+        ("008_plans_indexes", r#"
+            CREATE INDEX IF NOT EXISTS idx_plans_active ON plans(is_active) WHERE is_active = true
+        "#),
+
+        ("008_plans_sort_index", r#"
+            CREATE INDEX IF NOT EXISTS idx_plans_sort ON plans(sort_order)
+        "#),
     ]
 }
 
@@ -209,7 +236,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 7);
+        assert_eq!(migrations.len(), 10);
     }
 
     #[test]
@@ -222,7 +249,7 @@ mod tests {
             "004_audit_log",
             "005_agents_devices",
             "006_subscriptions",
-            "007_orders",
+            "010_plans_sort_index",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(*name, expected_names[i], "Migration at index {} has wrong name", i);

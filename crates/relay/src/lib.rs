@@ -145,9 +145,14 @@ impl Relay {
             )),
             metrics,
             billing: if self.config.billing.enabled {
-                Some(Arc::new(flowlink_billing::BillingEngine::new(
+                let engine = Arc::new(flowlink_billing::BillingEngine::new(
                     flowlink_billing::payment::PaymentConfig::default(),
-                )))
+                ));
+                // Load plans from DB if available
+                if let Some(ref db_pool) = db {
+                    engine.plans().load_from_db(db_pool).await;
+                }
+                Some(engine)
             } else {
                 None
             },

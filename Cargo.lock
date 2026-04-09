@@ -1088,6 +1088,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "flowlink-core",
+ "flowlink-db",
  "reqwest",
  "serde",
  "serde_json",
