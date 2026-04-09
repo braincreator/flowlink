@@ -245,7 +245,7 @@ impl RollbackEngine {
 
         let repo = self.open_repo()?;
         let head = Self::head_commit(&repo)?;
-        let head_oid = head.id().to_string();
+        let _head_oid = head.id().to_string();
 
         let mut revwalk = repo
             .revwalk()

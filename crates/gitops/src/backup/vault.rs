@@ -78,8 +78,7 @@ impl VaultManager {
             .join(format!("{}.tmp", metadata.id));
 
         // Copy file to tmp location
-        self.copy_file_atomic(source_path, &tmp_path)
-            .await?;
+        self.copy_file_atomic(source_path, &tmp_path).await?;
 
         // Compute SHA256 checksum
         let checksum = self.compute_checksum(&tmp_path).await?;

@@ -1,5 +1,49 @@
 use crate::types::*;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Error type for configuration validation failures.
+#[derive(Debug, Clone)]
+pub enum ConfigError {
+    /// A file path is empty or cannot be created.
+    InvalidPath { field: String, path: String, reason: String },
+    /// A numeric or enum value is out of the acceptable range.
+    InvalidValue { field: String, value: String, reason: String },
+    /// A required field is missing or empty.
+    MissingField { field: String },
+    /// Two or more settings conflict with each other.
+    ConflictingSettings { message: String },
+    /// Multiple validation errors collected together.
+    Multiple(Vec<String>),
+}
+
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigError::InvalidPath { field, path, reason } => {
+                write!(f, "invalid path for '{}': '{}' ({})", field, path, reason)
+            }
+            ConfigError::InvalidValue { field, value, reason } => {
+                write!(f, "invalid value for '{}': '{}' ({})", field, value, reason)
+            }
+            ConfigError::MissingField { field } => {
+                write!(f, "missing required field: '{}'", field)
+            }
+            ConfigError::ConflictingSettings { message } => {
+                write!(f, "conflicting settings: {}", message)
+            }
+            ConfigError::Multiple(errors) => {
+                write!(f, "multiple validation errors ({}):\n  - {}", errors.len(), errors.join("\n  - "))
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GitOpsConfig {
@@ -14,6 +58,38 @@ pub struct GitOpsConfig {
     pub health: HealthConfig,
     pub approval: ApprovalConfig,
     pub audit: AuditConfig,
+    pub pipeline: Option<GitOpsPipelineConfig>,
+    pub server_guard: Option<GitOpsServerGuardConfig>,
+}
+
+/// Optional pipeline configuration for the GitOps engine.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GitOpsPipelineConfig {
+    pub max_concurrent_commands: Option<u32>,
+    pub command_timeout_secs: Option<u64>,
+}
+
+impl Default for GitOpsPipelineConfig {
+    fn default() -> Self {
+        Self {
+            max_concurrent_commands: None,
+            command_timeout_secs: None,
+        }
+    }
+}
+
+/// Optional server-guard configuration for the GitOps engine.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GitOpsServerGuardConfig {
+    pub state_collect_interval_secs: Option<u64>,
+}
+
+impl Default for GitOpsServerGuardConfig {
+    fn default() -> Self {
+        Self {
+            state_collect_interval_secs: None,
+        }
+    }
 }
 
 impl Default for GitOpsConfig {
@@ -29,6 +105,8 @@ impl Default for GitOpsConfig {
             health: HealthConfig::default(),
             approval: ApprovalConfig::default(),
             audit: AuditConfig::default(),
+            pipeline: None,
+            server_guard: None,
         }
     }
 }
@@ -386,6 +464,137 @@ impl GitOpsConfig {
         
         Ok(())
     }
+
+    /// Validate the configuration, collecting all errors into a list.
+    ///
+    /// This is lenient: it only checks fields that ARE set and doesn't
+    /// require optional fields. Returns `Ok(())` if there are no issues.
+    pub fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+
+        // --- git.repo_path ---
+        let repo_path = std::path::Path::new(&self.git.repo_path);
+        if self.git.repo_path.trim().is_empty() {
+            errors.push("git.repo_path must not be empty".into());
+        } else {
+            // Check if the directory exists or its parent is writable
+            if !repo_path.exists() {
+                if let Some(parent) = repo_path.parent() {
+                    if !parent.exists() {
+                        // Try to see if we can create the parent by probing writability
+                        // of the closest existing ancestor
+                        let mut probe = parent;
+                        while !probe.exists() {
+                            probe = match probe.parent() {
+                                Some(p) if !p.as_os_str().is_empty() => p,
+                                _ => break,
+                            };
+                        }
+                        if probe.as_os_str().is_empty() || !probe.is_dir() {
+                            errors.push(format!(
+                                "git.repo_path '{}' has no valid parent directory",
+                                self.git.repo_path
+                            ));
+                        }
+                    }
+                } else {
+                    errors.push(format!(
+                        "git.repo_path '{}' has no valid parent directory",
+                        self.git.repo_path
+                    ));
+                }
+            }
+        }
+
+        // --- git.branch ---
+        if self.git.branch.trim().is_empty() {
+            errors.push("git.branch must not be empty".into());
+        }
+
+        // --- vault.path ---
+        if self.vault.path.trim().is_empty() {
+            errors.push("vault.path must not be empty".into());
+        }
+
+        // --- pipeline.max_concurrent_commands (if set) ---
+        if let Some(ref pipeline) = self.pipeline {
+            if let Some(max_concurrent) = pipeline.max_concurrent_commands {
+                if max_concurrent == 0 {
+                    errors.push(
+                        "pipeline.max_concurrent_commands must be > 0".into()
+                    );
+                }
+            }
+            if let Some(timeout) = pipeline.command_timeout_secs {
+                if timeout == 0 {
+                    errors.push(
+                        "pipeline.command_timeout_secs must be > 0".into()
+                    );
+                }
+            }
+        }
+
+        // --- server_guard.state_collect_interval_secs (if set) ---
+        if let Some(ref sg) = self.server_guard {
+            if let Some(interval) = sg.state_collect_interval_secs {
+                if interval < 60 {
+                    errors.push(format!(
+                        "server_guard.state_collect_interval_secs must be >= 60, got {}",
+                        interval
+                    ));
+                }
+            }
+        }
+
+        // --- Conflicting settings ---
+        match &self.git.sync_strategy {
+            SyncStrategy::Realtime => {
+                if self.git.remote_url.as_ref().map_or(true, |u| u.trim().is_empty()) {
+                    errors.push(
+                        "sync_strategy is Realtime but git.remote_url is not set; \
+                         realtime sync requires a remote to push/pull from".into()
+                    );
+                }
+            }
+            SyncStrategy::Scheduled { cron } => {
+                if cron.trim().is_empty() {
+                    errors.push(
+                        "sync_strategy is Scheduled but cron expression is empty".into()
+                    );
+                }
+            }
+            SyncStrategy::Batched { interval_secs, max_batch_size } => {
+                if *interval_secs == 0 {
+                    errors.push(
+                        "sync_strategy Batched interval_secs must be > 0".into()
+                    );
+                }
+                if *max_batch_size == 0 {
+                    errors.push(
+                        "sync_strategy Batched max_batch_size must be > 0".into()
+                    );
+                }
+            }
+            SyncStrategy::Manual => {}
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validate the config and return ownership of self on success, or a ConfigError.
+    ///
+    /// This is a convenience wrapper around [`validate()`] that produces a single
+    /// [`ConfigError`] (using the `Multiple` variant when there are several issues).
+    pub fn validated(self) -> Result<Self, ConfigError> {
+        match self.validate() {
+            Ok(()) => Ok(self),
+            Err(errors) => Err(ConfigError::Multiple(errors)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -438,5 +647,273 @@ mod tests {
         } else {
             assert!(config.path.starts_with("/opt"));
         }
+    }
+
+    // ── Validation tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_validate_default_config() {
+        let config = GitOpsConfig::default();
+        // Default config uses Realtime... no, it uses Batched. Let's check.
+        assert!(config.validate().is_ok(), "default config should validate");
+    }
+
+    #[test]
+    fn test_validated_default_config() {
+        let config = GitOpsConfig::default();
+        assert!(config.validated().is_ok());
+    }
+
+    #[test]
+    fn test_validate_empty_repo_path() {
+        let mut config = GitOpsConfig::default();
+        config.git.repo_path = String::new();
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("repo_path") && e.contains("empty")));
+    }
+
+    #[test]
+    fn test_validate_empty_branch() {
+        let mut config = GitOpsConfig::default();
+        config.git.branch = String::new();
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("branch") && e.contains("empty")));
+    }
+
+    #[test]
+    fn test_validate_empty_vault_path() {
+        let mut config = GitOpsConfig::default();
+        config.vault.path = String::new();
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("vault.path") && e.contains("empty")));
+    }
+
+    #[test]
+    fn test_validate_realtime_without_remote_url() {
+        let mut config = GitOpsConfig::default();
+        config.git.sync_strategy = SyncStrategy::Realtime;
+        config.git.remote_url = None;
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("Realtime") && e.contains("remote_url")));
+    }
+
+    #[test]
+    fn test_validate_realtime_with_empty_remote_url() {
+        let mut config = GitOpsConfig::default();
+        config.git.sync_strategy = SyncStrategy::Realtime;
+        config.git.remote_url = Some(String::new());
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("Realtime") && e.contains("remote_url")));
+    }
+
+    #[test]
+    fn test_validate_realtime_with_remote_url() {
+        let mut config = GitOpsConfig::default();
+        config.git.sync_strategy = SyncStrategy::Realtime;
+        config.git.remote_url = Some("git@github.com:example/repo.git".into());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_scheduled_with_empty_cron() {
+        let mut config = GitOpsConfig::default();
+        config.git.sync_strategy = SyncStrategy::Scheduled { cron: String::new() };
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("Scheduled") && e.contains("cron")));
+    }
+
+    #[test]
+    fn test_validate_scheduled_with_valid_cron() {
+        let mut config = GitOpsConfig::default();
+        config.git.sync_strategy = SyncStrategy::Scheduled {
+            cron: "0 */5 * * * *".into(),
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_batched_zero_interval() {
+        let mut config = GitOpsConfig::default();
+        config.git.sync_strategy = SyncStrategy::Batched {
+            interval_secs: 0,
+            max_batch_size: 50,
+        };
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("interval_secs")));
+    }
+
+    #[test]
+    fn test_validate_batched_zero_batch_size() {
+        let mut config = GitOpsConfig::default();
+        config.git.sync_strategy = SyncStrategy::Batched {
+            interval_secs: 30,
+            max_batch_size: 0,
+        };
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("max_batch_size")));
+    }
+
+    #[test]
+    fn test_validate_manual_strategy_always_ok() {
+        let mut config = GitOpsConfig::default();
+        config.git.sync_strategy = SyncStrategy::Manual;
+        config.git.remote_url = None;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_pipeline_max_concurrent_zero() {
+        let mut config = GitOpsConfig::default();
+        config.pipeline = Some(GitOpsPipelineConfig {
+            max_concurrent_commands: Some(0),
+            command_timeout_secs: None,
+        });
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("max_concurrent_commands") && e.contains("> 0")));
+    }
+
+    #[test]
+    fn test_validate_pipeline_timeout_zero() {
+        let mut config = GitOpsConfig::default();
+        config.pipeline = Some(GitOpsPipelineConfig {
+            max_concurrent_commands: None,
+            command_timeout_secs: Some(0),
+        });
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("command_timeout_secs") && e.contains("> 0")));
+    }
+
+    #[test]
+    fn test_validate_pipeline_valid_values() {
+        let mut config = GitOpsConfig::default();
+        config.pipeline = Some(GitOpsPipelineConfig {
+            max_concurrent_commands: Some(10),
+            command_timeout_secs: Some(300),
+        });
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_server_guard_interval_too_low() {
+        let mut config = GitOpsConfig::default();
+        config.server_guard = Some(GitOpsServerGuardConfig {
+            state_collect_interval_secs: Some(30),
+        });
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("state_collect_interval_secs") && e.contains(">= 60")));
+    }
+
+    #[test]
+    fn test_validate_server_guard_interval_at_minimum() {
+        let mut config = GitOpsConfig::default();
+        config.server_guard = Some(GitOpsServerGuardConfig {
+            state_collect_interval_secs: Some(60),
+        });
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_server_guard_none_is_ok() {
+        let config = GitOpsConfig::default(); // server_guard is None
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_multiple_errors() {
+        let mut config = GitOpsConfig::default();
+        config.git.repo_path = String::new();
+        config.git.branch = String::new();
+        config.vault.path = String::new();
+        let errs = config.validate().unwrap_err();
+        assert!(errs.len() >= 3, "expected at least 3 errors, got {}", errs.len());
+    }
+
+    #[test]
+    fn test_validated_returns_config_on_success() {
+        let config = GitOpsConfig::default();
+        let result = config.validated().unwrap();
+        assert_eq!(result.git.branch, "main");
+    }
+
+    #[test]
+    fn test_validated_returns_error_on_failure() {
+        let mut config = GitOpsConfig::default();
+        config.git.repo_path = String::new();
+        let err = config.validated().unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("validation errors"));
+    }
+
+    #[test]
+    fn test_config_error_display() {
+        let err = ConfigError::InvalidPath {
+            field: "git.repo_path".into(),
+            path: "/no/such/dir".into(),
+            reason: "parent not creatable".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("git.repo_path"));
+        assert!(msg.contains("/no/such/dir"));
+    }
+
+    #[test]
+    fn test_config_error_invalid_value() {
+        let err = ConfigError::InvalidValue {
+            field: "pipeline.max_concurrent_commands".into(),
+            value: "0".into(),
+            reason: "must be > 0".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("0") && msg.contains("must be > 0"));
+    }
+
+    #[test]
+    fn test_config_error_missing_field() {
+        let err = ConfigError::MissingField {
+            field: "git.branch".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("git.branch"));
+    }
+
+    #[test]
+    fn test_config_error_conflicting_settings() {
+        let err = ConfigError::ConflictingSettings {
+            message: "Realtime sync requires remote_url".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("Realtime sync requires remote_url"));
+    }
+
+    #[test]
+    fn test_config_error_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<ConfigError>();
+    }
+
+    #[test]
+    fn test_config_serialization_with_optional_fields() {
+        let config = GitOpsConfig::default();
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        let deserialized: GitOpsConfig = serde_yaml::from_str(&yaml).unwrap();
+
+        assert_eq!(config.pipeline, deserialized.pipeline);
+        assert_eq!(config.server_guard, deserialized.server_guard);
+    }
+
+    #[test]
+    fn test_validate_repo_path_with_temp_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut config = GitOpsConfig::default();
+        config.git.repo_path = temp_dir.path().join("subdir").to_string_lossy().to_string();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_repo_path_whitespace_only() {
+        let mut config = GitOpsConfig::default();
+        config.git.repo_path = "   ".to_string();
+        let errs = config.validate().unwrap_err();
+        assert!(errs.iter().any(|e| e.contains("repo_path") && e.contains("empty")));
     }
 }

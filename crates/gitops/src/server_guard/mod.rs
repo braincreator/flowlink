@@ -44,8 +44,8 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 use tracing::{info, warn, debug};
 
-use event_types::{EventSource, GuardAlert, GuardEvent};
-use guard_mode::{GuardKillswitch, GuardMode};
+use event_types::{GuardAlert, GuardEvent};
+use guard_mode::GuardKillswitch;
 use command_runner::CommandRunner;
 use pipeline::{Pipeline, PipelineConfig, PipelineOutcome};
 

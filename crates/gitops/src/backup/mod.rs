@@ -189,7 +189,7 @@ impl BackupEngine {
             .max_by_key(|b| b.timestamp);
 
         if let Some(backup) = most_recent {
-            let result = self.restore.restore(&backup.id).await?;
+            let result = self.restore.restore(&backup.id, None).await?;
             info!("Auto-restore completed from backup {}", backup.id);
             return Ok(Some(result));
         }

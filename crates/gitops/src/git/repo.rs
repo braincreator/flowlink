@@ -3,6 +3,7 @@ use git2::Repository;
 use std::path::Path;
 
 pub struct RepositoryManager {
+    #[allow(dead_code)]
     repo: Repository,
 }
 

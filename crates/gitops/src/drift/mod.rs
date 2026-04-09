@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 /// Drift detector — orchestrates event-driven and periodic drift detection
 pub struct DriftDetector {
     config: crate::config::DriftConfig,
+    #[allow(dead_code)]
     state: Arc<RwLock<ServerState>>,
 }
 

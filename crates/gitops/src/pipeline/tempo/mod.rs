@@ -14,9 +14,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
-use crate::config::{CircuitBreakerConfig, GlobalRateLimit, RateLimitConfig};
+use crate::config::{GlobalRateLimit, RateLimitConfig};
+#[cfg(test)]
+use crate::config::CircuitBreakerConfig;
 use crate::types::{ActionTier, BreakerState, DenialFeedback, ExceedAction, RateBudget, RiskLevel, ToolRateLimit};
 
 use types::{CircuitBreakerInternal, ExponentialBackoffState, GlobalTracker, TierRateTracker, TempoState, ToolRateTracker};
@@ -35,6 +37,7 @@ const DEFAULT_TIER_LIMITS: &[(&str, ToolRateLimit)] = &[
     ("Network", ToolRateLimit { max_calls: 10, window_seconds: 60, on_exceed: ExceedAction::Escalate }),
 ];
 
+#[allow(dead_code)]
 const DEFAULT_GLOBAL_LIMIT: GlobalRateLimit = GlobalRateLimit {
     max_calls: 300,
     window_seconds: 60,

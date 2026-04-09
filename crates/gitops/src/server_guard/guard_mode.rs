@@ -9,7 +9,6 @@
 //! on the agent crate. It's a simple atomic state machine.
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};

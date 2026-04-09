@@ -39,6 +39,7 @@ impl ToolRateTracker {
         self.timestamps.len() as u32
     }
 
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.timestamps.clear();
     }
@@ -77,6 +78,7 @@ impl TierRateTracker {
         self.timestamps.len() as u32
     }
 
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.timestamps.clear();
     }
@@ -115,6 +117,7 @@ impl GlobalTracker {
         self.timestamps.len() as u32
     }
 
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.timestamps.clear();
     }
@@ -207,6 +210,7 @@ impl CircuitBreakerInternal {
         }
     }
 
+    #[allow(dead_code)]
     pub fn check_can_execute(&self, tier: ActionTier) -> bool {
         match self.state {
             BreakerState::Open { .. } => tier == ActionTier::ReadOnly,

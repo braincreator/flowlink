@@ -1,4 +1,4 @@
-use crate::{types::*, config::GitConfig};
+use crate::{types::*, config::{GitConfig, ConfigError}};
 use anyhow::{Context, Result};
 use git2::{Repository, Signature, Oid, StatusOptions};
 use serde_json::Value;
@@ -30,12 +30,28 @@ impl std::fmt::Debug for GitOpsEngine {
 }
 
 impl GitOpsEngine {
-    /// Create a new GitOpsEngine with configuration
-    pub fn new(config: GitConfig) -> Self {
-        Self {
+    /// Create a new GitOpsEngine with configuration.
+    ///
+    /// Validates the essential git config fields before constructing the engine.
+    pub fn new(config: GitConfig) -> Result<Self> {
+        // Validate git config fields
+        let mut errors: Vec<String> = Vec::new();
+
+        if config.repo_path.trim().is_empty() {
+            errors.push("git.repo_path must not be empty".into());
+        }
+        if config.branch.trim().is_empty() {
+            errors.push("git.branch must not be empty".into());
+        }
+
+        if !errors.is_empty() {
+            return Err(ConfigError::Multiple(errors).into());
+        }
+
+        Ok(Self {
             config,
             repository: None,
-        }
+        })
     }
 
     /// Initialize or open the state repository
@@ -422,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn test_initialize_new_repository() {
         let config = create_test_config();
-        let mut engine = GitOpsEngine::new(config);
+        let mut engine = GitOpsEngine::new(config).unwrap();
         
         engine.initialize().await.unwrap();
         
@@ -433,7 +449,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_status_empty_repo() {
         let config = create_test_config();
-        let mut engine = GitOpsEngine::new(config);
+        let mut engine = GitOpsEngine::new(config).unwrap();
         
         engine.initialize().await.unwrap();
         let status = engine.get_status().await.unwrap();
@@ -446,7 +462,7 @@ mod tests {
     #[tokio::test]
     async fn test_validate_integrity_new_repo() {
         let config = create_test_config();
-        let mut engine = GitOpsEngine::new(config);
+        let mut engine = GitOpsEngine::new(config).unwrap();
         
         engine.initialize().await.unwrap();
         let integrity = engine.validate_integrity().await.unwrap();
@@ -469,7 +485,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_snapshot() {
         let config = create_test_config();
-        let mut engine = GitOpsEngine::new(config);
+        let mut engine = GitOpsEngine::new(config).unwrap();
         
         engine.initialize().await.unwrap();
         

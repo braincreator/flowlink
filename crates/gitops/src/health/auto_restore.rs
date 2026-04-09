@@ -72,7 +72,7 @@ impl AutoRestoreEngine {
 
         // Delegate to the backup engine's restore engine.
         // RestoreEngine::restore returns Result<RestoreResult>.
-        match self.backup_engine.restore_engine().restore(backup_id).await {
+        match self.backup_engine.restore_engine().restore(backup_id, None).await {
             Ok(result) => {
                 // Only increment the counter on an actual restore attempt that succeeded
                 let mut count = self.restore_count.write().await;

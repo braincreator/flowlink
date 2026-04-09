@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
-use bollard::{Docker, system::EventsOptions};
+use bollard::Docker;
 use futures_util::StreamExt;
 use notify::{Event, EventKind, RecursiveMode, Watcher as NotifyWatcher};
 use tokio::sync::mpsc;

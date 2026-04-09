@@ -9,7 +9,6 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use std::io::Read;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tar::Builder;
@@ -269,7 +268,15 @@ impl FileBackupEngine {
                 }
             }
 
-            builder.finish().context("Failed to finalize archive")?;
+            builder.finish().context("Failed to finalize tar archive")?;
+            // Recover the GzEncoder to explicitly finalize the gzip stream,
+            // ensuring the gzip footer is written before we checksum the file.
+            let encoder = builder
+                .into_inner()
+                .context("Failed to recover gzip encoder")?;
+            encoder
+                .finish()
+                .context("Failed to finalize gzip stream")?;
 
             // Compute checksum of the archive
             let archive_data = std::fs::read(&output_path)?;

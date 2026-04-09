@@ -6,7 +6,7 @@ use crate::types::{AuditEntry, IntegrityStatus};
 use anyhow::{Context, Result};
 use chrono::{NaiveDate, Utc};
 use std::path::PathBuf;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tracing::{debug, info};
 
 use entry::compute_hmac;

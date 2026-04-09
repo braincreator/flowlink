@@ -130,7 +130,7 @@ impl GitSync {
         };
 
         // Fetch from remote
-        let mut callbacks = Self::remote_callbacks();
+        let callbacks = Self::remote_callbacks();
         let mut fetch_opts = FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
 

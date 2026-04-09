@@ -64,6 +64,7 @@ pub enum PipelineAction {
 
 /// The L3 pipeline orchestrator
 pub struct PipelineOrchestrator {
+    #[allow(dead_code)]
     config: Arc<GitOpsConfig>,
     literal_checker: LiteralChecker,
     classifier: ActionClassifier,
@@ -308,12 +309,12 @@ impl PipelineOrchestrator {
     async fn write_audit(
         &self,
         command: &str,
-        args: &[String],
-        tier: &ActionTier,
-        action: &PipelineAction,
+        _args: &[String],
+        _tier: &ActionTier,
+        _action: &PipelineAction,
     ) -> Option<String> {
         let audit_guard = self.audit.read().await;
-        if let Some(ref audit) = *audit_guard {
+        if let Some(ref _audit) = *audit_guard {
             let entry_id = uuid::Uuid::new_v4().to_string();
             debug!("Audit entry created: {} for '{}'", entry_id, command);
             // In a full implementation, we'd call audit.log_entry() here
@@ -324,7 +325,7 @@ impl PipelineOrchestrator {
     }
 
     /// Post-execution health check and auto-restore
-    pub async fn post_execution_check(&self, backup_id: Option<&str>) -> PostCheckResult {
+    pub async fn post_execution_check(&self, _backup_id: Option<&str>) -> PostCheckResult {
         let health_guard = self.health.read().await;
         if let Some(ref checker) = *health_guard {
             let result = checker.run_checks().await;

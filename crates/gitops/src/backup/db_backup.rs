@@ -1,6 +1,5 @@
 //! Database backup engine — PostgreSQL and MySQL dumps
 
-use crate::types::*;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};

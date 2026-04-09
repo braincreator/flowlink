@@ -8,12 +8,11 @@
 //! 5. Killswitch check
 //! 6. Actuator dispatch
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use super::command_runner::CommandRunner;
@@ -244,7 +243,7 @@ impl Classifier {
         event.detail = detail;
     }
 
-    fn classify_process(&self, event: &mut GuardEvent, pid: u32, uid: u32, comm: &str, args: &str, already_frozen: bool) {
+    fn classify_process(&self, event: &mut GuardEvent, _pid: u32, uid: u32, comm: &str, _args: &str, already_frozen: bool) {
         // Root running dangerous commands = Critical
         let dangerous_binaries = ["rm", "shred", "mkfs", "dd", "chmod", "chown", "iptables", "useradd", "userdel", "passwd"];
 
