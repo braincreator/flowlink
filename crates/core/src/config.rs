@@ -252,11 +252,14 @@ pub struct BillingConfig {
     pub currency: String,
     #[serde(default)]
     pub plans: Vec<PlanConfig>,
+    /// JWT-токен для авторизации в API Точка Банка
+    #[serde(default)]
+    pub tochka_jwt_token: Option<String>,
 }
 
 impl Default for BillingConfig {
     fn default() -> Self {
-        Self { enabled: false, currency: "RUB".into(), plans: vec![] }
+        Self { enabled: false, currency: "RUB".into(), plans: vec![], tochka_jwt_token: None }
     }
 }
 

@@ -157,6 +157,48 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_devices_account ON devices(account_id);
             CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
         "#),
+
+        ("006_subscriptions", r#"
+            CREATE TABLE IF NOT EXISTS subscriptions (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(account_id),
+                plan_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                period TEXT NOT NULL DEFAULT 'month',
+                amount_kopecks BIGINT NOT NULL,
+                tochka_subscription_id TEXT,
+                payment_method TEXT,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ,
+                trial_ends_at TIMESTAMPTZ,
+                next_billing_at TIMESTAMPTZ,
+                cancelled_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_account ON subscriptions(account_id);
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_tochka ON subscriptions(tochka_subscription_id) WHERE tochka_subscription_id IS NOT NULL;
+        "#),
+
+        ("007_orders", r#"
+            CREATE TABLE IF NOT EXISTS orders (
+                id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(account_id),
+                invoice_id TEXT REFERENCES invoices(id),
+                amount_kopecks BIGINT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                payment_method TEXT NOT NULL DEFAULT 'card',
+                tochka_payment_id TEXT,
+                payment_url TEXT,
+                paid_at TIMESTAMPTZ,
+                failed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_orders_account ON orders(account_id);
+            CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+        "#),
     ]
 }
 
@@ -167,7 +209,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 5);
+        assert_eq!(migrations.len(), 7);
     }
 
     #[test]
@@ -179,6 +221,8 @@ mod tests {
             "003_invoices",
             "004_audit_log",
             "005_agents_devices",
+            "006_subscriptions",
+            "007_orders",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(*name, expected_names[i], "Migration at index {} has wrong name", i);

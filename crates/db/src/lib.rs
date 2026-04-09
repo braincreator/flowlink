@@ -19,6 +19,8 @@ pub mod accounts;
 pub mod usage;
 pub mod invoices;
 pub mod audit;
+pub mod subscriptions;
+pub mod orders;
 pub mod migrations;
 
 pub use pool::DbPool;

@@ -229,3 +229,234 @@ impl Drop for HybridHandle {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audit::AuditLog;
+    use crate::notifier::Notifier;
+    use crate::snapshot::SnapshotBackend;
+    use tempfile::NamedTempFile;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    fn make_shield_guard() -> ShieldGuard {
+        let tmp = NamedTempFile::new().unwrap();
+        let audit = Arc::new(RwLock::new(AuditLog::open(tmp.path()).unwrap()));
+        let notifier = Notifier::new(None);
+        ShieldGuard::new(
+            crate::engine::AnalysisEngine { enable_ast: false, enable_interpreter: false },
+            SnapshotBackend::None,
+            audit,
+            notifier,
+            crate::guard::ShieldGuardConfig::default(),
+        )
+    }
+
+    // ═══════════════════════════════════════════
+    // HybridConfig
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn hybrid_config_default() {
+        let cfg = HybridConfig::default();
+        assert!(cfg.kernel_l1);
+        assert!(cfg.userspace_l2_l3);
+        assert!(cfg.auto_release_false_positives);
+        assert_eq!(cfg.false_positive_timeout_ms, 100);
+        assert!(!cfg.patterns.is_empty());
+    }
+
+    #[test]
+    fn hybrid_config_custom() {
+        let cfg = HybridConfig {
+            kernel_l1: false,
+            userspace_l2_l3: false,
+            auto_release_false_positives: false,
+            false_positive_timeout_ms: 500,
+            patterns: vec![],
+        };
+        assert!(!cfg.kernel_l1);
+        assert!(!cfg.userspace_l2_l3);
+        assert_eq!(cfg.false_positive_timeout_ms, 500);
+        assert!(cfg.patterns.is_empty());
+    }
+
+    #[test]
+    fn hybrid_config_debug_clone() {
+        let cfg = HybridConfig::default();
+        let _ = format!("{:?}", cfg);
+        let _ = cfg.clone();
+    }
+
+    #[test]
+    fn default_patterns_not_empty() {
+        let patterns = default_patterns();
+        assert!(patterns.len() > 10);
+        // Verify key dangerous patterns are present
+        let names: Vec<&str> = patterns.iter().map(|p| p.binary.as_str()).collect();
+        assert!(names.contains(&"rm"));
+        assert!(names.contains(&"shred"));
+        assert!(names.contains(&"mkfs."));
+        assert!(names.contains(&"dd"));
+        assert!(names.contains(&"shutdown"));
+        assert!(names.contains(&"docker"));
+        assert!(names.contains(&"iptables"));
+    }
+
+    #[test]
+    fn dangerous_pattern_fields() {
+        let pat = DangerousPattern {
+            binary: "rm".into(),
+            check_args: true,
+            check_paths: true,
+        };
+        assert_eq!(pat.binary, "rm");
+        assert!(pat.check_args);
+        assert!(pat.check_paths);
+    }
+
+    #[test]
+    fn dangerous_pattern_debug_clone() {
+        let pat = DangerousPattern {
+            binary: "test".into(),
+            check_args: false,
+            check_paths: false,
+        };
+        let _ = format!("{:?}", pat);
+        let cloned = pat.clone();
+        assert_eq!(cloned.binary, pat.binary);
+    }
+
+    // ═══════════════════════════════════════════
+    // KernelBackend enum
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn kernel_backend_equality() {
+        assert_eq!(KernelBackend::Es, KernelBackend::Es);
+        assert_eq!(KernelBackend::Ebpf, KernelBackend::Ebpf);
+        assert_eq!(KernelBackend::Simulated, KernelBackend::Simulated);
+        assert_ne!(KernelBackend::Es, KernelBackend::Ebpf);
+        assert_ne!(KernelBackend::Ebpf, KernelBackend::Simulated);
+    }
+
+    #[test]
+    fn kernel_backend_copy() {
+        let backend = KernelBackend::Simulated;
+        let copied = backend;
+        assert_eq!(backend, copied);
+    }
+
+    #[test]
+    fn kernel_backend_debug() {
+        let _ = format!("{:?}", KernelBackend::Es);
+        let _ = format!("{:?}", KernelBackend::Ebpf);
+        let _ = format!("{:?}", KernelBackend::Simulated);
+    }
+
+    // ═══════════════════════════════════════════
+    // HybridGuard construction
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn hybrid_guard_construction() {
+        let guard = make_shield_guard();
+        let config = HybridConfig::default();
+        let hybrid = HybridGuard::new(guard, config);
+        // Verify inner guard is accessible
+        let _ = hybrid.inner();
+    }
+
+    #[test]
+    fn hybrid_guard_inner_access() {
+        let guard = make_shield_guard();
+        let hybrid = HybridGuard::new(guard, HybridConfig::default());
+        let inner = hybrid.inner();
+        assert!(!inner.allowed_uids().is_empty());
+    }
+
+    #[test]
+    fn hybrid_guard_config_l1_disabled() {
+        let guard = make_shield_guard();
+        let config = HybridConfig {
+            kernel_l1: false,
+            ..HybridConfig::default()
+        };
+        let hybrid = HybridGuard::new(guard, config);
+        assert!(!hybrid.config.kernel_l1);
+    }
+
+    #[tokio::test]
+    async fn hybrid_guard_start_l1_disabled() {
+        let guard = make_shield_guard();
+        let config = HybridConfig {
+            kernel_l1: false,
+            ..HybridConfig::default()
+        };
+        let hybrid = Arc::new(HybridGuard::new(guard, config));
+        let result = hybrid.start().await;
+        assert!(result.is_ok());
+        // Should return handle with no task
+        let _handle = result.unwrap();
+    }
+
+    #[tokio::test]
+    async fn hybrid_guard_start_simulated_backend() {
+        let guard = make_shield_guard();
+        // Force Simulated backend by using kernel_l1 = true
+        // On non-Linux/non-macOS, detect_backend returns Simulated
+        let config = HybridConfig::default();
+        let hybrid = Arc::new(HybridGuard::new(guard, config));
+        let result = hybrid.start().await;
+        // On macOS: tries ES → may fall back to userspace-only
+        // On non-Linux/non-macOS: Simulated → userspace-only
+        // Either way, should not error
+        assert!(result.is_ok());
+    }
+
+    // ═══════════════════════════════════════════
+    // KernelEvent
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn kernel_event_construction() {
+        let event = KernelEvent {
+            pid: 1234,
+            ppid: 1,
+            uid: 1000,
+            comm: "rm".into(),
+            args: "-rf /".into(),
+            signal_sent: true,
+        };
+        assert_eq!(event.pid, 1234);
+        assert_eq!(event.uid, 1000);
+        assert!(event.signal_sent);
+    }
+
+    #[test]
+    fn kernel_event_clone() {
+        let event = KernelEvent {
+            pid: 1,
+            ppid: 0,
+            uid: 0,
+            comm: "test".into(),
+            args: String::new(),
+            signal_sent: false,
+        };
+        let cloned = event.clone();
+        assert_eq!(cloned.pid, event.pid);
+    }
+
+    #[test]
+    fn kernel_event_debug() {
+        let event = KernelEvent {
+            pid: 1, ppid: 0, uid: 0,
+            comm: "bash".into(),
+            args: "-c 'rm -rf /'".into(),
+            signal_sent: false,
+        };
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("bash"));
+    }
+}

@@ -171,6 +171,11 @@ impl PaymentConfig {
         let rubles = kopecks as f64 / 100.0;
         format!("{:.2} ₽", rubles)
     }
+
+    /// Получить конфиг SBP (Точка Банк)
+    pub fn sbp_config(&self) -> Option<&SbpConfig> {
+        self.sbp.as_ref()
+    }
 }
 
 #[cfg(test)]

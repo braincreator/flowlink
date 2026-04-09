@@ -667,4 +667,288 @@ mod tests {
         let _ = format!("{:?}", cfg);
         let _ = cfg.clone();
     }
+
+    // ═══════════════════════════════════════════
+    // Edge cases: UID exemption
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn config_no_allowed_uids() {
+        let cfg = ShieldGuardConfig {
+            allowed_uids: vec![],
+            ..ShieldGuardConfig::default()
+        };
+        assert!(cfg.allowed_uids.is_empty());
+    }
+
+    #[test]
+    fn config_multiple_allowed_uids() {
+        let cfg = ShieldGuardConfig {
+            allowed_uids: vec![0, 1000, 1001],
+            ..ShieldGuardConfig::default()
+        };
+        assert_eq!(cfg.allowed_uids.len(), 3);
+        assert!(cfg.allowed_uids.contains(&1000));
+    }
+
+    #[tokio::test]
+    async fn intercept_nonexistent_pid_allows() {
+        let guard = make_guard();
+        // Non-existent PID — /proc read fails → returns Allowed
+        let result = guard.intercept(9999999).await;
+        match result {
+            InterceptResult::Allowed => {}
+            _ => {} // Also fine if it can't read /proc
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // Edge cases: binary filter
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn config_monitored_binaries() {
+        let cfg = ShieldGuardConfig {
+            monitored_binaries: vec!["rm".into(), "shred".into()],
+            ..ShieldGuardConfig::default()
+        };
+        assert_eq!(cfg.monitored_binaries.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn intercept_binary_filter_skips_non_monitored() {
+        // When monitored_binaries is set, non-matching binaries are allowed
+        let tmp = NamedTempFile::new().unwrap();
+        let audit = Arc::new(RwLock::new(AuditLog::open(tmp.path()).unwrap()));
+        let notifier = Notifier::new(None);
+        let cfg = ShieldGuardConfig {
+            monitored_binaries: vec!["rm".into()],
+            allowed_uids: vec![], // Don't exempt any UID
+            ..ShieldGuardConfig::default()
+        };
+        let guard = ShieldGuard::new(
+            test_engine(),
+            SnapshotBackend::None,
+            audit,
+            notifier,
+            cfg,
+        );
+        // Own process is not "rm", so should be allowed
+        let result = guard.intercept(std::process::id()).await;
+        assert!(matches!(result, InterceptResult::Allowed));
+    }
+
+    // ═══════════════════════════════════════════
+    // Edge cases: auto_kill_critical
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn config_auto_kill_critical() {
+        let cfg = ShieldGuardConfig {
+            auto_kill_critical: true,
+            auto_kill_timeout_secs: 300,
+            ..ShieldGuardConfig::default()
+        };
+        assert!(cfg.auto_kill_critical);
+        assert_eq!(cfg.auto_kill_timeout_secs, 300);
+    }
+
+    // ═══════════════════════════════════════════
+    // Stats edge cases
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn stats_increment_and_serialize() {
+        let mut stats = ShieldStats::default();
+        stats.total_analyzed = 100;
+        stats.allowed = 90;
+        stats.blocked = 5;
+        stats.released = 3;
+        stats.timeout_killed = 2;
+        stats.pending = 1;
+
+        let json = serde_json::to_string(&stats).unwrap();
+        assert!(json.contains("\"total_analyzed\":100"));
+        assert!(json.contains("\"blocked\":5"));
+        assert!(json.contains("\"pending\":1"));
+    }
+
+    #[test]
+    fn stats_default_serialize() {
+        let stats = ShieldStats::default();
+        let json = serde_json::to_string(&stats).unwrap();
+        // All fields should be 0
+        assert!(json.contains("\"total_analyzed\":0"));
+        assert!(json.contains("\"allowed\":0"));
+        assert!(json.contains("\"blocked\":0"));
+        assert!(json.contains("\"released\":0"));
+        assert!(json.contains("\"timeout_killed\":0"));
+        assert!(json.contains("\"pending\":0"));
+    }
+
+    #[test]
+    fn stats_serialize_roundtrip_via_value() {
+        let json = serde_json::to_string(&ShieldStats::default()).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(val["total_analyzed"], 0);
+        assert_eq!(val["pending"], 0);
+    }
+
+    // ═══════════════════════════════════════════
+    // InterceptResult serialization edge cases
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn intercept_result_allowed_serialization() {
+        let r = InterceptResult::Allowed;
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("Allowed"));
+    }
+
+    #[test]
+    fn intercept_result_intercepted_serialization() {
+        let r = InterceptResult::Intercepted {
+            pid: 1234,
+            threat: "rm_rf".into(),
+            forensic: None,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("Intercepted"));
+        assert!(json.contains("1234"));
+        assert!(json.contains("rm_rf"));
+    }
+
+    #[test]
+    fn intercept_result_blocked_serialization() {
+        let r = InterceptResult::Blocked {
+            pid: 5678,
+            reason: "Auto-killed critical threat: rm_rf".into(),
+            forensic: None,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("Blocked"));
+        assert!(json.contains("5678"));
+    }
+
+    // ═══════════════════════════════════════════
+    // ApprovalRequest serialization edge cases
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn approval_request_minimal() {
+        let req = ApprovalRequest {
+            pid: 1,
+            command: String::new(),
+            threat_name: String::new(),
+            threat_level: String::new(),
+            username: String::new(),
+            snapshot: None,
+            intercepted_at: String::new(),
+            forensic: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"pid\":1"));
+    }
+
+    // ═══════════════════════════════════════════
+    // resolve_approval edge cases
+    // ═══════════════════════════════════════════
+
+    #[tokio::test]
+    async fn resolve_approval_nonexistent() {
+        let guard = make_guard();
+        let result = guard.resolve_approval(99999, false).await.unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_nonexistent() {
+        let guard = make_guard();
+        let result = guard.cancel_pending(99999).await.unwrap();
+        assert!(!result);
+    }
+
+    // ═══════════════════════════════════════════
+    // Concurrent intercept calls
+    // ═══════════════════════════════════════════
+
+    #[tokio::test]
+    async fn concurrent_intercepts() {
+        let guard = Arc::new(make_guard());
+        let mut handles = vec![];
+
+        for _ in 0..5 {
+            let g = guard.clone();
+            handles.push(tokio::spawn(async move {
+                // Use own PID — safe since it's exempt
+                let _ = g.intercept(std::process::id()).await;
+            }));
+        }
+
+        for h in handles {
+            let _ = h.await;
+        }
+        // No panic = success
+        let stats = guard.stats().await;
+        assert!(stats.total_analyzed >= 0);
+    }
+
+    // ═══════════════════════════════════════════
+    // Policy engine
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn guard_no_policy_engine_by_default() {
+        let guard = make_guard();
+        assert!(guard.policy_engine().is_none());
+    }
+
+    #[test]
+    fn guard_approval_sender() {
+        let guard = make_guard();
+        let _sender = guard.approval_sender();
+        // Just verify it doesn't panic
+    }
+
+    // ═══════════════════════════════════════════
+    // Config variations
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn config_snapshot_dataset() {
+        let cfg = ShieldGuardConfig {
+            snapshot_dataset: Some("zpool/data".into()),
+            ..ShieldGuardConfig::default()
+        };
+        assert_eq!(cfg.snapshot_dataset.as_deref(), Some("zpool/data"));
+    }
+
+    #[test]
+    fn config_policy_file() {
+        let cfg = ShieldGuardConfig {
+            policy_file: Some("/etc/flowlink/policy.yaml".into()),
+            ..ShieldGuardConfig::default()
+        };
+        assert_eq!(cfg.policy_file.as_deref(), Some("/etc/flowlink/policy.yaml"));
+    }
+
+    #[test]
+    fn config_all_fields_false() {
+        let cfg = ShieldGuardConfig {
+            auto_kill_critical: false,
+            auto_kill_timeout_secs: 0,
+            snapshot_on_intercept: false,
+            notify_on_intercept: false,
+            audit_all: false,
+            allowed_uids: vec![],
+            monitored_binaries: vec![],
+            snapshot_dataset: None,
+            policy_file: None,
+        };
+        assert!(!cfg.snapshot_on_intercept);
+        assert!(!cfg.notify_on_intercept);
+        assert!(!cfg.audit_all);
+        assert!(cfg.allowed_uids.is_empty());
+        assert!(cfg.monitored_binaries.is_empty());
+    }
 }

@@ -784,6 +784,325 @@ footer a {
   color: var(--text-secondary);
 }
 
+/* ═══ PRICING TOGGLE ═══ */
+.pricing-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.pricing-toggle .active {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.toggle-track {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s var(--ease-out);
+}
+
+.toggle-track.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  transition: transform 0.2s var(--ease-spring);
+}
+
+.toggle-track.on .toggle-thumb {
+  transform: translateX(20px);
+}
+
+.toggle-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.popular-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: #0a0a0a;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
+}
+
+/* ═══ CHECKOUT ═══ */
+.checkout-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-top: 24px;
+}
+
+.checkout-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.checkout-methods {
+  margin-top: 24px;
+}
+
+.method-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.method-btn {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+}
+
+.method-btn:hover {
+  border-color: var(--border-hover);
+}
+
+.method-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.checkout-error {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--critical-bg);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: var(--critical);
+  font-size: 13px;
+}
+
+/* ═══ BILLING DASHBOARD ═══ */
+.billing-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.billing-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.billing-card-body {
+  padding: 20px;
+}
+
+.billing-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+}
+
+.billing-info-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.text-muted {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Usage bars */
+.usage-bar-wrapper {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.usage-bar-wrapper:last-child {
+  border-bottom: none;
+}
+
+.usage-bar-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+
+.usage-bar-value {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.usage-bar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.5s var(--ease-out);
+}
+
+.usage-bar-fill.warning {
+  background: var(--warning);
+}
+
+.usage-bar-fill.danger {
+  background: var(--critical);
+}
+
+/* Orders table */
+.orders-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.orders-table th {
+  padding: 12px 20px;
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+}
+
+.orders-table td {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.orders-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Buttons */
+.btn-danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--critical);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+/* Success / Fail icons */
+.success-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #0a0a0a;
+  font-size: 36px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+  box-shadow: 0 0 40px var(--accent-glow-strong);
+}
+
+.fail-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--critical-bg);
+  border: 2px solid var(--critical);
+  color: var(--critical);
+  font-size: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 24px;
+}
+
+.modal-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  max-width: 400px;
+  width: 100%;
+}
+
+.modal-card h3 {
+  font-size: 17px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.modal-card p {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
 /* ═══ RESPONSIVE — breakpoints: 375, 768, 1024 ═══ */
 @media (max-width: 1024px) {
   .features-grid {

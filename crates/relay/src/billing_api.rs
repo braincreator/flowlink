@@ -1,10 +1,12 @@
 //! Billing API endpoints for the relay server
 //!
-//! REST API for plan management, usage checking, and invoices.
+//! REST API для управления тарифами, подписками, платежами и вебхуками Точка Банка.
 
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
+    body::Bytes,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,21 @@ pub struct TopUpRequest {
     pub method: String,
 }
 
+#[derive(Deserialize)]
+pub struct CreateSubscriptionRequest {
+    pub plan_id: String,
+    pub period: String,
+    pub amount_kopecks: i64,
+    pub tochka_subscription_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct CreateOrderRequest {
+    pub amount_kopecks: i64,
+    pub description: Option<String>,
+    pub payment_method: String,
+}
+
 #[derive(Serialize)]
 pub struct BillingInfo {
     pub plan_id: String,
@@ -48,14 +65,28 @@ fn get_billing_engine(state: &AppState) -> Result<&Arc<flowlink_billing::Billing
     match &state.billing {
         Some(engine) => Ok(engine),
         None => Err((
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            StatusCode::SERVICE_UNAVAILABLE,
             Json(json!({"error": "Billing not configured"})),
         ).into_response()),
     }
 }
 
+/// Constant-time string comparison для предотвращения timing-атак
+fn const_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    let mut result = 0u8;
+    for i in 0..a_bytes.len() {
+        result |= a_bytes[i] ^ b_bytes[i];
+    }
+    result == 0
+}
+
 // ═══════════════════════════════════════════════
-// Handlers
+// Handlers — Existing billing endpoints
 // ═══════════════════════════════════════════════
 
 /// GET /api/billing — get billing info for the authenticated account
@@ -105,22 +136,17 @@ pub async fn get_billing_info(
         available_plans,
     };
 
-    (axum::http::StatusCode::OK, Json(info)).into_response()
+    (StatusCode::OK, Json(info)).into_response()
 }
 
 /// GET /api/billing/usage — get current usage snapshot
-///
-/// Returns the billing engine usage plus real-time usage tracker data
-/// (per-agent requests, tokens, and commands).
 pub async fn get_usage(
     State(state): State<AppState>,
     account: AccountIdExtractor,
 ) -> impl IntoResponse {
-    // Collect usage tracker data
     let all_tracker_usage = state.usage_tracker.get_all_usage().await;
     let (daily_requests, daily_tokens) = state.usage_tracker.today_stats().await;
 
-    // Build enriched response
     let mut response = serde_json::json!({
         "tracker": {
             "agents": all_tracker_usage,
@@ -130,13 +156,12 @@ pub async fn get_usage(
         }
     });
 
-    // Also include billing engine snapshot if available
     if let Some(billing_engine) = &state.billing {
         let snapshot = billing_engine.usage().get_snapshot(&account.0);
         response["billing"] = serde_json::to_value(&snapshot).unwrap_or(json!(null));
     }
 
-    (axum::http::StatusCode::OK, Json(response)).into_response()
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 /// GET /api/billing/plans — list available plans
@@ -147,7 +172,7 @@ pub async fn list_plans(State(state): State<AppState>) -> impl IntoResponse {
     };
 
     let plans = billing_engine.plans().list_available();
-    (axum::http::StatusCode::OK, Json(plans)).into_response()
+    (StatusCode::OK, Json(plans)).into_response()
 }
 
 /// POST /api/billing/change-plan — change plan
@@ -165,15 +190,12 @@ pub async fn change_plan(
 
     match billing_engine.change_plan(&mut account_billing, &body.plan_id) {
         Ok(created_invoice) => {
-            // change_plan already calls update_account internally
-            // Persist to DB if available
             if let Some(db) = &state.db {
                 if let Err(e) = flowlink_db::accounts::AccountRepo::update_plan(
                     db.pool(), &account.0, &body.plan_id,
                 ).await {
                     log::warn!("Failed to persist plan change to DB: {e}");
                 }
-                // Persist invoice to DB
                 if let Some(ref inv) = created_invoice {
                     let row = flowlink_db::invoices::InvoiceRow {
                         id: inv.id.clone(),
@@ -204,10 +226,10 @@ pub async fn change_plan(
             if let Some(inv) = created_invoice {
                 resp["invoice"] = serde_json::to_value(&inv).unwrap_or(json!(null));
             }
-            (axum::http::StatusCode::OK, Json(resp)).into_response()
+            (StatusCode::OK, Json(resp)).into_response()
         }
         Err(e) => {
-            (axum::http::StatusCode::BAD_REQUEST, Json(json!({
+            (StatusCode::BAD_REQUEST, Json(json!({
                 "error": e.to_string(),
             }))).into_response()
         }
@@ -225,7 +247,7 @@ pub async fn list_invoices(
     };
 
     let invoices = billing_engine.invoices().list_for_account(&account.0);
-    (axum::http::StatusCode::OK, Json(invoices)).into_response()
+    (StatusCode::OK, Json(invoices)).into_response()
 }
 
 /// GET /api/billing/invoices/{id} — get specific invoice
@@ -239,9 +261,9 @@ pub async fn get_invoice(
     };
 
     match billing_engine.invoices().get(&id) {
-        Some(invoice) => (axum::http::StatusCode::OK, Json(invoice)).into_response(),
+        Some(invoice) => (StatusCode::OK, Json(invoice)).into_response(),
         None => {
-            (axum::http::StatusCode::NOT_FOUND, Json(json!({
+            (StatusCode::NOT_FOUND, Json(json!({
                 "error": "Invoice not found",
             }))).into_response()
         }
@@ -263,7 +285,189 @@ pub async fn list_payment_methods(State(state): State<AppState>) -> impl IntoRes
         }))
         .collect();
 
-    (axum::http::StatusCode::OK, Json(methods)).into_response()
+    (StatusCode::OK, Json(methods)).into_response()
+}
+
+// ═══════════════════════════════════════════════
+// Handlers — Subscriptions (Точка Банк)
+// ═══════════════════════════════════════════════
+
+/// GET /api/billing/subscriptions — список подписок аккаунта
+pub async fn list_subscriptions(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+    match flowlink_db::subscriptions::SubscriptionRepo::list_for_account(db.pool(), &account.0).await {
+        Ok(subs) => (StatusCode::OK, Json(json!(subs))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// POST /api/billing/subscriptions — создать подписку
+pub async fn create_subscription(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+    Json(body): Json<CreateSubscriptionRequest>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    match flowlink_db::subscriptions::SubscriptionRepo::create(
+        db.pool(), &id, &account.0, &body.plan_id, &body.period, body.amount_kopecks, body.tochka_subscription_id.as_deref(),
+    ).await {
+        Ok(sub) => (StatusCode::CREATED, Json(json!(sub))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// POST /api/billing/subscriptions/:id/cancel — отменить подписку
+pub async fn cancel_subscription(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    _account: AccountIdExtractor,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+    match flowlink_db::subscriptions::SubscriptionRepo::cancel(db.pool(), &id).await {
+        Ok(()) => (StatusCode::OK, Json(json!({"cancelled": true}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+// ═══════════════════════════════════════════════
+// Handlers — Orders (разовые платежи)
+// ═══════════════════════════════════════════════
+
+/// POST /api/billing/orders — создать платёжный заказ
+pub async fn create_order(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+    Json(body): Json<CreateOrderRequest>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    match flowlink_db::orders::OrderRepo::create(
+        db.pool(), &id, &account.0, body.amount_kopecks, body.description.as_deref(), &body.payment_method,
+    ).await {
+        Ok(order) => (StatusCode::CREATED, Json(json!(order))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// GET /api/billing/orders — список заказов аккаунта
+pub async fn list_orders(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+    match flowlink_db::orders::OrderRepo::list_for_account(db.pool(), &account.0).await {
+        Ok(orders) => (StatusCode::OK, Json(json!(orders))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+// ═══════════════════════════════════════════════
+// Handlers — Tochka webhook
+// ═══════════════════════════════════════════════
+
+/// POST /api/billing/webhook/tochka — вебхук коллбеков от Точка Банка
+/// Проверяет HMAC-подпись и обновляет статус подписки/заказа в БД
+pub async fn tochka_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    // Получаем secret_key из конфига биллинга через BillingEngine
+    let secret_key = state.billing.as_ref().and_then(|engine| {
+        engine.payments().sbp_config().map(|c| c.secret_key.clone())
+    });
+
+    let secret = match secret_key {
+        Some(k) => k,
+        None => {
+            log::warn!("Вебхук Точки получен, но secret_key не настроен");
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "No secret key configured"}))).into_response();
+        }
+    };
+
+    // Проверяем HMAC-подпись из заголовка X-Signature
+    let sig_header = headers.get("X-Signature").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let expected = {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC key");
+        mac.update(&body);
+        let result = mac.finalize();
+        hex::encode(result.into_bytes())
+    };
+
+    if !const_eq(sig_header, &expected) {
+        log::warn!("HMAC вебхука Точки не прошёл проверку");
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid signature"}))).into_response();
+    }
+
+    // Парсим тело коллбека
+    let callback: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("Не удалось распарсить тело вебхука: {e}");
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid JSON"}))).into_response();
+        }
+    };
+
+    // Обновляем статус в БД по типу коллбека
+    if let Some(db) = &state.db {
+        let event_type = callback.get("event_type").and_then(|v| v.as_str()).unwrap_or("");
+        match event_type {
+            "subscription.activated" | "subscription.renewed" => {
+                if let Some(sub_id) = callback.get("subscription_id").and_then(|v| v.as_str()) {
+                    if let Err(e) = flowlink_db::subscriptions::SubscriptionRepo::update_status(db.pool(), sub_id, "active").await {
+                        log::warn!("Не удалось обновить подписку {sub_id}: {e}");
+                    }
+                }
+            }
+            "subscription.cancelled" => {
+                if let Some(sub_id) = callback.get("subscription_id").and_then(|v| v.as_str()) {
+                    if let Err(e) = flowlink_db::subscriptions::SubscriptionRepo::cancel(db.pool(), sub_id).await {
+                        log::warn!("Не удалось отменить подписку {sub_id}: {e}");
+                    }
+                }
+            }
+            "payment.success" => {
+                if let Some(order_id) = callback.get("order_id").and_then(|v| v.as_str()) {
+                    let payment_id = callback.get("payment_id").and_then(|v| v.as_str()).unwrap_or("");
+                    if let Err(e) = flowlink_db::orders::OrderRepo::update_paid(db.pool(), order_id, payment_id).await {
+                        log::warn!("Не обновить заказ {order_id}: {e}");
+                    }
+                }
+            }
+            "payment.failed" => {
+                if let Some(order_id) = callback.get("order_id").and_then(|v| v.as_str()) {
+                    if let Err(e) = flowlink_db::orders::OrderRepo::update_failed(db.pool(), order_id).await {
+                        log::warn!("Не обновить заказ {order_id}: {e}");
+                    }
+                }
+            }
+            other => log::info!("Неизвестный тип вебхука Точки: {other}"),
+        }
+    }
+
+    (StatusCode::OK, Json(json!({"ok": true}))).into_response()
 }
 
 #[cfg(test)]
@@ -271,12 +475,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_const_eq_same() {
+        assert!(const_eq("abc", "abc"));
+    }
+
+    #[test]
+    fn test_const_eq_different() {
+        assert!(!const_eq("abc", "abd"));
+    }
+
+    #[test]
+    fn test_const_eq_different_length() {
+        assert!(!const_eq("abc", "abcd"));
+    }
+
+    #[test]
     fn test_billing_info_serialization() {
         let info = BillingInfo {
             plan_id: "free".to_string(),
             plan_name: "Free".to_string(),
             active: true,
-            balance_rub: "0.00 ₽".to_string(),
+            balance_rub: "0.00 RUB".to_string(),
             expires_at: None,
             usage: json!(null),
             available_plans: vec![],
