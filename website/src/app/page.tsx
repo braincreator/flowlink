@@ -251,17 +251,19 @@ export default function Home() {
             <h3>Individual</h3>
             <div className="price">1 990 ₽</div>
             <div className="price-note">/мес</div>
-            <p className="price-yearly">1 592 ₽ /год (-20%)</p>
+            <p className="price-yearly">15 920 ₽ /год (-20%)</p>
             <ul>
               <li>3 hosts</li>
               <li>2 users</li>
               <li>14 day trial</li>
               <li>AST analysis</li>
+              <li>Canary honeypots</li>
               <li>Approval workflow</li>
-              <li>Auto backup</li>
-              <li>5GB storage</li>
+              <li>Custom policies (up to 10)</li>
+              <li>Smart backup + dedup</li>
               <li>Device trust</li>
               <li>MCP protocol</li>
+              <li>Multi-backend LLM (up to 3)</li>
             </ul>
           </div>
 
@@ -269,17 +271,22 @@ export default function Home() {
             <h3>Business</h3>
             <div className="price">4 990 ₽</div>
             <div className="price-note">/мес</div>
-            <p className="price-yearly">3 992 ₽ /год (-20%)</p>
+            <p className="price-yearly">39 920 ₽ /год (-20%)</p>
             <ul>
               <li>25 hosts</li>
               <li>10 users</li>
               <li>14 day trial</li>
               <li>eBPF kernel-level</li>
+              <li>Policy DSL</li>
+              <li>Forensics</li>
               <li>K8s operator</li>
               <li>GitOps</li>
               <li>SIEM export</li>
-              <li>RBAC</li>
-              <li>20GB storage</li>
+              <li>RBAC (10 users)</li>
+              <li>Telegram approval</li>
+              <li>Auto restore</li>
+              <li>LLM failover</li>
+              <li>Global kill switch</li>
             </ul>
           </div>
         </div>
