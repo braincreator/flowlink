@@ -320,19 +320,19 @@ mod tests {
 
     #[test]
     fn test_invoice_for_plan() {
-        let plan = Plan::individual();
+        let plan = Plan::starter();
         let store = make_store();
         let invoice = store.create(Invoice::for_plan("acc-1", &plan));
 
         assert_eq!(invoice.items.len(), 1);
-        assert_eq!(invoice.subtotal_kopecks, 199_900);
-        assert!(invoice.total_kopecks > 199_900); // with tax
+        assert_eq!(invoice.subtotal_kopecks, 299_000);
+        assert!(invoice.total_kopecks > 299_000); // with tax
     }
 
     #[test]
     fn test_mark_paid() {
         let store = make_store();
-        let mut invoice = store.create(Invoice::for_plan("acc-1", &Plan::individual()));
+        let mut invoice = store.create(Invoice::for_plan("acc-1", &Plan::starter()));
         invoice.mark_paid(PaymentMethod::Sbp);
         store.update(invoice.clone());
 
@@ -344,9 +344,9 @@ mod tests {
     #[test]
     fn test_list_for_account() {
         let store = make_store();
-        store.create(Invoice::for_plan("acc-1", &Plan::individual()));
-        store.create(Invoice::for_plan("acc-1", &Plan::individual()));
-        store.create(Invoice::for_plan("acc-2", &Plan::free()));
+        store.create(Invoice::for_plan("acc-1", &Plan::starter()));
+        store.create(Invoice::for_plan("acc-1", &Plan::starter()));
+        store.create(Invoice::for_plan("acc-2", &Plan::trial()));
 
         assert_eq!(store.list_for_account("acc-1").len(), 2);
         assert_eq!(store.list_for_account("acc-2").len(), 1);
@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_format_price() {
-        let plan = Plan::free();
+        let plan = Plan::trial();
         let invoice = Invoice::for_plan("acc-1", &plan);
         assert_eq!(invoice.format_total(), "0.00 ₽");
     }
@@ -375,14 +375,14 @@ mod tests {
     fn test_total_revenue() {
         let store = make_store();
 
-        let mut inv1 = store.create(Invoice::for_plan("acc-1", &Plan::individual()));
+        let mut inv1 = store.create(Invoice::for_plan("acc-1", &Plan::starter()));
         inv1.mark_paid(PaymentMethod::Card);
         store.update(inv1);
 
-        let _inv2 = store.create(Invoice::for_plan("acc-2", &Plan::individual()));
+        let _inv2 = store.create(Invoice::for_plan("acc-2", &Plan::starter()));
         // inv2 is pending, not counted
 
-        assert_eq!(store.total_revenue(), 239_880); // 199900 + 20% NDS
+        assert_eq!(store.total_revenue(), 358_800); // 299000 + 20% NDS
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Plan definitions and registry
 //!
-//! Three tiers: Free, Individual, Business
+//! Three tiers: Trial, Starter, Pro
 //! All prices in RUB (Russian market)
 
 use serde::{Deserialize, Serialize};
@@ -10,17 +10,17 @@ use std::sync::RwLock;
 /// Built-in plan IDs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlanId {
-    Free,
-    Individual,
-    Business,
+    Trial,
+    Starter,
+    Pro,
 }
 
 impl PlanId {
     pub fn as_str(&self) -> &'static str {
         match self {
-            PlanId::Free => "free",
-            PlanId::Individual => "individual",
-            PlanId::Business => "business",
+            PlanId::Trial => "trial",
+            PlanId::Starter => "starter",
+            PlanId::Pro => "pro",
         }
     }
 }
@@ -84,12 +84,12 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Free plan
-    pub fn free() -> Self {
+    /// Trial plan — free for 7 days
+    pub fn trial() -> Self {
         Self {
-            id: PlanId::Free.as_str().to_string(),
-            name: "Free".to_string(),
-            description: "Для знакомства с FlowLink".to_string(),
+            id: PlanId::Trial.as_str().to_string(),
+            name: "Trial".to_string(),
+            description: "Попробуйте FlowLink бесплатно".to_string(),
             tier: 0,
             price_kopecks: 0,
             annual_price_kopecks: None,
@@ -99,21 +99,57 @@ impl Plan {
                 backup_storage_mb: 500,
                 max_snapshots: 5,
                 retention_days: 3,
-                audit_retention_days: 1,
+                audit_retention_days: 3,
                 max_file_size_mb: 10,
                 exec_timeout_sec: 60,
                 shield_level: "basic".to_string(),
             },
             features: vec![
-                "Pattern blocking".to_string(),
-                "E2EE".to_string(),
-                "Manual backup".to_string(),
-                "Basic sandbox".to_string(),
-                "Rate limiting".to_string(),
-                "Config hot-reload".to_string(),
-                "Graceful shutdown".to_string(),
                 "1 host".to_string(),
-                "500MB backup storage".to_string(),
+                "1 user".to_string(),
+                "3 day logs".to_string(),
+                "Pattern blocking".to_string(),
+                "Manual backup".to_string(),
+                "E2EE".to_string(),
+            ],
+            available: true,
+            legacy: false,
+            trial_days: Some(7),
+            billing_period: "month".to_string(),
+        }
+    }
+
+    /// Starter plan
+    pub fn starter() -> Self {
+        Self {
+            id: PlanId::Starter.as_str().to_string(),
+            name: "Starter".to_string(),
+            description: "Для фрилансеров и small teams".to_string(),
+            tier: 1,
+            price_kopecks: 299_000, // 2 990 RUB/month
+            annual_price_kopecks: Some(2_392_000), // 23 920 RUB/year (~20% discount)
+            limits: PlanLimits {
+                max_hosts: 3,
+                max_users: 3,
+                backup_storage_mb: 5120,
+                max_snapshots: 50,
+                retention_days: 14,
+                audit_retention_days: 14,
+                max_file_size_mb: 100,
+                exec_timeout_sec: 300,
+                shield_level: "advanced".to_string(),
+            },
+            features: vec![
+                "3 hosts".to_string(),
+                "3 users".to_string(),
+                "14 day logs".to_string(),
+                "AST analysis".to_string(),
+                "Canary honeypots".to_string(),
+                "Approval workflow".to_string(),
+                "Custom policies (up to 10)".to_string(),
+                "Smart backup + dedup".to_string(),
+                "Device trust".to_string(),
+                "MCP protocol".to_string(),
             ],
             available: true,
             legacy: false,
@@ -122,98 +158,45 @@ impl Plan {
         }
     }
 
-    /// Individual plan
-    pub fn individual() -> Self {
+    /// Pro plan
+    pub fn pro() -> Self {
         Self {
-            id: PlanId::Individual.as_str().to_string(),
-            name: "Individual".to_string(),
-            description: "Для фрилансеров и small teams".to_string(),
-            tier: 1,
-            price_kopecks: 199_900, // 1 990 RUB/month
-            annual_price_kopecks: Some(1_592_000), // 15 920 RUB/year (~20% discount)
-            limits: PlanLimits {
-                max_hosts: 3,
-                max_users: 2,
-                backup_storage_mb: 5120,
-                max_snapshots: 50,
-                retention_days: 14,
-                audit_retention_days: 30,
-                max_file_size_mb: 100,
-                exec_timeout_sec: 300,
-                shield_level: "advanced".to_string(),
-            },
-            features: vec![
-                "AST analysis".to_string(),
-                "Interpreter analysis".to_string(),
-                "Canary honeypots".to_string(),
-                "Approval workflow".to_string(),
-                "Custom policies (up to 10)".to_string(),
-                "Auto backup".to_string(),
-                "Smart backup".to_string(),
-                "Deduplication".to_string(),
-                "Device trust".to_string(),
-                "Multi-backend LLM (up to 3)".to_string(),
-                "MCP protocol".to_string(),
-                "Backup browsing".to_string(),
-                "Settings management".to_string(),
-                "Up to 3 hosts".to_string(),
-                "5GB backup storage".to_string(),
-                "30-day audit".to_string(),
-            ],
-            available: true,
-            legacy: false,
-            trial_days: Some(14),
-            billing_period: "month".to_string(),
-        }
-    }
-
-    /// Business plan
-    pub fn business() -> Self {
-        Self {
-            id: PlanId::Business.as_str().to_string(),
-            name: "Business".to_string(),
+            id: PlanId::Pro.as_str().to_string(),
+            name: "Pro".to_string(),
             description: "Для стартапов, IT-отделов и DevOps teams".to_string(),
             tier: 2,
-            price_kopecks: 499_000, // 4 990 RUB/month
-            annual_price_kopecks: Some(3_992_000), // 39 920 RUB/year (~20% discount)
+            price_kopecks: 799_000, // 7 990 RUB/month
+            annual_price_kopecks: Some(6_392_000), // 63 920 RUB/year (~20% discount)
             limits: PlanLimits {
-                max_hosts: 25,
+                max_hosts: 20,
                 max_users: 10,
                 backup_storage_mb: 20480,
                 max_snapshots: 0, // unlimited
-                retention_days: 30,
+                retention_days: 90,
                 audit_retention_days: 90,
                 max_file_size_mb: 0, // configurable
                 exec_timeout_sec: 0, // configurable
                 shield_level: "enterprise".to_string(),
             },
             features: vec![
+                "20 hosts".to_string(),
+                "10 users".to_string(),
+                "90 day logs".to_string(),
                 "eBPF kernel-level shield".to_string(),
                 "Policy DSL".to_string(),
                 "Forensics".to_string(),
-                "Webhook notifications".to_string(),
-                "Telegram approval".to_string(),
-                "Auto restore".to_string(),
                 "K8s operator".to_string(),
                 "GitOps drift detection".to_string(),
                 "SIEM export".to_string(),
-                "Session recording".to_string(),
                 "RBAC (10 users)".to_string(),
-                "Device auto-deny".to_string(),
-                "Push notifications".to_string(),
+                "Telegram approval".to_string(),
+                "Auto restore".to_string(),
                 "LLM failover".to_string(),
-                "PostgreSQL audit".to_string(),
-                "Prometheus metrics".to_string(),
                 "Global kill switch".to_string(),
-                "Autonomous L2 tasks".to_string(),
-                "Sudo control".to_string(),
-                "Up to 25 hosts".to_string(),
-                "20GB backup storage".to_string(),
-                "90-day audit".to_string(),
             ],
             available: true,
             legacy: false,
-            trial_days: Some(14),
+            trial_days: None,
             billing_period: "month".to_string(),
         }
     }
@@ -273,12 +256,12 @@ pub struct PlanRegistry {
 }
 
 impl PlanRegistry {
-    /// Create with default plans (Free, Individual, Business)
+    /// Create with default plans (Trial, Starter, Pro)
     pub fn new() -> Self {
         let mut plans = HashMap::new();
-        plans.insert(PlanId::Free.as_str().to_string(), Plan::free());
-        plans.insert(PlanId::Individual.as_str().to_string(), Plan::individual());
-        plans.insert(PlanId::Business.as_str().to_string(), Plan::business());
+        plans.insert(PlanId::Trial.as_str().to_string(), Plan::trial());
+        plans.insert(PlanId::Starter.as_str().to_string(), Plan::starter());
+        plans.insert(PlanId::Pro.as_str().to_string(), Plan::pro());
 
         Self {
             plans: RwLock::new(plans),
@@ -349,45 +332,45 @@ mod tests {
     #[test]
     fn test_default_plans() {
         let registry = PlanRegistry::new();
-        assert!(registry.get("free").is_some());
-        assert!(registry.get("individual").is_some());
-        assert!(registry.get("business").is_some());
+        assert!(registry.get("trial").is_some());
+        assert!(registry.get("starter").is_some());
+        assert!(registry.get("pro").is_some());
     }
 
     #[test]
     fn test_free_plan_limits() {
-        let free = Plan::free();
+        let free = Plan::trial();
         assert_eq!(free.limits.max_hosts, 1);
         assert_eq!(free.limits.max_users, 1);
         assert_eq!(free.limits.backup_storage_mb, 500);
         assert_eq!(free.price_kopecks, 0);
         assert_eq!(free.limits.shield_level, "basic");
-        assert!(free.trial_days.is_none());
+        assert_eq!(free.trial_days, Some(7));
     }
 
     #[test]
     fn test_individual_plan_limits() {
-        let individual = Plan::individual();
+        let individual = Plan::starter();
         assert_eq!(individual.limits.max_hosts, 3);
-        assert_eq!(individual.limits.max_users, 2);
+        assert_eq!(individual.limits.max_users, 3);
         assert_eq!(individual.limits.backup_storage_mb, 5120);
-        assert_eq!(individual.price_kopecks, 199_900);
+        assert_eq!(individual.price_kopecks, 299_000);
         assert_eq!(individual.limits.shield_level, "advanced");
-        assert_eq!(individual.trial_days, Some(14));
-        assert_eq!(individual.annual_price_kopecks, Some(1_592_000));
+        assert_eq!(individual.trial_days, None);
+        assert_eq!(individual.annual_price_kopecks, Some(2_392_000));
     }
 
     #[test]
     fn test_business_unlimited() {
-        let business = Plan::business();
+        let business = Plan::pro();
         assert!(Plan::is_unlimited(business.limits.max_snapshots));
         assert!(Plan::is_unlimited(business.limits.max_file_size_mb));
         assert!(Plan::is_unlimited(business.limits.exec_timeout_sec));
-        assert_eq!(business.limits.max_hosts, 25);
+        assert_eq!(business.limits.max_hosts, 20);
         assert_eq!(business.limits.max_users, 10);
         assert_eq!(business.limits.audit_retention_days, 90);
-        assert_eq!(business.price_kopecks, 499_000);
-        assert_eq!(business.trial_days, Some(14));
+        assert_eq!(business.price_kopecks, 799_000);
+        assert_eq!(business.trial_days, None);
     }
 
     #[test]
@@ -422,10 +405,10 @@ mod tests {
     #[test]
     fn test_deprecate_plan() {
         let registry = PlanRegistry::new();
-        registry.deprecate("individual");
+        registry.deprecate("starter");
         let available = registry.list_available();
         assert_eq!(available.len(), 2); // Free + Business
-        let individual = registry.get("individual").unwrap();
+        let individual = registry.get("starter").unwrap();
         assert!(!individual.available);
         assert!(individual.legacy);
     }
@@ -439,8 +422,8 @@ mod tests {
 
     #[test]
     fn test_plan_id_display() {
-        assert_eq!(PlanId::Free.to_string(), "free");
-        assert_eq!(PlanId::Individual.to_string(), "individual");
-        assert_eq!(PlanId::Business.to_string(), "business");
+        assert_eq!(PlanId::Trial.to_string(), "trial");
+        assert_eq!(PlanId::Starter.to_string(), "starter");
+        assert_eq!(PlanId::Pro.to_string(), "pro");
     }
 }

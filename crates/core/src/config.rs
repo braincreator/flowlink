@@ -491,7 +491,7 @@ mod tests {
             enabled: true,
             currency: "USD".into(),
             plans: vec![PlanConfig {
-                id: "individual".into(), name: "Individual".into(), price: 1999,
+                id: "starter".into(), name: "Individual".into(), price: 1999,
                 period: "monthly".into(), features: Default::default(),
             }],
             tochka_jwt_token: None,
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn test_plan_config_features() {
         let plan = PlanConfig {
-            id: "individual".into(), name: "Individual".into(), price: 1999, period: "monthly".into(),
+            id: "starter".into(), name: "Individual".into(), price: 1999, period: "monthly".into(),
             features: [("max_agents".into(), serde_json::json!(10))].into_iter().collect(),
         };
         let json = serde_json::to_string(&plan).unwrap();

@@ -201,7 +201,7 @@ pub async fn signup(
         uuid_simple());
 
     // Assign free plan by default
-    let plan_id = "free".to_string();
+    let plan_id = "trial".to_string();
     let now = Utc::now();
     let trial_ends = now + chrono::Duration::days(14);
 

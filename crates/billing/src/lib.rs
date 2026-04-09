@@ -77,7 +77,7 @@ impl AccountBilling {
         let now = Utc::now();
         Self {
             account_id: account_id.to_string(),
-            plan_id: plans::PlanId::Free.as_str().to_string(),
+            plan_id: plans::PlanId::Trial.as_str().to_string(),
             activated_at: now,
             expires_at: None,
             active: true,
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn test_account_billing_new() {
         let billing = AccountBilling::new("acc-1");
-        assert_eq!(billing.plan_id, "free");
+        assert_eq!(billing.plan_id, "trial");
         assert!(billing.active);
         assert!(billing.payment_method.is_none());
         assert!(!billing.is_trial);
@@ -481,11 +481,11 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "individual").unwrap();
-        assert_eq!(billing.plan_id, "individual");
+        // Upgrade from trial to starter — no trial flag on paid plan
+        engine.upgrade_plan(&mut billing, "starter").unwrap();
+        assert_eq!(billing.plan_id, "starter");
         assert!(billing.expires_at.is_some());
-        assert!(billing.is_trial);
-        assert!(billing.trial_end.is_some());
+        assert!(!billing.is_trial);
     }
 
     #[test]
@@ -493,10 +493,10 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "individual").unwrap();
-        let result = engine.upgrade_plan(&mut billing, "free");
+        engine.upgrade_plan(&mut billing, "starter").unwrap();
+        let result = engine.upgrade_plan(&mut billing, "trial");
         assert!(result.is_err());
-        assert_eq!(billing.plan_id, "individual"); // unchanged
+        assert_eq!(billing.plan_id, "starter"); // unchanged
     }
 
     #[test]
@@ -504,9 +504,9 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "individual").unwrap();
-        engine.change_plan(&mut billing, "free").unwrap();
-        assert_eq!(billing.plan_id, "free");
+        engine.upgrade_plan(&mut billing, "starter").unwrap();
+        engine.change_plan(&mut billing, "trial").unwrap();
+        assert_eq!(billing.plan_id, "trial");
     }
 
     #[test]

@@ -685,7 +685,7 @@ mod tests {
             .with("/subscriptions", r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
-                "plan_id": "individual",
+                "plan_id": "starter",
                 "status": "active",
                 "period": "month",
                 "amount": 29990,
@@ -696,7 +696,7 @@ mod tests {
             .with("/subscriptions/sub_abc123", r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
-                "plan_id": "individual",
+                "plan_id": "starter",
                 "status": "paused",
                 "period": "month",
                 "amount": 29990
@@ -704,7 +704,7 @@ mod tests {
             .with("/subscriptions/sub_abc123/pause", r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
-                "plan_id": "individual",
+                "plan_id": "starter",
                 "status": "paused",
                 "period": "month",
                 "amount": 29990
@@ -712,7 +712,7 @@ mod tests {
             .with("/subscriptions/sub_abc123/resume", r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
-                "plan_id": "individual",
+                "plan_id": "starter",
                 "status": "active",
                 "period": "month",
                 "amount": 29990
@@ -802,7 +802,7 @@ mod tests {
         let c = client();
         let req = CreateSubscriptionRequest {
             customer_id: "acc-1".into(),
-            plan_id: "individual".into(),
+            plan_id: "starter".into(),
             period: BillingPeriod::Month,
             amount: 29990,
             payment_method: SubscriptionPaymentMethod::Sbp { phone: "+79001234567".into() },

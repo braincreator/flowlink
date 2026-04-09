@@ -102,7 +102,7 @@ pub async fn get_billing_info(
     // Ensure account exists in DB
     if let Some(db) = &state.db {
         if let Err(e) = flowlink_db::accounts::AccountRepo::get_or_create(
-            db.pool(), &account.0, flowlink_billing::plans::PlanId::Free.as_str(),
+            db.pool(), &account.0, flowlink_billing::plans::PlanId::Trial.as_str(),
         ).await {
             log::warn!("DB account lookup failed: {e}");
         }
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn test_billing_info_serialization() {
         let info = BillingInfo {
-            plan_id: "free".to_string(),
+            plan_id: "trial".to_string(),
             plan_name: "Free".to_string(),
             active: true,
             balance_rub: "0.00 RUB".to_string(),
@@ -501,6 +501,6 @@ mod tests {
             available_plans: vec![],
         };
         let json_str = serde_json::to_string(&info).unwrap();
-        assert!(json_str.contains("free"));
+        assert!(json_str.contains("trial"));
     }
 }
