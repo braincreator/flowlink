@@ -208,7 +208,7 @@ const ru: typeof import('./en').default = {
   billing: {
     title: 'Тарифы', current_plan: 'Текущий тариф', current_plan_desc: 'Trial — 7 дней',
     usage: 'Использование', hosts_connected: 'Хостов подключено', team_members: 'Участников команды',
-    log_retention: 'Хранение логов', upgrade: 'Уменьшить тариф',
+    log_retention: 'Хранение логов', upgrade: 'Улучшить тариф',
     trial_name: 'Trial', trial_price: 'Бесплатно · 7 дней',
     trial_features: [
       '1 хост', '1 юзер', '3 дня логов', 'Pattern blocking', 'Manual backup', 'E2EE',
