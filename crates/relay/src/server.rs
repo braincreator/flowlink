@@ -46,6 +46,8 @@ pub struct AppState {
     pub billing: Option<Arc<flowlink_billing::BillingEngine>>,
     pub db: Option<Arc<flowlink_db::DbPool>>,
     pub config_reloader: Option<Arc<ConfigReloader>>,
+    pub e2ee: Arc<crate::e2ee::E2eeSessionManager>,
+    pub usage_tracker: Arc<crate::billing_middleware::UsageTracker>,
 }
 
 // ═══════════════════════════════════════════════
@@ -190,6 +192,13 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         status: "ok".to_string(),
         agents: state.pool.count(),
     })
+}
+
+async fn healthz() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
 }
 
 async fn list_agents(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
@@ -366,7 +375,7 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
         capabilities: vec![],
     });
 
-    // Send Connected ack
+    // Send Connected ack with relay's E2EE public key
     let connected = flowlink_core::Message::new(flowlink_core::MessageType::Connected)
         .with_agent_id(&agent_id)
         .with_payload(flowlink_core::ConnectedPayload {
@@ -374,8 +383,8 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
             relay_id: "relay-0".into(),
             heartbeat_interval_sec: 30,
             server_time: chrono::Utc::now().timestamp(),
-            relay_public_key: None,
-            relay_key_id: None,
+            relay_public_key: Some(state.e2ee.relay_public_key().to_string()),
+            relay_key_id: Some(state.e2ee.relay_key_id().to_string()),
         });
     if let Ok(json) = serde_json::to_string(&connected) {
         let _ = ws_sink.send(AxumMsg::Text(json.into())).await;
@@ -391,13 +400,34 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
             match msg {
                 Ok(AxumMsg::Text(text)) => {
                     let text_str: String = text.to_string();
-                    if let Ok(msg) = serde_json::from_str::<flowlink_core::Message>(&text_str) {
+                    // Try E2EE decryption first; fall back to plaintext
+                    let effective_text = if let Some(decrypted) = state.e2ee.decrypt_from_agent(&text_str) {
+                        String::from_utf8(decrypted).unwrap_or(text_str.clone())
+                    } else {
+                        text_str.clone()
+                    };
+                    if let Ok(msg) = serde_json::from_str::<flowlink_core::Message>(&effective_text) {
+                        // Track every incoming message as an API request
+                        state.usage_tracker.record_request(&aid).await;
+
                         match msg.msg_type {
+                            flowlink_core::MessageType::Connect => {
+                                // Register agent's public key for E2EE if provided
+                                if let Some(payload) = &msg.payload {
+                                    if let Ok(connect) = serde_json::from_value::<flowlink_core::ConnectPayload>(payload.clone()) {
+                                        if let Some(pk) = &connect.public_key {
+                                            state.e2ee.register_agent_key(&aid, pk).await;
+                                            log::info!("Agent {}: E2EE public key registered", aid);
+                                        }
+                                    }
+                                }
+                            }
                             flowlink_core::MessageType::Heartbeat => {
                                 pool.update_heartbeat(&aid);
                                 eventbus.publish("heartbeat", &text_str);
                             }
                             flowlink_core::MessageType::ExecDone => {
+                                state.usage_tracker.record_command(&aid).await;
                                 eventbus.publish("exec_done", &text_str);
                             }
                             flowlink_core::MessageType::ExecOutput => {
@@ -436,6 +466,16 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
                                 eventbus.publish("config_ack", &text_str);
                                 log::info!("Agent {aid}: config acknowledged");
                             }
+                            flowlink_core::MessageType::LlmResponse => {
+                                // Extract token usage from LLM response payload
+                                if let Some(ref payload) = msg.payload {
+                                    let (tokens_in, tokens_out) =
+                                        crate::billing_middleware::extract_tokens_from_payload(payload);
+                                    if tokens_in > 0 || tokens_out > 0 {
+                                        state.usage_tracker.record_tokens(&aid, tokens_in, tokens_out).await;
+                                    }
+                                }
+                            }
                             flowlink_core::MessageType::Disconnect => break,
                             other => {
                                 log::info!("Agent {aid}: {:?}", other);
@@ -469,6 +509,7 @@ async fn handle_ws(socket: WebSocket, agent_id: String, state: AppState) {
 
     pool.unregister(&aid);
     state.handler.remove_sender(&aid);
+    state.e2ee.remove_agent_key(&aid).await;
     eventbus.publish("agent_disconnect", &serde_json::to_string(&serde_json::json!({"agent_id": aid})).unwrap_or_default());
 }
 
@@ -584,7 +625,14 @@ async fn llm_chat(
     };
 
     match proxy.complete(body).await {
-        Ok(resp) => Json(resp).into_response(),
+        Ok(resp) => {
+            // Track token usage from the HTTP LLM endpoint
+            let tokens_in = resp.usage.prompt_tokens as u64;
+            let tokens_out = resp.usage.completion_tokens as u64;
+            // Use a generic agent id for HTTP API calls
+            state.usage_tracker.record_tokens("_api_http", tokens_in, tokens_out).await;
+            Json(resp).into_response()
+        }
         Err(e) => (
             axum::http::StatusCode::BAD_GATEWAY,
             Json(serde_json::json!({ "error": e.to_string() })),
@@ -775,6 +823,7 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
+        .route("/healthz", get(healthz))
         .route("/health", get(health))
         .route("/api/agents", get(list_agents))
         .route("/api/approvals", get(list_approvals))
@@ -856,6 +905,8 @@ mod tests {
             billing: None,
             db: None,
             config_reloader: None,
+            e2ee: Arc::new(crate::e2ee::E2eeSessionManager::new()),
+            usage_tracker: Arc::new(crate::billing_middleware::UsageTracker::new()),
         }
     }
 

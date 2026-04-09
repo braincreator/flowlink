@@ -1,52 +1,79 @@
 # ============================================================
-# Stage 1: Builder (multi-arch aware)
+# FlowLink Relay — Multi-stage Rust Dockerfile
 # ============================================================
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates tzdata
+# Stage 1: Build
+FROM rust:1.80-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates pkgconf musl-dev
 
 WORKDIR /build
 
-# Cache module downloads
-COPY go.mod go.sum ./
-RUN go mod download
+# Cache dependencies
+COPY Cargo.toml Cargo.lock ./
+COPY crates/core/Cargo.toml crates/core/
+COPY crates/crypto/Cargo.toml crates/crypto/
+COPY crates/db/Cargo.toml crates/db/
+COPY crates/billing/Cargo.toml crates/billing/
+COPY crates/agent/Cargo.toml crates/agent/
+COPY crates/relay/Cargo.toml crates/relay/
+COPY crates/cli/Cargo.toml crates/cli/
+COPY crates/shield/Cargo.toml crates/shield/
+COPY crates/k8s/Cargo.toml crates/k8s/
+COPY crates/gitops/Cargo.toml crates/gitops/
 
-# Copy source
+# Create dummy source files to cache dependencies
+RUN mkdir -p crates/core/src && echo "" > crates/core/src/lib.rs
+RUN mkdir -p crates/crypto/src && echo "" > crates/crypto/src/lib.rs
+RUN mkdir -p crates/db/src && echo "" > crates/db/src/lib.rs
+RUN mkdir -p crates/billing/src && echo "" > crates/billing/src/lib.rs
+RUN mkdir -p crates/agent/src && echo "" > crates/agent/src/lib.rs
+RUN mkdir -p crates/relay/src && echo "" > crates/relay/src/lib.rs
+RUN mkdir -p crates/cli/src && echo "fn main() {}" > crates/cli/src/main.rs
+RUN mkdir -p crates/shield/src && echo "" > crates/shield/src/lib.rs
+RUN mkdir -p crates/k8s/src && echo "" > crates/k8s/src/lib.rs
+RUN mkdir -p crates/gitops/src && echo "" > crates/gitops/src/lib.rs
+
+# Build dependencies only (cached layer)
+RUN cargo build --release 2>/dev/null || true
+
+# Copy actual source
 COPY . .
 
-# Resolve target platform from Docker buildx
-ARG TARGETOS
-ARG TARGETARCH
+# Touch source files to invalidate the cache
+RUN find crates -name "*.rs" -exec touch {} +
 
-# Build for the target platform
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w -extldflags '-static'" \
-    -o /build/flowlink-relay ./cmd/relay
+# Build for release (stripped)
+RUN cargo build --release --bin flowlink && \
+    strip /build/target/release/flowlink
 
 # ============================================================
-# Stage 2: Runtime
+# Stage 2: Runtime (minimal)
 # ============================================================
-FROM alpine:latest
+FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata
 
 # Create non-root user
-RUN adduser -D -u 1001 -g 1001 flowlink
+RUN adduser -D -h /home/flowlink -s /sbin/nologin flowlink
 
-WORKDIR /app
+WORKDIR /home/flowlink
 
 # Copy binary from builder
-COPY --from=builder /build/flowlink-relay /app/flowlink-relay
+COPY --from=builder /build/target/release/flowlink /usr/local/bin/flowlink
 
-# Expose ports
-EXPOSE 8080 8443
+# Copy default config
+COPY crates/cli/examples/relay.json /etc/flowlink/relay.json 2>/dev/null || true
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -qO- http://localhost:8080/api/v1/health/live || exit 1
+# Create data directory
+RUN mkdir -p /home/flowlink/.flowlink && chown -R flowlink:flowlink /home/flowlink
 
-# Run as non-root user
 USER flowlink
 
-ENTRYPOINT ["/app/flowlink-relay"]
-CMD ["serve"]
+EXPOSE 8080 8443
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD wget -qO- http://localhost:8080/healthz || exit 1
+
+ENTRYPOINT ["flowlink"]
+CMD ["relay", "--config", "/etc/flowlink/relay.json"]

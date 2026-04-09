@@ -41,6 +41,11 @@ impl ApprovalManager {
         }
     }
 
+    /// Update approval mode at runtime (from ConfigUpdate).
+    pub fn set_mode(&mut self, mode: ApprovalMode) {
+        self.mode = mode;
+    }
+
     /// Check if command needs approval based on mode and risk.
     pub fn needs_approval(&self, risk: &str) -> bool {
         match self.mode {

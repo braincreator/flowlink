@@ -51,6 +51,9 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         metrics: Arc::new(flowlink_relay::metrics::Metrics::new()),
         billing: None,
         db: None,
+        config_reloader: None,
+        e2ee: Arc::new(flowlink_relay::e2ee::E2eeSessionManager::new()),
+        usage_tracker: Arc::new(flowlink_relay::billing_middleware::UsageTracker::new()),
     };
     (state, tmp)
 }

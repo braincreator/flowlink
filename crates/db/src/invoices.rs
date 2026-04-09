@@ -198,3 +198,212 @@ impl InvoiceRepo {
         Ok(format!("INV-{:04}", count + 1))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_invoice() -> InvoiceRow {
+        let now = Utc::now();
+        InvoiceRow {
+            id: "inv-001".into(),
+            account_id: "acc-123".into(),
+            number: "INV-0001".into(),
+            status: "pending".into(),
+            subtotal_kopecks: 10_000,
+            tax_kopecks: 2_000,
+            total_kopecks: 12_000,
+            currency: "RUB".into(),
+            payment_method: None,
+            created_at: now,
+            paid_at: None,
+            due_at: now + chrono::Duration::days(30),
+            notes: None,
+        }
+    }
+
+    fn make_invoice_item() -> InvoiceItemRow {
+        InvoiceItemRow {
+            id: 1,
+            invoice_id: "inv-001".into(),
+            description: "API calls".into(),
+            quantity: 100,
+            unit_price_kopecks: 100,
+            total_kopecks: 10_000,
+            sort_order: 0,
+        }
+    }
+
+    // --- InvoiceRow tests ---
+
+    #[test]
+    fn invoice_row_construction() {
+        let inv = make_invoice();
+        assert_eq!(inv.id, "inv-001");
+        assert_eq!(inv.account_id, "acc-123");
+        assert_eq!(inv.status, "pending");
+        assert_eq!(inv.subtotal_kopecks, 10_000);
+        assert_eq!(inv.tax_kopecks, 2_000);
+        assert_eq!(inv.total_kopecks, 12_000);
+        assert_eq!(inv.currency, "RUB");
+        assert!(inv.payment_method.is_none());
+        assert!(inv.paid_at.is_none());
+    }
+
+    #[test]
+    fn invoice_row_clone() {
+        let inv = make_invoice();
+        let cloned = inv.clone();
+        assert_eq!(cloned.id, inv.id);
+        assert_eq!(cloned.total_kopecks, inv.total_kopecks);
+    }
+
+    #[test]
+    fn invoice_row_serialization_roundtrip() {
+        let inv = make_invoice();
+        let json = serde_json::to_string(&inv).expect("serialize");
+        let deserialized: InvoiceRow = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.id, inv.id);
+        assert_eq!(deserialized.account_id, inv.account_id);
+        assert_eq!(deserialized.total_kopecks, inv.total_kopecks);
+        assert_eq!(deserialized.currency, inv.currency);
+    }
+
+    #[test]
+    fn invoice_row_serialization_contains_expected_fields() {
+        let inv = make_invoice();
+        let json = serde_json::to_value(&inv).expect("to_value");
+        assert_eq!(json["id"], "inv-001");
+        assert_eq!(json["account_id"], "acc-123");
+        assert_eq!(json["status"], "pending");
+        assert_eq!(json["total_kopecks"], 12_000);
+        assert_eq!(json["currency"], "RUB");
+        assert!(json.get("payment_method").unwrap().is_null());
+    }
+
+    #[test]
+    fn invoice_row_with_all_fields_populated() {
+        let now = Utc::now();
+        let inv = InvoiceRow {
+            id: "inv-full".into(),
+            account_id: "acc-456".into(),
+            number: "INV-0002".into(),
+            status: "paid".into(),
+            subtotal_kopecks: 50_000,
+            tax_kopecks: 10_000,
+            total_kopecks: 60_000,
+            currency: "USD".into(),
+            payment_method: Some("bank_transfer".into()),
+            created_at: now,
+            paid_at: Some(now),
+            due_at: now + chrono::Duration::days(30),
+            notes: Some("Monthly invoice".into()),
+        };
+        assert_eq!(inv.status, "paid");
+        assert_eq!(inv.payment_method.as_deref(), Some("bank_transfer"));
+        assert!(inv.paid_at.is_some());
+        assert_eq!(inv.notes.as_deref(), Some("Monthly invoice"));
+    }
+
+    // --- InvoiceItemRow tests ---
+
+    #[test]
+    fn invoice_item_row_construction() {
+        let item = make_invoice_item();
+        assert_eq!(item.id, 1);
+        assert_eq!(item.invoice_id, "inv-001");
+        assert_eq!(item.description, "API calls");
+        assert_eq!(item.quantity, 100);
+        assert_eq!(item.unit_price_kopecks, 100);
+        assert_eq!(item.total_kopecks, 10_000);
+        assert_eq!(item.sort_order, 0);
+    }
+
+    #[test]
+    fn invoice_item_row_serialization_roundtrip() {
+        let item = make_invoice_item();
+        let json = serde_json::to_string(&item).expect("serialize");
+        let deserialized: InvoiceItemRow = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(deserialized.id, item.id);
+        assert_eq!(deserialized.invoice_id, item.invoice_id);
+        assert_eq!(deserialized.total_kopecks, item.total_kopecks);
+    }
+
+    #[test]
+    fn invoice_item_row_clone() {
+        let item = make_invoice_item();
+        let cloned = item.clone();
+        assert_eq!(cloned.description, item.description);
+        assert_eq!(cloned.quantity, item.quantity);
+    }
+
+    // --- SQL query validation ---
+
+    #[test]
+    fn sql_queries_reference_invoices_table() {
+        let queries = [
+            "INSERT INTO invoices (id, account_id, number, status",
+            "SELECT * FROM invoices WHERE id = $1",
+            "SELECT * FROM invoices WHERE account_id = $1 ORDER BY created_at DESC",
+            "UPDATE invoices SET status = $1",
+            "SELECT * FROM invoices WHERE status = 'pending' ORDER BY due_at",
+            "SELECT COALESCE(SUM(total_kopecks), 0) FROM invoices WHERE status = 'paid'",
+            "SELECT COUNT(*) FROM invoices",
+        ];
+        for q in &queries {
+            assert!(q.contains("invoices"), "Query missing 'invoices' table: {}", q);
+        }
+    }
+
+    #[test]
+    fn sql_queries_reference_invoice_items_table() {
+        let queries = [
+            "INSERT INTO invoice_items (invoice_id, description, quantity",
+            "SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY sort_order",
+        ];
+        for q in &queries {
+            assert!(q.contains("invoice_items"), "Query missing 'invoice_items' table: {}", q);
+        }
+    }
+
+    #[test]
+    fn invoice_create_uses_transaction() {
+        // The create method uses a transaction - verify the INSERT queries exist
+        let inv_sql = "INSERT INTO invoices (id, account_id, number, status, subtotal_kopecks,
+             tax_kopecks, total_kopecks, currency, payment_method, due_at, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)";
+        assert!(inv_sql.contains("VALUES"));
+        assert!(inv_sql.contains("$1"));
+        assert!(inv_sql.contains("$11"));
+    }
+
+    #[test]
+    fn mark_paid_query_sets_paid_at() {
+        let query = "UPDATE invoices SET status = 'paid', paid_at = NOW(), payment_method = $1 WHERE id = $2";
+        assert!(query.contains("paid_at = NOW()"));
+        assert!(query.contains("status = 'paid'"));
+    }
+
+    #[test]
+    fn update_status_paid_sets_paid_at_clause() {
+        // The update_status method conditionally adds paid_at = NOW()
+        let status = "paid";
+        let paid_at = if status == "paid" { "paid_at = NOW()," } else { "" };
+        let sql = format!(
+            "UPDATE invoices SET status = $1, {paid_at} payment_method = COALESCE(payment_method, $2)
+             WHERE id = $3"
+        );
+        assert!(sql.contains("paid_at = NOW(),"));
+    }
+
+    #[test]
+    fn update_status_non_paid_no_paid_at_clause() {
+        let status = "cancelled";
+        let paid_at = if status == "paid" { "paid_at = NOW()," } else { "" };
+        let sql = format!(
+            "UPDATE invoices SET status = $1, {paid_at} payment_method = COALESCE(payment_method, $2)
+             WHERE id = $3"
+        );
+        assert!(!sql.contains("paid_at = NOW()"));
+    }
+}

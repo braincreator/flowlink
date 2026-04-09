@@ -1,9 +1,10 @@
-// WebSocket connection to relay with auto-reconnect
+// WebSocket connection to relay with auto-reconnect + config hot-reload
 // Port of internal/agent/connection.go
 
 use flowlink_core::*;
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn, error};
+use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 use crate::approval::ApprovalManager;
@@ -20,14 +21,15 @@ pub struct Connection {
     url: String,
     agent_id: String,
     token: String,
-    policy: PolicyEngine,
-    approval: ApprovalManager,
+    policy: Arc<RwLock<PolicyEngine>>,
+    approval: Arc<RwLock<ApprovalManager>>,
     fileops: FileOps,
     backup: BackupManager,
     killswitch: Arc<KillSwitch>,
     skill_mgr: SkillManager,
-    sandbox: Sandbox,
+    sandbox: Arc<RwLock<Sandbox>>,
     executor: Executor,
+    shutdown: Arc<tokio::sync::Notify>,
 }
 
 impl Connection {
@@ -43,8 +45,17 @@ impl Connection {
         skill_mgr: SkillManager,
         sandbox: Sandbox,
         executor: Executor,
+        shutdown: Arc<tokio::sync::Notify>,
     ) -> Self {
-        Self { url, agent_id, token, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox, executor }
+        Self {
+            url, agent_id, token,
+            policy: Arc::new(RwLock::new(policy)),
+            approval: Arc::new(RwLock::new(approval)),
+            fileops, backup, killswitch, skill_mgr,
+            sandbox: Arc::new(RwLock::new(sandbox)),
+            executor,
+            shutdown,
+        }
     }
 
     /// Connect, authenticate, run message loop with auto-reconnect + exponential backoff.
@@ -53,19 +64,29 @@ impl Connection {
         const MAX_BACKOFF: u64 = 60;
 
         loop {
-            match self.connect_and_loop().await {
-                Ok(()) => {
-                    info!("Connection closed cleanly, reconnecting...");
-                    backoff_secs = 1;
+            tokio::select! {
+                result = self.connect_and_loop() => {
+                    match result {
+                        Ok(()) => {
+                            info!("Connection closed cleanly, reconnecting...");
+                            backoff_secs = 1;
+                        }
+                        Err(e) => {
+                            error!("Connection error: {e}, reconnecting in {backoff_secs}s...");
+                        }
+                    }
+
+                    tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                    backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF);
                 }
-                Err(e) => {
-                    error!("Connection error: {e}, reconnecting in {backoff_secs}s...");
+                _ = self.shutdown.notified() => {
+                    info!("Shutdown signal received, stopping agent connection");
+                    break;
                 }
             }
-
-            tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
-            backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF);
         }
+
+        Ok(())
     }
 
     async fn connect_and_loop(&self) -> anyhow::Result<()> {
@@ -151,11 +172,146 @@ impl Connection {
             msg.priority = Priority::User;
         }
 
+        // EXCEPTION: ConfigUpdate from relay is trusted (sent with System priority by reloader).
+        // Allow it through to update agent config at runtime.
+        if msg.msg_type == MessageType::ConfigUpdate {
+            info!("Received ConfigUpdate from relay");
+            return self.handle_config_update(&msg).await;
+        }
+
         info!("Received: {:?}", msg.msg_type);
-        let response = crate::dispatch::dispatch(&msg, &self.policy, &self.approval, &self.fileops, &self.backup, &self.killswitch, &self.skill_mgr, &self.sandbox, &self.executor).await;
-        // Drain any shield alerts queued during dispatch and send them as separate messages
-        // The caller (connect_and_loop) picks these up via send_shield_alerts
+        let response = crate::dispatch::dispatch(
+            &msg,
+            &*self.policy.read().await,
+            &*self.approval.read().await,
+            &self.fileops,
+            &self.backup,
+            &self.killswitch,
+            &self.skill_mgr,
+            &*self.sandbox.read().await,
+            &self.executor,
+        ).await;
         response
+    }
+
+    /// Handle ConfigUpdate from relay — apply new config and send ConfigAck.
+    ///
+    /// Updates: read_only mode, sandbox params, approval mode.
+    /// Fields that require reconnect (relay_url, agent_id, token) are logged but not applied.
+    async fn handle_config_update(&self, msg: &Message) -> Option<Message> {
+        let payload = match &msg.payload {
+            Some(p) => p,
+            None => {
+                warn!("ConfigUpdate received with no payload");
+                return Some(Message::new(MessageType::ConfigAck)
+                    .with_agent_id(&self.agent_id)
+                    .with_payload(serde_json::json!({
+                        "status": "error",
+                        "reason": "no payload"
+                    })));
+            }
+        };
+
+        let mut applied = Vec::new();
+        let mut warnings = Vec::new();
+
+        // Update read_only mode
+        if let Some(read_only) = payload.get("read_only").and_then(|v| v.as_bool()) {
+            {
+                let mut policy = self.policy.write().await;
+                policy.set_read_only(read_only);
+            }
+            applied.push(format!("read_only={read_only}"));
+        }
+
+        // Update sandbox allowed_dirs
+        if let Some(dirs) = payload.get("sandbox_allowed_dirs").and_then(|v| v.as_array()) {
+            let dirs: Vec<String> = dirs.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            {
+                let mut sb = self.sandbox.write().await;
+                sb.set_allowed_dirs(dirs.clone());
+            }
+            applied.push(format!("sandbox_allowed_dirs=[{} items]", dirs.len()));
+        }
+
+        // Update sandbox blocked_patterns
+        if let Some(patterns) = payload.get("sandbox_blocked_patterns").and_then(|v| v.as_array()) {
+            let patterns: Vec<String> = patterns.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            {
+                let mut sb = self.sandbox.write().await;
+                sb.set_blocked_patterns(patterns.clone());
+            }
+            applied.push(format!("sandbox_blocked_patterns=[{} items]", patterns.len()));
+        }
+
+        // Update sandbox allow_sudo
+        if let Some(allow) = payload.get("sandbox_allow_sudo").and_then(|v| v.as_bool()) {
+            {
+                let mut sb = self.sandbox.write().await;
+                sb.set_allow_sudo(allow);
+            }
+            applied.push(format!("sandbox_allow_sudo={allow}"));
+        }
+
+        // Update sandbox max_exec_timeout
+        if let Some(timeout) = payload.get("sandbox_max_exec_timeout").and_then(|v| v.as_u64()) {
+            {
+                let mut sb = self.sandbox.write().await;
+                sb.set_max_exec_timeout(timeout as u32);
+            }
+            applied.push(format!("sandbox_max_exec_timeout={timeout}"));
+        }
+
+        // Update approval mode
+        if let Some(mode) = payload.get("approval_mode").and_then(|v| v.as_str()) {
+            use crate::approval::ApprovalMode;
+            let new_mode = match mode {
+                "soft_ask" => ApprovalMode::SoftAsk,
+                "hard_ask" => ApprovalMode::HardAsk,
+                "auto" => ApprovalMode::Auto,
+                other => {
+                    warnings.push(format!("unknown approval_mode '{other}', ignored"));
+                    return Some(Message::new(MessageType::ConfigAck)
+                        .with_agent_id(&self.agent_id)
+                        .with_payload(serde_json::json!({
+                            "status": "partial",
+                            "applied": applied,
+                            "warnings": warnings,
+                        })));
+                }
+            };
+            {
+                let mut approval = self.approval.write().await;
+                approval.set_mode(new_mode);
+            }
+            applied.push(format!("approval_mode={mode}"));
+        }
+
+        // Log fields that require reconnect (cannot be applied at runtime)
+        for field in &["relay_url", "agent_id", "token"] {
+            if payload.get(*field).is_some() {
+                warnings.push(format!("{field} changed — requires agent restart to take effect"));
+            }
+        }
+
+        let status = if warnings.is_empty() { "applied" } else { "partial" };
+        info!(
+            "Config update: status={status}, applied=[{}], warnings=[{}]",
+            applied.join(", "),
+            warnings.join(", "),
+        );
+
+        Some(Message::new(MessageType::ConfigAck)
+            .with_agent_id(&self.agent_id)
+            .with_payload(serde_json::json!({
+                "status": status,
+                "applied": applied,
+                "warnings": warnings,
+            })))
     }
 
     /// After dispatch returns, drain any queued shield alerts. Called from connect_and_loop.
@@ -169,4 +325,96 @@ fn get_hostname() -> String {
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().into())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::approval::{ApprovalManager, ApprovalMode};
+    use crate::policy::PolicyEngine;
+    use crate::sandbox::Sandbox;
+    use flowlink_core::{Message, MessageType, Priority};
+
+    fn test_connection() -> Connection {
+        Connection::new(
+            "ws://localhost:9090".into(),
+            "test-agent".into(),
+            "test-token".into(),
+            PolicyEngine::new(false, false),
+            ApprovalManager::new(ApprovalMode::Auto),
+            crate::fileops::FileOps::new(vec![], 1024),
+            crate::backup::BackupManager::new("/tmp".into(), 5, 7),
+            std::sync::Arc::new(KillSwitch::new()),
+            crate::skills::SkillManager::new("/tmp").unwrap(),
+            Sandbox::new(vec![], vec![], 1024, 300, false),
+            crate::executor::Executor::default_executor(),
+            Arc::new(tokio::sync::Notify::new()),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_config_update_read_only() {
+        let conn = test_connection();
+        let msg = Message::new(MessageType::ConfigUpdate)
+            .with_agent_id("test-agent")
+            .with_payload(serde_json::json!({"read_only": true}));
+
+        let resp = conn.handle_config_update(&msg).await.unwrap();
+        assert_eq!(resp.msg_type, MessageType::ConfigAck);
+
+        // Verify policy was updated
+        let policy = conn.policy.read().await;
+        assert!(policy.is_read_only());
+    }
+
+    #[tokio::test]
+    async fn test_config_update_sandbox() {
+        let conn = test_connection();
+        let msg = Message::new(MessageType::ConfigUpdate)
+            .with_agent_id("test-agent")
+            .with_payload(serde_json::json!({
+                "sandbox_allowed_dirs": ["/home", "/tmp"],
+                "sandbox_allow_sudo": true,
+            }));
+
+        let resp = conn.handle_config_update(&msg).await.unwrap();
+        let payload = resp.payload.unwrap();
+        assert_eq!(payload["status"], "applied");
+    }
+
+    #[tokio::test]
+    async fn test_config_update_approval_mode() {
+        let conn = test_connection();
+        let msg = Message::new(MessageType::ConfigUpdate)
+            .with_agent_id("test-agent")
+            .with_payload(serde_json::json!({"approval_mode": "hard_ask"}));
+
+        let resp = conn.handle_config_update(&msg).await.unwrap();
+        let payload = resp.payload.unwrap();
+        assert_eq!(payload["status"], "applied");
+    }
+
+    #[tokio::test]
+    async fn test_config_update_no_payload() {
+        let conn = test_connection();
+        let msg = Message::new(MessageType::ConfigUpdate)
+            .with_agent_id("test-agent");
+
+        let resp = conn.handle_config_update(&msg).await.unwrap();
+        let payload = resp.payload.unwrap();
+        assert_eq!(payload["status"], "error");
+    }
+
+    #[tokio::test]
+    async fn test_config_update_relay_url_warns() {
+        let conn = test_connection();
+        let msg = Message::new(MessageType::ConfigUpdate)
+            .with_agent_id("test-agent")
+            .with_payload(serde_json::json!({"relay_url": "wss://new:9090"}));
+
+        let resp = conn.handle_config_update(&msg).await.unwrap();
+        let payload = resp.payload.unwrap();
+        assert_eq!(payload["status"], "partial");
+        assert!(payload["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("relay_url")));
+    }
 }

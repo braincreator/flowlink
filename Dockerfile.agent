@@ -1,33 +1,57 @@
-# Multi-stage build for FlowLink Agent
-FROM rust:1.85-bookworm AS builder
+# ============================================================
+# FlowLink Agent — Multi-stage Rust Dockerfile
+# ============================================================
 
-WORKDIR /flowlink
+FROM rust:1.80-alpine AS builder
 
-# Cache deps
+RUN apk add --no-cache git ca-certificates pkgconf musl-dev
+
+WORKDIR /build
+
+# Cache dependencies
 COPY Cargo.toml Cargo.lock ./
-COPY crates/core/Cargo.toml crates/core/Cargo.toml
-COPY crates/crypto/Cargo.toml crates/crypto/Cargo.toml
-COPY crates/shield/Cargo.toml crates/shield/Cargo.toml
-COPY crates/agent/Cargo.toml crates/agent/Cargo.toml
-COPY crates/relay/Cargo.toml crates/relay/Cargo.toml
-COPY crates/cli/Cargo.toml crates/cli/Cargo.toml
+COPY crates/core/Cargo.toml crates/core/
+COPY crates/crypto/Cargo.toml crates/crypto/
+COPY crates/db/Cargo.toml crates/db/
+COPY crates/billing/Cargo.toml crates/billing/
+COPY crates/agent/Cargo.toml crates/agent/
+COPY crates/relay/Cargo.toml crates/relay/
+COPY crates/cli/Cargo.toml crates/cli/
+COPY crates/shield/Cargo.toml crates/shield/
+COPY crates/k8s/Cargo.toml crates/k8s/
+COPY crates/gitops/Cargo.toml crates/gitops/
 
-RUN mkdir -p crates/core/src && echo "" > crates/core/src/lib.rs \
- && mkdir -p crates/crypto/src && echo "" > crates/crypto/src/lib.rs \
- && mkdir -p crates/shield/src && echo "" > crates/shield/src/lib.rs \
- && mkdir -p crates/agent/src && echo "" > crates/agent/src/lib.rs \
- && mkdir -p crates/relay/src && echo "" > crates/relay/src/lib.rs \
- && mkdir -p crates/cli/src && echo "fn main(){}" > crates/cli/src/main.rs
+RUN mkdir -p crates/core/src && echo "" > crates/core/src/lib.rs
+RUN mkdir -p crates/crypto/src && echo "" > crates/crypto/src/lib.rs
+RUN mkdir -p crates/db/src && echo "" > crates/db/src/lib.rs
+RUN mkdir -p crates/billing/src && echo "" > crates/billing/src/lib.rs
+RUN mkdir -p crates/agent/src && echo "" > crates/agent/src/lib.rs
+RUN mkdir -p crates/relay/src && echo "" > crates/relay/src/lib.rs
+RUN mkdir -p crates/cli/src && echo "fn main() {}" > crates/cli/src/main.rs
+RUN mkdir -p crates/shield/src && echo "" > crates/shield/src/lib.rs
+RUN mkdir -p crates/k8s/src && echo "" > crates/k8s/src/lib.rs
+RUN mkdir -p crates/gitops/src && echo "" > crates/gitops/src/lib.rs
 
-RUN cargo build --release -p flowlink 2>/dev/null || true
+RUN cargo build --release 2>/dev/null || true
 
-COPY crates/ crates/
-RUN cargo build --release -p flowlink
+COPY . .
+RUN find crates -name "*.rs" -exec touch {} +
+RUN cargo build --release --bin flowlink && \
+    strip /build/target/release/flowlink
 
-# Runtime
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM alpine:3.20
 
-COPY --from=builder /flowlink/target/release/flowlink /usr/local/bin/
+RUN apk add --no-cache ca-certificates tzdata
 
-ENTRYPOINT ["flowlink", "agent"]
+RUN adduser -D -h /home/flowlink -s /sbin/nologin flowlink
+
+WORKDIR /home/flowlink
+
+COPY --from=builder /build/target/release/flowlink /usr/local/bin/flowlink
+
+RUN mkdir -p /home/flowlink/.flowlink && chown -R flowlink:flowlink /home/flowlink
+
+USER flowlink
+
+ENTRYPOINT ["flowlink"]
+CMD ["agent", "--config", "/etc/flowlink/agent.json"]

@@ -52,6 +52,16 @@ impl PolicyEngine {
         self
     }
 
+    /// Update read_only flag at runtime (from ConfigUpdate).
+    pub fn set_read_only(&mut self, value: bool) {
+        self.read_only = value;
+    }
+
+    /// Check if read_only mode is active.
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
     /// Check command against full policy chain.
     pub fn check(&self, payload: &ExecRequestPayload) -> PolicyResult {
         let command = &payload.command;

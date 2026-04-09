@@ -95,8 +95,8 @@ pub async fn dispatch(
         | MessageType::ApprovalRequest
         | MessageType::FileResponse
         | MessageType::SysInfo
-        | MessageType::SysInfoResp
-        | MessageType::ConfigUpdate
+        |        MessageType::SysInfoResp
+        | MessageType::ConfigUpdate  // handled in Connection::handle_message before dispatch
         | MessageType::ConfigAck
         | MessageType::Task
         | MessageType::TaskProgress

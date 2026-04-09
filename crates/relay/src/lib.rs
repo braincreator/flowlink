@@ -16,8 +16,10 @@ pub mod rbac_manager;
 pub mod metrics;
 pub mod billing_api;
 pub mod billing_persist;
+pub mod billing_middleware;
 
 pub mod config_reload;
+pub mod e2ee;
 
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -140,6 +142,8 @@ impl Relay {
             },
             db,
             config_reloader,
+            e2ee: Arc::new(crate::e2ee::E2eeSessionManager::new()),
+            usage_tracker: Arc::new(crate::billing_middleware::UsageTracker::new()),
         };
 
         let app = server::build_router(state);
@@ -158,8 +162,24 @@ impl Relay {
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for ctrl-c");
-    info!("shutdown signal received");
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to listen for ctrl-c");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+    info!("Shutting down...");
 }

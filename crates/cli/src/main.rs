@@ -76,7 +76,8 @@ async fn main() -> anyhow::Result<()> {
             if let Some(addr) = addr {
                 cfg.http_addr = addr.parse()?;
             }
-            let relay = flowlink_relay::Relay::new(cfg);
+            let mut relay = flowlink_relay::Relay::new(cfg);
+            relay = relay.with_config_path(&config);
             relay.run().await
         }
         Commands::Keygen { output } => {

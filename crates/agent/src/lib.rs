@@ -36,6 +36,33 @@ impl Agent {
         let killswitch = std::sync::Arc::new(KillSwitch::new());
         killswitch.start_monitor();
 
+        // Graceful shutdown: create a notify and spawn signal listeners
+        let shutdown = std::sync::Arc::new(tokio::sync::Notify::new());
+        let shutdown_signal = shutdown.clone();
+        tokio::spawn(async move {
+            let ctrl_c = async {
+                tokio::signal::ctrl_c()
+                    .await
+                    .expect("failed to listen for ctrl-c");
+            };
+            #[cfg(unix)]
+            let terminate = async {
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("failed to install SIGTERM handler")
+                    .recv()
+                    .await;
+            };
+            #[cfg(not(unix))]
+            let terminate = std::future::pending::<()>();
+
+            tokio::select! {
+                _ = ctrl_c => {},
+                _ = terminate => {},
+            }
+            log::info!("Agent shutdown signal received, notifying connection...");
+            shutdown_signal.notify_waiters();
+        });
+
         let policy = PolicyEngine::new(self.config.read_only, self.config.sandbox.allow_sudo)
             .with_allowed_dirs(self.config.sandbox.allowed_dirs.clone())
             .with_blocked_patterns(self.config.sandbox.blocked_patterns.clone());
@@ -78,6 +105,7 @@ impl Agent {
             skill_mgr,
             sandbox,
             crate::executor::Executor::default_executor(),
+            shutdown,
         );
         conn.run().await
     }

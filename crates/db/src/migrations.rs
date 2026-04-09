@@ -159,3 +159,220 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
         "#),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_migrations_returns_expected_count() {
+        let migrations = get_migrations();
+        assert_eq!(migrations.len(), 5);
+    }
+
+    #[test]
+    fn migration_names_are_sequential() {
+        let migrations = get_migrations();
+        let expected_names = [
+            "001_accounts",
+            "002_usage_daily",
+            "003_invoices",
+            "004_audit_log",
+            "005_agents_devices",
+        ];
+        for (i, (name, _sql)) in migrations.iter().enumerate() {
+            assert_eq!(*name, expected_names[i], "Migration at index {} has wrong name", i);
+        }
+    }
+
+    #[test]
+    fn migration_names_are_unique() {
+        let migrations = get_migrations();
+        let names: Vec<&str> = migrations.iter().map(|(n, _)| *n).collect();
+        let mut seen = std::collections::HashSet::new();
+        for name in &names {
+            assert!(seen.insert(*name), "Duplicate migration name: {}", name);
+        }
+    }
+
+    #[test]
+    fn all_migrations_create_tables() {
+        let migrations = get_migrations();
+        for (name, sql) in &migrations {
+            assert!(sql.contains("CREATE TABLE"), "Migration '{}' missing CREATE TABLE", name);
+        }
+    }
+
+    #[test]
+    fn all_migrations_use_if_not_exists() {
+        let migrations = get_migrations();
+        for (name, sql) in &migrations {
+            assert!(sql.contains("IF NOT EXISTS"), "Migration '{}' missing IF NOT EXISTS", name);
+        }
+    }
+
+    #[test]
+    fn accounts_migration_has_expected_columns() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[0];
+        let expected_cols = [
+            "account_id", "plan_id", "active", "balance_kopecks",
+            "payment_method", "activated_at", "expires_at", "cycle_start",
+            "created_at", "updated_at",
+        ];
+        for col in &expected_cols {
+            assert!(sql.contains(col), "accounts migration missing column '{}'", col);
+        }
+    }
+
+    #[test]
+    fn accounts_migration_has_indexes() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[0];
+        assert!(sql.contains("idx_accounts_plan"));
+        assert!(sql.contains("idx_accounts_active"));
+    }
+
+    #[test]
+    fn usage_daily_migration_has_expected_columns() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[1];
+        let expected_cols = [
+            "account_id", "date", "api_requests", "tokens",
+            "active_agents", "storage_bytes", "api_requests_total", "tokens_total",
+        ];
+        for col in &expected_cols {
+            assert!(sql.contains(col), "usage_daily migration missing column '{}'", col);
+        }
+    }
+
+    #[test]
+    fn usage_daily_has_unique_constraint() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[1];
+        assert!(sql.contains("UNIQUE(account_id, date)"));
+    }
+
+    #[test]
+    fn invoices_migration_creates_both_tables() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[2];
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS invoices"));
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS invoice_items"));
+    }
+
+    #[test]
+    fn invoices_migration_has_expected_columns() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[2];
+        let inv_cols = ["id", "account_id", "number", "status", "total_kopecks", "currency", "paid_at"];
+        for col in &inv_cols {
+            assert!(sql.contains(col), "invoices migration missing column '{}'", col);
+        }
+        let item_cols = ["invoice_id", "description", "quantity", "unit_price_kopecks", "total_kopecks", "sort_order"];
+        for col in &item_cols {
+            assert!(sql.contains(col), "invoice_items migration missing column '{}'", col);
+        }
+    }
+
+    #[test]
+    fn invoice_items_has_cascade_delete() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[2];
+        assert!(sql.contains("ON DELETE CASCADE"));
+    }
+
+    #[test]
+    fn audit_log_migration_has_expected_columns() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[3];
+        let expected_cols = [
+            "timestamp", "level", "category", "agent_id", "account_id",
+            "action", "target", "result", "metadata", "hmac_hash", "source_ip",
+        ];
+        for col in &expected_cols {
+            assert!(sql.contains(col), "audit_log migration missing column '{}'", col);
+        }
+    }
+
+    #[test]
+    fn audit_log_metadata_is_jsonb() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[3];
+        assert!(sql.contains("metadata JSONB"));
+    }
+
+    #[test]
+    fn audit_log_has_expected_indexes() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[3];
+        assert!(sql.contains("idx_audit_timestamp"));
+        assert!(sql.contains("idx_audit_level"));
+        assert!(sql.contains("idx_audit_account"));
+        assert!(sql.contains("idx_audit_agent"));
+        assert!(sql.contains("idx_audit_category"));
+    }
+
+    #[test]
+    fn agents_devices_migration_creates_both_tables() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[4];
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS agents"));
+        assert!(sql.contains("CREATE TABLE IF NOT EXISTS devices"));
+    }
+
+    #[test]
+    fn agents_migration_has_expected_columns() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[4];
+        let expected_cols = ["agent_id", "account_id", "name", "status", "os", "arch", "version",
+                             "connected_at", "last_heartbeat", "metadata", "created_at"];
+        for col in &expected_cols {
+            assert!(sql.contains(col), "agents migration missing column '{}'", col);
+        }
+    }
+
+    #[test]
+    fn devices_migration_has_expected_columns() {
+        let migrations = get_migrations();
+        let (_, sql) = &migrations[4];
+        let expected_cols = ["device_id", "account_id", "name", "device_type", "fingerprint",
+                             "status", "paired_at", "last_seen", "metadata", "created_at"];
+        for col in &expected_cols {
+            assert!(sql.contains(col), "devices migration missing column '{}'", col);
+        }
+    }
+
+    #[test]
+    fn all_migrations_create_indexes() {
+        let migrations = get_migrations();
+        for (name, sql) in &migrations {
+            assert!(sql.contains("CREATE INDEX"), "Migration '{}' has no indexes", name);
+        }
+    }
+
+    #[test]
+    fn migration_sql_is_not_empty() {
+        let migrations = get_migrations();
+        for (name, sql) in &migrations {
+            assert!(!sql.trim().is_empty(), "Migration '{}' has empty SQL", name);
+            assert!(sql.len() > 50, "Migration '{}' SQL seems too short ({} bytes)", name, sql.len());
+        }
+    }
+
+    #[test]
+    fn foreign_keys_reference_accounts() {
+        let migrations = get_migrations();
+        // usage_daily references accounts
+        assert!(migrations[1].1.contains("REFERENCES accounts(account_id)"));
+        // invoices references accounts
+        assert!(migrations[2].1.contains("REFERENCES accounts(account_id)"));
+    }
+
+    #[test]
+    fn foreign_keys_reference_invoices() {
+        let migrations = get_migrations();
+        // invoice_items references invoices
+        assert!(migrations[2].1.contains("REFERENCES invoices(id)"));
+    }
+}

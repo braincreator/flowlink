@@ -1,29 +1,59 @@
 version: '3.8'
+
 services:
   relay:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: flowlink-relay
     ports:
       - "8080:8080"
       - "8443:8443"
     volumes:
-      - flowlink-data:/root/.flowlink
+      - flowlink-data:/home/flowlink/.flowlink
+      - ./config/relay.json:/etc/flowlink/relay.json:ro
     environment:
-      - FLOWLINK_TLS_MODE=self-signed
-      - FLOWLINK_AUTH_SECRET=change-me-in-production
+      - RUST_LOG=info
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
-  bot:
+  agent:
     build:
       context: .
-      dockerfile: Dockerfile.bot
-    container_name: flowlink-bot
+      dockerfile: Dockerfile.agent
+    container_name: flowlink-agent
     depends_on:
-      - relay
+      relay:
+        condition: service_healthy
+    volumes:
+      - flowlink-data:/home/flowlink/.flowlink
+      - ./config/agent.json:/etc/flowlink/agent.json:ro
     environment:
-      - FLOWLINK_RELAY_URL=http://relay:8080
-      - FLOWLINK_TG_TOKEN=${TG_BOT_TOKEN}
+      - RUST_LOG=info
     restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: flowlink-db
+    environment:
+      POSTGRES_DB: flowlink
+      POSTGRES_USER: flowlink
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-flowlink_dev}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowlink"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   flowlink-data:
+  postgres-data:

@@ -50,6 +50,12 @@ impl Sandbox {
         }
     }
 
+    /// Runtime setters for ConfigUpdate hot-reload.
+    pub fn set_allowed_dirs(&mut self, dirs: Vec<String>) { self.allowed_dirs = dirs; }
+    pub fn set_blocked_patterns(&mut self, patterns: Vec<String>) { self.blocked_patterns = patterns; }
+    pub fn set_allow_sudo(&mut self, allow: bool) { self.allow_sudo = allow; }
+    pub fn set_max_exec_timeout(&mut self, timeout: u32) { self.max_exec_timeout = timeout; }
+
     /// Validate a file path: must be within allowed_dirs, resolve symlinks, reject traversal.
     pub fn validate_path(&self, path: &str) -> Result<PathBuf> {
         if path.is_empty() {

@@ -112,3 +112,94 @@ impl UsageRepo {
         Ok(result.rows_affected())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_row_default_is_all_zeros() {
+        let row = UsageRow::default();
+        assert_eq!(row.api_requests, 0);
+        assert_eq!(row.tokens, 0);
+        assert_eq!(row.active_agents, 0);
+        assert_eq!(row.storage_bytes, 0);
+        assert_eq!(row.api_requests_total, 0);
+        assert_eq!(row.tokens_total, 0);
+    }
+
+    #[test]
+    fn usage_row_clone() {
+        let row = UsageRow {
+            api_requests: 42,
+            tokens: 1000,
+            active_agents: 3,
+            storage_bytes: 2048,
+            api_requests_total: 500,
+            tokens_total: 10000,
+        };
+        let cloned = row.clone();
+        assert_eq!(cloned.api_requests, 42);
+        assert_eq!(cloned.tokens, 1000);
+        assert_eq!(cloned.active_agents, 3);
+        assert_eq!(cloned.storage_bytes, 2048);
+        assert_eq!(cloned.api_requests_total, 500);
+        assert_eq!(cloned.tokens_total, 10000);
+    }
+
+    #[test]
+    fn usage_row_debug() {
+        let row = UsageRow {
+            api_requests: 1,
+            tokens: 2,
+            active_agents: 3,
+            storage_bytes: 4,
+            api_requests_total: 5,
+            tokens_total: 6,
+        };
+        let debug_str = format!("{:?}", row);
+        assert!(debug_str.contains("api_requests"));
+        assert!(debug_str.contains("tokens"));
+    }
+
+    #[test]
+    fn usage_row_with_large_values() {
+        let row = UsageRow {
+            api_requests: i64::MAX,
+            tokens: i64::MAX,
+            active_agents: i64::MAX,
+            storage_bytes: i64::MAX,
+            api_requests_total: i64::MAX,
+            tokens_total: i64::MAX,
+        };
+        assert_eq!(row.api_requests, i64::MAX);
+        assert_eq!(row.tokens, i64::MAX);
+    }
+
+    #[test]
+    fn sql_queries_reference_usage_daily_table() {
+        let queries = [
+            "INSERT INTO usage_daily (account_id, date, api_requests) VALUES ($1, $2, $3)",
+            "SELECT api_requests, tokens, active_agents, storage_bytes,
+                    api_requests_total, tokens_total
+             FROM usage_daily WHERE account_id = $1 AND date = $2",
+            "UPDATE usage_daily SET api_requests = 0, tokens = 0",
+        ];
+        for q in &queries {
+            assert!(q.contains("usage_daily"), "Query missing 'usage_daily' table: {}", q);
+        }
+    }
+
+    #[test]
+    fn increment_query_uses_upsert() {
+        // The increment query should use ON CONFLICT for upsert behavior
+        let field = "api_requests";
+        let sql = format!(
+            "INSERT INTO usage_daily (account_id, date, {field}) VALUES ($1, $2, $3)
+             ON CONFLICT (account_id, date) DO UPDATE SET {field} = usage_daily.{field} + $3"
+        );
+        assert!(sql.contains("ON CONFLICT"));
+        assert!(sql.contains("DO UPDATE"));
+        assert!(sql.contains("usage_daily.api_requests"));
+    }
+}

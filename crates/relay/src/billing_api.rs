@@ -109,17 +109,34 @@ pub async fn get_billing_info(
 }
 
 /// GET /api/billing/usage — get current usage snapshot
+///
+/// Returns the billing engine usage plus real-time usage tracker data
+/// (per-agent requests, tokens, and commands).
 pub async fn get_usage(
     State(state): State<AppState>,
     account: AccountIdExtractor,
 ) -> impl IntoResponse {
-    let billing_engine = match get_billing_engine(&state) {
-        Ok(e) => e,
-        Err(r) => return r,
-    };
+    // Collect usage tracker data
+    let all_tracker_usage = state.usage_tracker.get_all_usage().await;
+    let (daily_requests, daily_tokens) = state.usage_tracker.today_stats().await;
 
-    let snapshot = billing_engine.usage().get_snapshot(&account.0);
-    (axum::http::StatusCode::OK, Json(snapshot)).into_response()
+    // Build enriched response
+    let mut response = serde_json::json!({
+        "tracker": {
+            "agents": all_tracker_usage,
+            "daily_requests": daily_requests,
+            "daily_tokens": daily_tokens,
+            "active_agents": all_tracker_usage.len(),
+        }
+    });
+
+    // Also include billing engine snapshot if available
+    if let Some(billing_engine) = &state.billing {
+        let snapshot = billing_engine.usage().get_snapshot(&account.0);
+        response["billing"] = serde_json::to_value(&snapshot).unwrap_or(json!(null));
+    }
+
+    (axum::http::StatusCode::OK, Json(response)).into_response()
 }
 
 /// GET /api/billing/plans — list available plans
