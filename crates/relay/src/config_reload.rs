@@ -205,7 +205,7 @@ impl ConfigReloader {
 
         // Build the config update payload with relevant fields
         let payload = serde_json::json!({
-            "relay_url": config.wss_addr.to_string(),
+            "relay_url": format!("wss://{}", config.wss_addr),
             "http_addr": config.http_addr.to_string(),
             "client_name": config.client_name,
             "llm_enabled": config.llm.enabled,
@@ -241,7 +241,7 @@ impl ConfigReloader {
     pub async fn push_to_agent(&self, agent_id: &str) -> Result<PushResult> {
         let config = self.config.read().await.clone();
         let payload = serde_json::json!({
-            "relay_url": config.wss_addr.to_string(),
+            "relay_url": format!("wss://{}", config.wss_addr),
             "http_addr": config.http_addr.to_string(),
             "client_name": config.client_name,
             "llm_enabled": config.llm.enabled,

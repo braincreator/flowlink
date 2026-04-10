@@ -197,6 +197,8 @@ pub struct RelayConfig {
     #[serde(default)]
     pub client_email: String,
     pub api_token: String,
+    /// WSS address — always started at relay boot.
+    /// TLS cert+key must be configured via wss_tls (required).
     #[serde(default = "default_wss_addr")]
     pub wss_addr: SocketAddr,
     #[serde(default = "default_http_addr")]
@@ -211,6 +213,36 @@ pub struct RelayConfig {
     pub registry: RegistryConfig,
     #[serde(default)]
     pub database: DatabaseConfig,
+    /// WSS TLS — when cert_path and key_path are set, starts a separate
+    /// TLS listener on wss_addr for direct agent WebSocket connections.
+    #[serde(default)]
+    pub wss_tls: WssTlsConfig,
+}
+
+/// WSS TLS configuration for the relay's WebSocket listener.
+/// When set, the relay starts a separate TLS listener on `wss_addr`.
+/// Agents connect via `wss://` directly (bypassing nginx).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WssTlsConfig {
+    /// Path to the TLS certificate (PEM).
+    #[serde(default)]
+    pub cert_path: Option<String>,
+    /// Path to the TLS private key (PEM).
+    #[serde(default)]
+    pub key_path: Option<String>,
+}
+
+impl Default for WssTlsConfig {
+    fn default() -> Self {
+        Self { cert_path: None, key_path: None }
+    }
+}
+
+impl WssTlsConfig {
+    /// Returns true if both cert and key paths are set (WSS is enabled).
+    pub fn is_enabled(&self) -> bool {
+        self.cert_path.is_some() && self.key_path.is_some()
+    }
 }
 
 /// Database connection configuration.
@@ -450,6 +482,7 @@ mod tests {
             billing: BillingConfig::default(),
             registry: RegistryConfig::default(),
             database: DatabaseConfig::default(),
+            wss_tls: WssTlsConfig::default(),
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: RelayConfig = serde_json::from_str(&json).unwrap();

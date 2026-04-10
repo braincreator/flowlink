@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use log::info;
 use tokio::sync::RwLock;
+use tokio_rustls::TlsAcceptor;
 use flowlink_core::config::RelayConfig;
 
 use crate::approval::ApprovalQueue;
@@ -37,6 +38,8 @@ use crate::registry::Registry;
 use crate::devices::DeviceManager;
 use crate::llm::LlmProxy;
 use crate::server::AppState;
+use crate::tls::{self as relay_tls};
+use tower::ServiceExt;
 
 pub struct Relay {
     config: RelayConfig,
@@ -165,15 +168,87 @@ impl Relay {
             control_plane: crate::control_plane::ControlPlaneState::new(),
         };
 
-        let app = server::build_router(state);
+        let app = server::build_router(state.clone());
 
         let addr = self.config.http_addr;
-        info!("relay listening on {addr}");
+        info!("relay listening on {addr} (HTTP API)");
 
-        let listener = tokio::net::TcpListener::bind(addr).await?;
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await?;
+        let http_listener = tokio::net::TcpListener::bind(addr).await?;
+        let http_server = axum::serve(http_listener, app)
+            .with_graceful_shutdown(shutdown_signal());
+
+        // ── WSS TLS listener (required) ──
+        // Realtime endpoint for agents. Cert+key are mandatory — fail fast if missing.
+        if !self.config.wss_tls.is_enabled() {
+            return Err(anyhow::anyhow!(
+                "wss_tls: cert_path and key_path are required (wss_addr={})",
+                self.config.wss_addr
+            ));
+        }
+        let cert_path = self.config.wss_tls.cert_path.as_deref().unwrap();
+        let key_path = self.config.wss_tls.key_path.as_deref().unwrap();
+        let wss_addr = self.config.wss_addr;
+
+        let tls_config = relay_tls::build_tls_server_config(&relay_tls::TlsConfig {
+                cert_path: cert_path.to_string(),
+                key_path: key_path.to_string(),
+                ca_path: None,
+            })?;
+
+        let tls_acceptor = TlsAcceptor::from(tls_config);
+
+        info!("WSS TLS listener on {wss_addr} (cert: {cert_path})");
+
+        let wss_listener = tokio::net::TcpListener::bind(wss_addr).await?;
+        let wss_app = server::build_router(state.clone());
+
+        tokio::spawn(async move {
+            loop {
+                let acceptor = tls_acceptor.clone();
+                let app = wss_app.clone();
+                tokio::select! {
+                    result = wss_listener.accept() => {
+                        match result {
+                            Ok((tcp_stream, peer_addr)) => {
+                                info!("WSS TLS connection from {peer_addr}");
+                                match acceptor.accept(tcp_stream).await {
+                                    Ok(tls_stream) => {
+                                        let app = app.clone();
+                                        tokio::spawn(async move {
+                                            let io = hyper_util::rt::TokioIo::new(tls_stream);
+                                            let svc = hyper::service::service_fn(move |req| {
+                                                let app = app.clone();
+                                                async move {
+                                                    app.oneshot(req).await
+                                                }
+                                            });
+                                            if let Err(e) = hyper::server::conn::http1::Builder::new()
+                                                .serve_connection(io, svc)
+                                                .await
+                                            {
+                                                log::warn!("WSS TLS serve error: {e}");
+                                            }
+                                        });
+                                    }
+                                    Err(e) => {
+                                        log::warn!("WSS TLS handshake failed from {peer_addr}: {e}");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("WSS listener accept error: {e}");
+                            }
+                        }
+                    }
+                    _ = shutdown_signal() => {
+                        info!("WSS TLS listener shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+
+        http_server.await?;
 
         info!("relay shut down");
         Ok(())

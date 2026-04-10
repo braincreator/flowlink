@@ -886,6 +886,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/config/reload", post(config_reload))
         .route("/api/config", get(config_get))
         .route("/api/config/push/{agent_id}", post(config_push_agent))
+        // Public plans endpoint (no auth, for website)
+        .route("/api/plans", axum::routing::get(crate::billing_api::public_plans))
         // Billing routes
         .route("/api/billing", axum::routing::get(crate::billing_api::get_billing_info))
         .route("/api/billing/usage", axum::routing::get(crate::billing_api::get_usage))
