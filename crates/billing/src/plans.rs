@@ -119,15 +119,15 @@ impl Plan {
         }
     }
 
-    /// Starter plan
+    /// Starter plan — 990 ₽/мес
     pub fn starter() -> Self {
         Self {
             id: PlanId::Starter.as_str().to_string(),
             name: "Starter".to_string(),
             description: "Для фрилансеров и small teams".to_string(),
             tier: 1,
-            price_kopecks: 299_000, // 2 990 RUB/month
-            annual_price_kopecks: Some(2_392_000), // 23 920 RUB/year (~20% discount)
+            price_kopecks: 99_000, // 990 RUB/month
+            annual_price_kopecks: Some(950_400), // 9 504 RUB/year (~20% discount)
             limits: PlanLimits {
                 max_hosts: 3,
                 max_users: 3,
@@ -140,16 +140,14 @@ impl Plan {
                 shield_level: "advanced".to_string(),
             },
             features: vec![
-                "3 hosts".to_string(),
-                "3 users".to_string(),
-                "14 day logs".to_string(),
-                "AST analysis".to_string(),
-                "Canary honeypots".to_string(),
-                "Approval workflow".to_string(),
-                "Custom policies (up to 10)".to_string(),
-                "Smart backup + dedup".to_string(),
+                "3 сервера".to_string(),
+                "3 пользователя".to_string(),
+                "Telegram бот".to_string(),
+                "Web dashboard".to_string(),
+                "E2EE шифрование".to_string(),
                 "Device trust".to_string(),
                 "MCP protocol".to_string(),
+                "Email поддержка".to_string(),
             ],
             available: true,
             legacy: false,
@@ -158,19 +156,19 @@ impl Plan {
         }
     }
 
-    /// Pro plan
+    /// Pro plan — 4 990 ₽/мес
     pub fn pro() -> Self {
         Self {
             id: PlanId::Pro.as_str().to_string(),
             name: "Pro".to_string(),
             description: "Для стартапов, IT-отделов и DevOps teams".to_string(),
             tier: 2,
-            price_kopecks: 799_000, // 7 990 RUB/month
-            annual_price_kopecks: Some(6_392_000), // 63 920 RUB/year (~20% discount)
+            price_kopecks: 499_000, // 4 990 RUB/month
+            annual_price_kopecks: Some(4_790_400), // 47 904 RUB/year (~20% discount)
             limits: PlanLimits {
-                max_hosts: 20,
+                max_hosts: 25,
                 max_users: 10,
-                backup_storage_mb: 20480,
+                backup_storage_mb: 0, // unlimited
                 max_snapshots: 0, // unlimited
                 retention_days: 90,
                 audit_retention_days: 90,
@@ -179,20 +177,15 @@ impl Plan {
                 shield_level: "enterprise".to_string(),
             },
             features: vec![
-                "20 hosts".to_string(),
-                "10 users".to_string(),
-                "90 day logs".to_string(),
-                "eBPF kernel-level shield".to_string(),
-                "Policy DSL".to_string(),
-                "Forensics".to_string(),
+                "25 серверов".to_string(),
+                "10 пользователей".to_string(),
                 "K8s operator".to_string(),
-                "GitOps drift detection".to_string(),
                 "SIEM export".to_string(),
-                "RBAC (10 users)".to_string(),
-                "Telegram approval".to_string(),
-                "Auto restore".to_string(),
-                "LLM failover".to_string(),
-                "Global kill switch".to_string(),
+                "RBAC".to_string(),
+                "Approval workflow".to_string(),
+                "Forensics".to_string(),
+                "Audit log + HMAC".to_string(),
+                "Priority поддержка".to_string(),
             ],
             available: true,
             legacy: false,
@@ -354,10 +347,10 @@ mod tests {
         assert_eq!(individual.limits.max_hosts, 3);
         assert_eq!(individual.limits.max_users, 3);
         assert_eq!(individual.limits.backup_storage_mb, 5120);
-        assert_eq!(individual.price_kopecks, 299_000);
+        assert_eq!(individual.price_kopecks, 99_000);
         assert_eq!(individual.limits.shield_level, "advanced");
         assert_eq!(individual.trial_days, None);
-        assert_eq!(individual.annual_price_kopecks, Some(2_392_000));
+        assert_eq!(individual.annual_price_kopecks, Some(950_400));
     }
 
     #[test]
@@ -366,10 +359,10 @@ mod tests {
         assert!(Plan::is_unlimited(business.limits.max_snapshots));
         assert!(Plan::is_unlimited(business.limits.max_file_size_mb));
         assert!(Plan::is_unlimited(business.limits.exec_timeout_sec));
-        assert_eq!(business.limits.max_hosts, 20);
+        assert_eq!(business.limits.max_hosts, 25);
         assert_eq!(business.limits.max_users, 10);
         assert_eq!(business.limits.audit_retention_days, 90);
-        assert_eq!(business.price_kopecks, 799_000);
+        assert_eq!(business.price_kopecks, 499_000);
         assert_eq!(business.trial_days, None);
     }
 

@@ -1,5 +1,5 @@
 # Multi-stage build for FlowLink Relay
-FROM rust:1.85-bookworm AS builder
+FROM rust:1.88-bookworm AS builder
 
 WORKDIR /flowlink
 
@@ -24,13 +24,13 @@ RUN cargo build --release -p flowlink-relay 2>/dev/null || true
 
 # Copy actual source
 COPY crates/ crates/
-RUN cargo build --release -p flowlink-relay
+RUN cargo build --release -p flowlink
 
 # Runtime
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /flowlink/target/release/flowlink-relay /usr/local/bin/
+COPY --from=builder /flowlink/target/release/flowlink /usr/local/bin/flowlink-relay
 
 EXPOSE 8080 8443
 ENTRYPOINT ["flowlink-relay"]

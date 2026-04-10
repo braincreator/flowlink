@@ -4,82 +4,113 @@ import React from "react";
 import { PlanCard, PricingToggle } from "../components/billing";
 import type { Plan } from "../components/billing";
 
-const plans: Plan[] = [
-  {
-    id: "free",
-    name: "Free",
-    monthlyPrice: 0,
-    annualPrice: 0,
-    features: [
-      "1 хост",
-      "1 пользователь",
-      "Pattern blocking (50+ паттернов)",
-      "Ручной бэкап",
-      "500MB backup storage",
-      "Basic sandbox",
-      "E2EE (X25519 + AES-256)",
-      "Rate limiting",
-      "Config hot-reload",
-    ],
-    cta: "Начать бесплатно",
-    ctaHref: "/signup",
-  },
-  {
-    id: "individual",
-    name: "Individual",
-    monthlyPrice: 1990,
-    annualPrice: 15920,
-    features: [
-      "До 3 хостов",
-      "До 2 пользователей",
-      "AST + Interpreter анализ",
-      "Canary honeypots",
-      "Approval workflow",
-      "Custom policies (до 10)",
-      "Auto backup + Smart backup + Dedup",
-      "5GB backup storage",
-      "Device trust",
-      "MCP protocol",
-      "Multi-backend LLM (до 3)",
-      "30-day audit log",
-      "14 дней trial",
-    ],
-    popular: true,
-    cta: "Начать trial",
-    ctaHref: "/checkout",
-  },
-  {
-    id: "business",
-    name: "Business",
-    monthlyPrice: 4990,
-    annualPrice: 39920,
-    features: [
-      "До 25 хостов",
-      "До 10 пользователей",
-      "eBPF kernel-level shield",
-      "Policy DSL",
-      "Forensics",
-      "K8s operator",
-      "GitOps drift detection",
-      "SIEM export (CEF/LEEF/JSON)",
-      "RBAC (10 users)",
-      "Telegram approval",
-      "Auto restore",
-      "LLM failover",
-      "Global kill switch",
-      "PostgreSQL audit",
-      "Prometheus metrics",
-      "20GB backup storage",
-      "90-day audit log",
-      "14 дней trial",
-    ],
-    cta: "Начать trial",
-    ctaHref: "/checkout",
-  },
-];
+interface ApiPlan {
+  id: string;
+  name: string;
+  description: string;
+  tier: number;
+  price_kopecks: number;
+  annual_price_kopecks: number | null;
+  features: string[];
+  trial_days: number | null;
+  available: boolean;
+  legacy: boolean;
+}
+
+function mapPlan(p: ApiPlan, index: number): Plan {
+  const monthlyPrice = p.price_kopecks / 100;
+  const annualPrice = p.annual_price_kopecks
+    ? p.annual_price_kopecks / 100 / 12
+    : monthlyPrice;
+  const isTrial = p.tier === 0;
+
+  return {
+    id: p.id,
+    name: p.name,
+    monthlyPrice,
+    annualPrice: Math.round(annualPrice),
+    features: p.features || [],
+    popular: index === 1,
+    cta: isTrial ? "Начать бесплатно" : "Начать trial",
+    ctaHref: isTrial ? "/signup" : "/checkout",
+  };
+}
 
 export default function PricingPage() {
   const [annual, setAnnual] = React.useState(false);
+  const [plans, setPlans] = React.useState<Plan[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    fetch("/api/plans")
+      .then((r) => r.json())
+      .then((data: ApiPlan[]) => {
+        setPlans(
+          (Array.isArray(data) ? data : [])
+            .filter((p) => p.available !== false && !p.legacy)
+            .sort((a, b) => a.tier - b.tier)
+            .map(mapPlan)
+        );
+      })
+      .catch(() => {
+        setPlans([
+          {
+            id: "trial",
+            name: "Trial",
+            monthlyPrice: 0,
+            annualPrice: 0,
+            features: [
+              "1 сервер",
+              "1 пользователь",
+              "Unlimited undo",
+              "Policy Engine",
+              "Community support",
+            ],
+            cta: "Начать бесплатно",
+            ctaHref: "/signup",
+          },
+          {
+            id: "starter",
+            name: "Starter",
+            monthlyPrice: 990,
+            annualPrice: 792,
+            features: [
+              "3 сервера",
+              "3 пользователя",
+              "Telegram бот",
+              "Web dashboard",
+              "E2EE шифрование",
+              "Device trust",
+              "MCP protocol",
+              "Email поддержка",
+            ],
+            popular: true,
+            cta: "Начать trial",
+            ctaHref: "/checkout",
+          },
+          {
+            id: "pro",
+            name: "Pro",
+            monthlyPrice: 4990,
+            annualPrice: 3992,
+            features: [
+              "25 серверов",
+              "10 пользователей",
+              "K8s operator",
+              "SIEM export",
+              "RBAC",
+              "Approval workflow",
+              "Forensics",
+              "Audit log + HMAC",
+              "Priority поддержка",
+            ],
+            cta: "Начать trial",
+            ctaHref: "/checkout",
+          },
+        ]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
     <div>
@@ -91,11 +122,15 @@ export default function PricingPage() {
           <PricingToggle annual={annual} onChange={setAnnual} />
         </div>
 
-        <div className="pricing-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-          {plans.map((p) => (
-            <PlanCard key={p.id} plan={p} annual={annual} />
-          ))}
-        </div>
+        {loading ? (
+          <p style={{ textAlign: "center", opacity: 0.5 }}>Загрузка тарифов...</p>
+        ) : (
+          <div className="pricing-grid" style={{ gridTemplateColumns: `repeat(${plans.length}, 1fr)` }}>
+            {plans.map((p) => (
+              <PlanCard key={p.id} plan={p} annual={annual} />
+            ))}
+          </div>
+        )}
 
         <p style={{ textAlign: "center", marginTop: 32, opacity: 0.7 }}>
           Нужен безлимит? <a href="mailto:hello@flowlink.app">Свяжитесь с нами</a>

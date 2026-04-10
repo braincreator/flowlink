@@ -325,8 +325,8 @@ mod tests {
         let invoice = store.create(Invoice::for_plan("acc-1", &plan));
 
         assert_eq!(invoice.items.len(), 1);
-        assert_eq!(invoice.subtotal_kopecks, 299_000);
-        assert!(invoice.total_kopecks > 299_000); // with tax
+        assert_eq!(invoice.subtotal_kopecks, 99_000);
+        assert!(invoice.total_kopecks > 99_000); // with tax
     }
 
     #[test]
@@ -382,7 +382,7 @@ mod tests {
         let _inv2 = store.create(Invoice::for_plan("acc-2", &Plan::starter()));
         // inv2 is pending, not counted
 
-        assert_eq!(store.total_revenue(), 358_800); // 299000 + 20% NDS
+        assert_eq!(store.total_revenue(), 118_800); // 99000 + 20% NDS
     }
 
     #[test]

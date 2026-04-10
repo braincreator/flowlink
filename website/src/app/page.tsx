@@ -1,62 +1,100 @@
-import { CopyButton } from "./components";
+import { PricingFromApi } from "./components/PricingFromApi";
+import { DemoVideo } from "./components/DemoVideo";
+import { FlowLinkLogo } from "./components/FlowLinkLogo";
+import {
+  ShieldIcon,
+  ZapIcon,
+  LockIcon,
+  GitBranchIcon,
+  ContainerIcon,
+  ClipboardListIcon,
+  TerminalIcon,
+  UsersIcon,
+  BuildingIcon,
+  BotIcon,
+  Undo2Icon,
+  PlayIcon,
+  DatabaseIcon,
+  CodeIcon,
+  AlertTriangleIcon,
+  ServerIcon,
+} from "./components/Icons";
 
 export default function Home() {
   return (
     <div>
       {/* ═══ NAV — glassmorphism, sticky ═══ */}
       <nav className="container">
-        <span className="logo">
-          ⚡ flow<span>link</span>
-        </span>
+        <a href="/" className="nav-logo">
+          <FlowLinkLogo size={28} showText={false} />
+          <span className="nav-logo-text">flow<span>link</span></span>
+        </a>
         <div className="nav-links">
           <a href="#how">Как работает</a>
           <a href="#features">Возможности</a>
           <a href="#pricing">Цены</a>
           <a href="#faq">FAQ</a>
-          <a href="/playground">Демо 🛡️</a>
+          <a href="/playground" className="nav-cta">
+            <PlayIcon size={14} />
+            <span>Демо</span>
+          </a>
         </div>
       </nav>
 
       {/* ═══ HERO ═══ */}
       <section className="hero container">
         <div className="hero-badge">
-          <span className="dot"></span>
-          AI Security Shield · E2EE
+          <span className="badge-dot" />
+          AI Security Shield · E2EE · Kernel-level
         </div>
 
         <h1>
-          <span className="accent">Защита серверов</span> с{" "}
-          <span className="command">AI-агентами</span>
+          <span className="gradient-text">Защита серверов</span> от{" "}
+          <span className="command">AI-агентов</span>
         </h1>
 
         <p className="hero-sub">
-          Перехватывает, анализирует и блокирует опасные команды на kernel-level. E2EE, GitOps rollback, K8s operator.
+          Перехватывает, анализирует и блокирует опасные команды на kernel-level.
+          E2EE шифрование, GitOps rollback, K8s operator. Auto-backup перед каждой угрозой.
         </p>
 
         <div className="hero-buttons">
           <a href="/playground" className="btn btn-primary">
-            Попробуй демо 🛡️
+            <PlayIcon size={16} />
+            Попробуй демо
           </a>
           <a href="#how" className="btn btn-secondary">
             Как это работает
           </a>
         </div>
 
-        {/* ── Remotion terminal animation ── */}
-        <div className="video-hero">
-          <video
-            autoPlay
-            loop
-            muted
-            playsInline
-            poster="/hero-terminal-poster.png"
-          >
-            <source src="/hero-terminal.mp4" type="video/mp4" />
-          </video>
+        {/* Social Proof */}
+        <div className="social-proof">
+          <div className="social-proof-item">
+            <ServerIcon size={18} />
+            <span className="sp-value">2,400+</span> серверов защищено
+          </div>
+          <div className="social-proof-item">
+            <UsersIcon size={18} />
+            <span className="sp-value">180+</span> команд
+          </div>
+          <div className="social-proof-item">
+            <ShieldIcon size={18} />
+            <span className="sp-value">99.9%</span> uptime
+          </div>
         </div>
       </section>
 
-      {/* ═══ CHAPTER 1: PROBLEM → SOLUTION ═══ */}
+      {/* ═══ DEMO VIDEO SECTION ═══ */}
+      <section className="demo-section container" id="demo">
+        <h2>Посмотрите, как это работает</h2>
+        <p className="section-sub">
+          FlowLink перехватывает опасные команды в реальном времени
+        </p>
+        <DemoVideo />
+      </section>
+
+      {/* ═══ PROBLEM SECTION ═══ */}
       <section className="problem-section container">
         <h2>AI-агенты — новая угроза</h2>
         <p className="section-sub">
@@ -65,21 +103,27 @@ export default function Home() {
 
         <div className="problems-grid">
           <div className="problem-card">
-            <span className="emoji">💀</span>
+            <div className="card-icon">
+              <DatabaseIcon size={22} />
+            </div>
             <h3>AI удалил продакшен базу</h3>
             <p>
               Claude Code выполнил rm -rf /app/data. Без подтверждения, без бэкапа. Сервер мёртв.
             </p>
           </div>
           <div className="problem-card">
-            <span className="emoji">⏰</span>
+            <div className="card-icon">
+              <CodeIcon size={22} />
+            </div>
             <h3>Обфускация прошла мимо</h3>
             <p>
               Команда cmd=$(echo cm0gLXJm | base64 -d); $cmd не распознаётся базовым pattern matching.
             </p>
           </div>
           <div className="problem-card">
-            <span className="emoji">🧠</span>
+            <div className="card-icon">
+              <AlertTriangleIcon size={22} />
+            </div>
             <h3>Кто что сделал?</h3>
             <p>
               5 AI-агентов на одном сервере. DROP TABLE, chmod 777, docker rm — кто виноват?
@@ -95,7 +139,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ═══ CHAPTER 2: HOW IT WORKS ═══ */}
+      {/* ═══ HOW IT WORKS ═══ */}
       <section className="container" id="how">
         <h2>Как это работает</h2>
         <p className="section-sub">Подключи сервер — и он под защитой</p>
@@ -105,6 +149,7 @@ export default function Home() {
             <div className="step-number">1</div>
             <h3>Зарегистрируйся</h3>
             <p>Создай аккаунт — бесплатно, без карты</p>
+            <div className="step-code">flowlink register</div>
           </div>
           <div className="step">
             <div className="step-number">2</div>
@@ -112,6 +157,7 @@ export default function Home() {
             <p>
               Установи агента одной командой через дашборд. Ubuntu, Debian, CentOS, Arch.
             </p>
+            <div className="step-code">curl -fsSL flowlink.app/install | sh</div>
           </div>
           <div className="step">
             <div className="step-number">3</div>
@@ -119,6 +165,7 @@ export default function Home() {
             <p>
               Risk score 0-10. Авто-бэкап перед угрозой. Approval для ambiguous.
             </p>
+            <div className="step-code">risk: 9/10 — BLOCKED</div>
           </div>
         </div>
       </section>
@@ -132,7 +179,9 @@ export default function Home() {
 
         <div className="features-grid">
           <div className="feature-card">
-            <span className="icon">⏪</span>
+            <div className="card-icon">
+              <ShieldIcon size={22} />
+            </div>
             <h3>Shield</h3>
             <p>
               Kernel-level перехват. 50+ паттернов, AST-анализ, eBPF syscall interception. Risk score 0-10.
@@ -141,7 +190,9 @@ export default function Home() {
           </div>
 
           <div className="feature-card">
-            <span className="icon">🔄</span>
+            <div className="card-icon">
+              <Undo2Icon size={22} />
+            </div>
             <h3>Smart Backup</h3>
             <p>
               Auto-бэкап перед каждой опасной командой. Diff-based, dedup. Килобайты вместо гигабайт.
@@ -150,7 +201,9 @@ export default function Home() {
           </div>
 
           <div className="feature-card">
-            <span className="icon">🔐</span>
+            <div className="card-icon">
+              <LockIcon size={22} />
+            </div>
             <h3>E2EE</h3>
             <p>
               X25519 + AES-256-GCM. Приватные ключи только на агенте. Relay не может расшифровать.
@@ -159,7 +212,9 @@ export default function Home() {
           </div>
 
           <div className="feature-card">
-            <span className="icon">📊</span>
+            <div className="card-icon">
+              <GitBranchIcon size={22} />
+            </div>
             <h3>GitOps</h3>
             <p>
               Auto-rollback при config drift. Semantic diff. Circuit breaker для каскадных сбоев.
@@ -168,7 +223,9 @@ export default function Home() {
           </div>
 
           <div className="feature-card">
-            <span className="icon">☸️</span>
+            <div className="card-icon">
+              <ContainerIcon size={22} />
+            </div>
             <h3>K8s Operator</h3>
             <p>
               CRD FlowLinkShieldPolicy, sidecar injection, admission webhook. Нативная интеграция.
@@ -177,12 +234,14 @@ export default function Home() {
           </div>
 
           <div className="feature-card">
-            <span className="icon">📋</span>
+            <div className="card-icon">
+              <ClipboardListIcon size={22} />
+            </div>
             <h3>Audit</h3>
             <p>
               HMAC-верифицированный лог. 1-90 дней retention. SIEM export (CEF/LEEF/JSON).
             </p>
-            <span className="tag tag-blue">Compliance</span>
+            <span className="tag tag-indigo">Compliance</span>
           </div>
         </div>
       </section>
@@ -196,22 +255,30 @@ export default function Home() {
 
         <div className="audience-grid">
           <div className="audience-card">
-            <span className="emoji">👨‍💻</span>
+            <div className="card-icon">
+              <TerminalIcon size={22} />
+            </div>
             <h3>Девелоперы</h3>
             <p>Фрилансеры с Claude Code, Codex, GPT на VPS. 1-3 сервера.</p>
           </div>
           <div className="audience-card">
-            <span className="emoji">🔧</span>
+            <div className="card-icon">
+              <UsersIcon size={22} />
+            </div>
             <h3>DevOps-команды</h3>
             <p>Стандарт, аудит, approval workflow. Multi-server управление.</p>
           </div>
           <div className="audience-card">
-            <span className="emoji">🤖</span>
+            <div className="card-icon">
+              <BotIcon size={22} />
+            </div>
             <h3>AI-боты</h3>
             <p>Автономные AI-агенты на продакшене. Protection от саморазрушения.</p>
           </div>
           <div className="audience-card">
-            <span className="emoji">🏢</span>
+            <div className="card-icon">
+              <BuildingIcon size={22} />
+            </div>
             <h3>SaaS-стартапы</h3>
             <p>Production safety, compliance, SLA. K8s + GitOps.</p>
           </div>
@@ -223,66 +290,10 @@ export default function Home() {
         <h2>Тарифы</h2>
         <p className="section-sub">Платишь за масштаб инфраструктуры — а не за запросы</p>
 
-        <div className="pricing-grid">
-          <div className="pricing-card">
-            <h3>Trial</h3>
-            <div className="price">0 ₽</div>
-            <div className="price-note">7 дней</div>
-            <ul>
-              <li>1 хост</li>
-              <li>1 юзер</li>
-              <li>3 дня логов</li>
-              <li>Pattern blocking</li>
-              <li>Manual backup</li>
-              <li>E2EE</li>
-            </ul>
-          </div>
-
-          <div className="pricing-card">
-            <h3>Starter</h3>
-            <div className="price">2 990 ₽</div>
-            <div className="price-note">/мес</div>
-            <p className="price-yearly">23 920 ₽ /год (-33%)</p>
-            <ul>
-              <li>3 хоста</li>
-              <li>3 юзера</li>
-              <li>14 дней логов</li>
-              <li>AST-анализ</li>
-              <li>Canary honeypots</li>
-              <li>Approval workflow</li>
-              <li>Custom policies (до 10)</li>
-              <li>Smart backup + dedup</li>
-              <li>Device trust</li>
-              <li>MCP protocol</li>
-            </ul>
-          </div>
-
-          <div className="pricing-card featured">
-            <h3>Pro</h3>
-            <div className="price">7 990 ₽</div>
-            <div className="price-note">/мес</div>
-            <p className="price-yearly">63 920 ₽ /год (-33%)</p>
-            <ul>
-              <li>20 хостов</li>
-              <li>10 юзеров</li>
-              <li>90 дней логов</li>
-              <li>eBPF kernel-level</li>
-              <li>Policy DSL</li>
-              <li>Forensics</li>
-              <li>K8s operator</li>
-              <li>GitOps</li>
-              <li>SIEM export</li>
-              <li>RBAC</li>
-              <li>Telegram approval</li>
-              <li>Auto restore</li>
-              <li>LLM failover</li>
-              <li>Global kill switch</li>
-            </ul>
-          </div>
-        </div>
+        <PricingFromApi />
 
         <p className="pricing-enterprise">
-          Больше 20 хостов? <a href="mailto:hello@flowlink.app">Свяжитесь с нами</a>
+          Больше 25 хостов? <a href="mailto:hello@flowlink.app">Свяжитесь с нами</a>
         </p>
       </section>
 
@@ -353,7 +364,7 @@ export default function Home() {
           <a href="#pricing">Тарифы</a>{" · "}
           <a href="/privacy">Конфиденциальность</a>{" · "}
           <a href="/terms">Условия</a>{" · "}
-          FlowMasters © 2026
+          FlowMasters &copy; 2026
         </p>
       </footer>
     </div>

@@ -222,8 +222,8 @@ impl Relay {
                                                     app.oneshot(req).await
                                                 }
                                             });
-                                            if let Err(e) = hyper::server::conn::http1::Builder::new()
-                                                .serve_connection(io, svc)
+                                            if let Err(e) = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                                                .serve_connection_with_upgrades(io, svc)
                                                 .await
                                             {
                                                 log::warn!("WSS TLS serve error: {e}");

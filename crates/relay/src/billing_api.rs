@@ -168,6 +168,19 @@ pub async fn get_usage(
     (StatusCode::OK, Json(response)).into_response()
 }
 
+/// GET /api/plans — public endpoint, no auth required
+/// Returns available plans from billing engine, or builtin defaults if billing not configured.
+pub async fn public_plans(State(state): State<AppState>) -> impl IntoResponse {
+    let plans = match &state.billing {
+        Some(engine) => engine.plans().list_available(),
+        None => {
+            // Fallback to builtin plans if billing not configured
+            vec![flowlink_billing::plans::Plan::trial(), flowlink_billing::plans::Plan::starter(), flowlink_billing::plans::Plan::pro()]
+        }
+    };
+    (StatusCode::OK, Json(plans)).into_response()
+}
+
 /// GET /api/billing/plans — list available plans
 pub async fn list_plans(State(state): State<AppState>) -> impl IntoResponse {
     let billing_engine = match get_billing_engine(&state) {
