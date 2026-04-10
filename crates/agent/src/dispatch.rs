@@ -96,8 +96,10 @@ pub async fn dispatch(
         | MessageType::FileResponse
         | MessageType::SysInfo
         |        MessageType::SysInfoResp
-        | MessageType::ConfigUpdate  // handled in Connection::handle_message before dispatch
+        | MessageType::ConfigUpdate
+        | MessageType::PolicyUpdate  // handled in Connection::handle_message before dispatch
         | MessageType::ConfigAck
+        | MessageType::PolicyAck
         | MessageType::Task
         | MessageType::TaskProgress
         | MessageType::TaskDone

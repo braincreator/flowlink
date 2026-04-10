@@ -29,6 +29,10 @@ pub struct PolicyEngine {
     allow_sudo: bool,
     blocked_patterns: Vec<String>,
     allowed_dirs: Vec<String>,
+    /// Dynamic allow rules added at runtime (regex patterns). Always allowed.
+    runtime_allow: Vec<String>,
+    /// Dynamic deny rules added at runtime (regex patterns). Always blocked.
+    runtime_deny: Vec<String>,
 }
 
 impl PolicyEngine {
@@ -39,6 +43,8 @@ impl PolicyEngine {
             allow_sudo,
             blocked_patterns: default_blocked_patterns(),
             allowed_dirs: vec![],
+            runtime_allow: vec![],
+            runtime_deny: vec![],
         }
     }
 
@@ -62,9 +68,81 @@ impl PolicyEngine {
         self.read_only
     }
 
+    /// Add a runtime allow rule (regex or glob). Commands matching this are always allowed.
+    pub fn add_allow_rule(&mut self, pattern: String) {
+        self.runtime_allow.push(pattern);
+    }
+
+    /// Add a runtime deny rule (regex or glob). Commands matching this are always blocked.
+    pub fn add_deny_rule(&mut self, pattern: String) {
+        self.runtime_deny.push(pattern);
+    }
+
+    /// Remove a runtime rule (allow or deny) by exact pattern match.
+    pub fn remove_rule(&mut self, pattern: &str) -> bool {
+        if let Some(pos) = self.runtime_allow.iter().position(|r| r == pattern) {
+            self.runtime_allow.remove(pos);
+            return true;
+        }
+        if let Some(pos) = self.runtime_deny.iter().position(|r| r == pattern) {
+            self.runtime_deny.remove(pos);
+            return true;
+        }
+        false
+    }
+
+    /// Get current runtime rules.
+    pub fn runtime_rules(&self) -> (Vec<String>, Vec<String>) {
+        (self.runtime_allow.clone(), self.runtime_deny.clone())
+    }
+
+    /// Match a command against a simple glob pattern (* = wildcard).
+    fn match_glob(pattern: &str, text: &str) -> bool {
+        if pattern == text {
+            return true;
+        }
+        if pattern.contains('*') {
+            let parts: Vec<&str> = pattern.split('*').collect();
+            if parts.len() == 2 {
+                let prefix = parts[0];
+                let suffix = parts[1];
+                return text.starts_with(prefix) && text.ends_with(suffix);
+            }
+        }
+        false
+    }
+
     /// Check command against full policy chain.
     pub fn check(&self, payload: &ExecRequestPayload) -> PolicyResult {
         let command = &payload.command;
+
+        // 0. Runtime deny rules (highest priority — always blocked)
+        for pattern in &self.runtime_deny {
+            if Self::match_glob(pattern, command) {
+                return PolicyResult {
+                    allowed: false,
+                    blocked: true,
+                    reason: format!("POLICY_DENY: matched runtime deny rule '{}'", pattern),
+                    risk_level: RiskLevel::High,
+                    require_approval: false,
+                    snapshot_id: None,
+                };
+            }
+        }
+
+        // 0b. Runtime allow rules (bypass shield + policy, always allowed)
+        for pattern in &self.runtime_allow {
+            if Self::match_glob(pattern, command) {
+                return PolicyResult {
+                    allowed: true,
+                    blocked: false,
+                    reason: format!("POLICY_ALLOW: matched runtime allow rule '{}'", pattern),
+                    risk_level: RiskLevel::None,
+                    require_approval: false,
+                    snapshot_id: None,
+                };
+            }
+        }
 
         // 1. Shield (L1+L2+L3 threat detection)
         let parts: Vec<&str> = command.split_whitespace().collect();
@@ -280,5 +358,75 @@ mod tests {
         let engine = PolicyEngine::new(false, false);
         let result = engine.check(&test_payload(""));
         assert!(result.allowed);
+    }
+
+    #[test]
+    fn test_runtime_allow_bypasses_shield() {
+        let mut engine = PolicyEngine::new(false, false);
+        // rm -rf / is blocked by shield and blacklist
+        let r = engine.check(&test_payload("rm -rf /"));
+        assert!(r.blocked);
+        // Add allow rule
+        engine.add_allow_rule("rm -rf /".into());
+        let r2 = engine.check(&test_payload("rm -rf /"));
+        assert!(r2.allowed);
+        assert!(r2.reason.contains("POLICY_ALLOW"));
+    }
+
+    #[test]
+    fn test_runtime_allow_glob() {
+        let mut engine = PolicyEngine::new(false, false);
+        engine.add_allow_rule("docker *".into());
+        let r = engine.check(&test_payload("docker rm -f container"));
+        assert!(r.allowed);
+        assert!(r.reason.contains("POLICY_ALLOW"));
+    }
+
+    #[test]
+    fn test_runtime_deny_blocks() {
+        let mut engine = PolicyEngine::new(false, false);
+        // ls is normally allowed
+        let r = engine.check(&test_payload("ls"));
+        assert!(r.allowed);
+        // Add deny rule
+        engine.add_deny_rule("ls".into());
+        let r2 = engine.check(&test_payload("ls"));
+        assert!(r2.blocked);
+        assert!(r2.reason.contains("POLICY_DENY"));
+    }
+
+    #[test]
+    fn test_runtime_deny_has_priority_over_allow() {
+        let mut engine = PolicyEngine::new(false, false);
+        engine.add_allow_rule("docker *".into());
+        engine.add_deny_rule("docker rm *".into());
+        // docker ps → allowed
+        let r = engine.check(&test_payload("docker ps"));
+        assert!(r.allowed);
+        // docker rm → denied (deny has priority)
+        let r2 = engine.check(&test_payload("docker rm -f container"));
+        assert!(r2.blocked);
+        assert!(r2.reason.contains("POLICY_DENY"));
+    }
+
+    #[test]
+    fn test_runtime_remove_rule() {
+        let mut engine = PolicyEngine::new(false, false);
+        engine.add_deny_rule("nmap".into());
+        assert!(engine.check(&test_payload("nmap")).blocked);
+        assert!(engine.remove_rule("nmap"));
+        assert!(engine.check(&test_payload("nmap")).allowed);
+        // Removing non-existent returns false
+        assert!(!engine.remove_rule("nonexistent"));
+    }
+
+    #[test]
+    fn test_runtime_rules_list() {
+        let mut engine = PolicyEngine::new(false, false);
+        engine.add_allow_rule("docker *".into());
+        engine.add_deny_rule("rm *".into());
+        let (allow, deny) = engine.runtime_rules();
+        assert_eq!(allow, vec!["docker *"]);
+        assert_eq!(deny, vec!["rm *"]);
     }
 }

@@ -8,6 +8,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+use crate::approval::ApprovalDecision;
 use crate::server::AppState;
 
 // ═══════════════════════════════════════════════
@@ -161,6 +163,33 @@ fn mcp_tools() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "name": "flowlink_approve",
+            "description": "Approve or reject a pending command from an agent. Use 'list' to see pending approvals, 'approve' to allow, 'reject' to deny, 'approve_always' to add a permanent allow rule.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["agent", "action"],
+                "properties": {
+                    "agent": { "type": "string", "description": "Agent ID or label" },
+                    "action": { "type": "string", "enum": ["list", "approve", "reject", "approve_always"], "description": "Action to perform" },
+                    "request_id": { "type": "string", "description": "Approval request ID (required for approve/reject/approve_always)" },
+                    "reason": { "type": "string", "description": "Reason for the decision (optional, for audit)" }
+                }
+            }
+        }),
+        json!({
+            "name": "flowlink_policy",
+            "description": "Dynamically manage agent policy rules at runtime. Add/remove allow/deny patterns without restart. Patterns use glob syntax (* = wildcard).",
+            "inputSchema": {
+                "type": "object",
+                "required": ["agent", "action"],
+                "properties": {
+                    "agent": { "type": "string", "description": "Agent ID or label" },
+                    "action": { "type": "string", "enum": ["list", "add_allow", "add_deny", "remove"], "description": "Policy action" },
+                    "pattern": { "type": "string", "description": "Glob pattern for the rule (required for add/remove). Examples: 'docker *', 'npm *', 'sudo apt *'" }
+                }
+            }
+        }),
     ]
 }
 
@@ -219,6 +248,8 @@ async fn handle_tools_call(state: AppState, req: McpRequest) -> axum::response::
         "flowlink_kill" => mcp_kill(&state, req.id, &args).await,
         "flowlink_health" => mcp_health(&state, req.id, &args),
         "flowlink_config_update" => mcp_config_update(&state, req.id, &args).await,
+        "flowlink_approve" => mcp_approve(&state, req.id, &args).await,
+        "flowlink_policy" => mcp_policy(&state, req.id, &args).await,
         _ => mcp_err(req.id, -32602, format!("unknown tool: {name}")).into_response(),
     }
 }
@@ -531,6 +562,188 @@ async fn mcp_config_update(state: &AppState, id: Option<Value>, args: &Value) ->
                     "content": [{ "type": "text", "text": format!("✅ Config update sent to agent {}. Changes: {}", resolved, changes.join(", ")) }]
                 })).into_response()
             }
+        }
+        Err(e) => mcp_err(id, -32603, format!("agent error: {e}")).into_response(),
+    }
+}
+
+// ═══════════════════════════════════════════════
+// Approve + Policy Management
+// ═══════════════════════════════════════════════
+
+async fn mcp_approve(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
+    let agent_id = match get_arg(args, "agent") {
+        Some(v) => v,
+        None => return mcp_err(id, -32602, "agent: required").into_response(),
+    };
+    let action = match get_arg(args, "action") {
+        Some(v) => v,
+        None => return mcp_err(id, -32602, "action: required (list/approve/reject/approve_always)").into_response(),
+    };
+
+    let resolved = match resolve_agent(&state.pool, &agent_id) {
+        Some(id) => id,
+        None => return mcp_err(id, -32602, format!("agent not found: {agent_id}")).into_response(),
+    };
+
+    match action.as_str() {
+        "list" => {
+            let pending = state.approvals.list_pending();
+            let agent_pending: Vec<_> = pending.iter().filter(|r| r.agent_id == resolved).collect();
+
+            if agent_pending.is_empty() {
+                mcp_ok(id, json!({
+                    "content": [{ "type": "text", "text": "📋 No pending approvals for this agent." }]
+                })).into_response()
+            } else {
+                let lines: Vec<String> = agent_pending.iter().map(|r| {
+                    format!("  📋 {} | {} | {} | {}s ago",
+                        r.id, r.command, r.risk_level,
+                        chrono::Utc::now().timestamp() - r.created_at)
+                }).collect();
+
+                mcp_ok(id, json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("📋 Pending approvals ({}):\n{}", agent_pending.len(), lines.join("\n"))
+                    }]
+                })).into_response()
+            }
+        }
+        "approve" | "reject" => {
+            let request_id = match get_arg(args, "request_id") {
+                Some(v) => v,
+                None => return mcp_err(id, -32602, "request_id: required for approve/reject").into_response(),
+            };
+
+            let decision = if action == "approve" {
+                ApprovalDecision::Approved
+            } else {
+                ApprovalDecision::Rejected
+            };
+
+            let reason = get_arg(args, "reason").unwrap_or_default();
+            if state.approvals.resolve(&request_id, decision) {
+                let emoji = if action == "approve" { "✅" } else { "❌" };
+                let text = if reason.is_empty() {
+                    format!("{} Approval {} for request {}", emoji, action, request_id)
+                } else {
+                    format!("{} Approval {} for request {}. Reason: {}", emoji, action, request_id, reason)
+                };
+
+                // Also send decision to agent via WS
+                let msg_type = if action == "approve" {
+                    flowlink_core::MessageType::ExecApprove
+                } else {
+                    flowlink_core::MessageType::ExecReject
+                };
+                let _ = state.handler.send_to_agent(&resolved,
+                    flowlink_core::Message::new(msg_type)
+                        .with_agent_id(&resolved)
+                        .with_payload(json!({
+                            "request_id": request_id,
+                            "decision": action,
+                            "reason": reason,
+                        }))
+                ).await;
+
+                mcp_ok(id, json!({
+                    "content": [{ "type": "text", "text": text }]
+                })).into_response()
+            } else {
+                mcp_err(id, -32603, format!("request {} not found or already resolved", request_id)).into_response()
+            }
+        }
+        "approve_always" => {
+            let request_id = match get_arg(args, "request_id") {
+                Some(v) => v,
+                None => return mcp_err(id, -32602, "request_id: required for approve_always").into_response(),
+            };
+
+            // First, get the command from the pending approval
+            let pending = state.approvals.list_pending();
+            let req = pending.iter().find(|r| r.id == request_id);
+            let command = match req {
+                Some(r) => r.command.clone(),
+                None => return mcp_err(id, -32603, format!("request {} not found", request_id)).into_response(),
+            };
+
+            // 1. Approve the pending request
+            let _ = state.approvals.resolve(&request_id, ApprovalDecision::Approved);
+
+            // 2. Notify agent
+            let _ = state.handler.send_to_agent(&resolved,
+                flowlink_core::Message::new(flowlink_core::MessageType::ExecApprove)
+                    .with_agent_id(&resolved)
+                    .with_payload(json!({
+                        "request_id": request_id,
+                        "decision": "approve_always",
+                    }))
+            ).await;
+
+            // 3. Add permanent allow rule via PolicyUpdate
+            let _ = state.handler.send_to_agent(&resolved,
+                flowlink_core::Message::new(flowlink_core::MessageType::PolicyUpdate)
+                    .with_agent_id(&resolved)
+                    .with_priority(flowlink_core::Priority::System)
+                    .with_payload(json!({
+                        "action": "add_allow",
+                        "pattern": command,
+                    }))
+            ).await;
+
+            mcp_ok(id, json!({
+                "content": [{ "type": "text", "text": format!("✅ Approved + added permanent allow rule: '{}'", command) }]
+            })).into_response()
+        }
+        other => mcp_err(id, -32602, format!("unknown action '{}'. Use: list, approve, reject, approve_always", other)).into_response(),
+    }
+}
+
+async fn mcp_policy(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
+    let agent_id = match get_arg(args, "agent") {
+        Some(v) => v,
+        None => return mcp_err(id, -32602, "agent: required").into_response(),
+    };
+    let action = match get_arg(args, "action") {
+        Some(v) => v,
+        None => return mcp_err(id, -32602, "action: required (list/add_allow/add_deny/remove)").into_response(),
+    };
+
+    let resolved = match resolve_agent(&state.pool, &agent_id) {
+        Some(id) => id,
+        None => return mcp_err(id, -32602, format!("agent not found: {agent_id}")).into_response(),
+    };
+
+    let payload = match action.as_str() {
+        "list" => json!({ "action": "list" }),
+        "add_allow" | "add_deny" | "remove" => {
+            let pattern = match get_arg(args, "pattern") {
+                Some(v) => v,
+                None => return mcp_err(id, -32602, "pattern: required for add_allow/add_deny/remove").into_response(),
+            };
+            json!({ "action": action, "pattern": pattern })
+        }
+        other => return mcp_err(id, -32602, format!("unknown action '{}'", other)).into_response(),
+    };
+
+    let msg = flowlink_core::Message::new(flowlink_core::MessageType::PolicyUpdate)
+        .with_agent_id(&resolved)
+        .with_priority(flowlink_core::Priority::System)
+        .with_payload(payload);
+
+    match state.handler.send_to_agent(&resolved, msg).await {
+        Ok(()) => {
+            let action_text = match action.as_str() {
+                "list" => "Policy rules requested".to_string(),
+                "add_allow" => format!("Allow rule added: {}", args.get("pattern").and_then(|v| v.as_str()).unwrap_or("")),
+                "add_deny" => format!("Deny rule added: {}", args.get("pattern").and_then(|v| v.as_str()).unwrap_or("")),
+                "remove" => format!("Rule removed: {}", args.get("pattern").and_then(|v| v.as_str()).unwrap_or("")),
+                _ => "Unknown".to_string(),
+            };
+            mcp_ok(id, json!({
+                "content": [{ "type": "text", "text": format!("🔒 {}", action_text) }]
+            })).into_response()
         }
         Err(e) => mcp_err(id, -32603, format!("agent error: {e}")).into_response(),
     }

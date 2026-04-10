@@ -173,10 +173,15 @@ impl Connection {
         }
 
         // EXCEPTION: ConfigUpdate from relay is trusted (sent with System priority by reloader).
-        // Allow it through to update agent config at runtime.
         if msg.msg_type == MessageType::ConfigUpdate {
             info!("Received ConfigUpdate from relay");
             return self.handle_config_update(&msg).await;
+        }
+
+        // EXCEPTION: PolicyUpdate from relay is trusted (System priority).
+        if msg.msg_type == MessageType::PolicyUpdate {
+            info!("Received PolicyUpdate from relay");
+            return self.handle_policy_update(&msg).await;
         }
 
         info!("Received: {:?}", msg.msg_type);
@@ -192,6 +197,86 @@ impl Connection {
             &self.executor,
         ).await;
         response
+    }
+
+    /// Handle PolicyUpdate from relay — add/remove runtime allow/deny rules.
+    async fn handle_policy_update(&self, msg: &Message) -> Option<Message> {
+        let payload = match &msg.payload {
+            Some(p) => p,
+            None => {
+                warn!("PolicyUpdate received with no payload");
+                return Some(Message::new(MessageType::PolicyAck)
+                    .with_agent_id(&self.agent_id)
+                    .with_payload(serde_json::json!({
+                        "status": "error",
+                        "reason": "no payload"
+                    })));
+            }
+        };
+
+        let action = payload.get("action").and_then(|v| v.as_str()).unwrap_or("add_allow");
+        let pattern = payload.get("pattern").and_then(|v| v.as_str());
+
+        if pattern.is_none() && action != "list" {
+            return Some(Message::new(MessageType::PolicyAck)
+                .with_agent_id(&self.agent_id)
+                .with_payload(serde_json::json!({
+                    "status": "error",
+                    "reason": "pattern is required for add_allow/add_deny/remove"
+                })));
+        }
+
+        let pattern = pattern.unwrap();
+        let mut policy = self.policy.write().await;
+
+        let result = match action {
+            "add_allow" => {
+                policy.add_allow_rule(pattern.to_string());
+                format!("allow rule '{}' added", pattern)
+            }
+            "add_deny" => {
+                policy.add_deny_rule(pattern.to_string());
+                format!("deny rule '{}' added", pattern)
+            }
+            "remove" => {
+                if policy.remove_rule(pattern) {
+                    format!("rule '{}' removed", pattern)
+                } else {
+                    return Some(Message::new(MessageType::PolicyAck)
+                        .with_agent_id(&self.agent_id)
+                        .with_payload(serde_json::json!({
+                            "status": "error",
+                            "reason": format!("rule '{}' not found", pattern)
+                        })));
+                }
+            }
+            "list" => {
+                let (allow, deny) = policy.runtime_rules();
+                return Some(Message::new(MessageType::PolicyAck)
+                    .with_agent_id(&self.agent_id)
+                    .with_payload(serde_json::json!({
+                        "status": "ok",
+                        "allow_rules": allow,
+                        "deny_rules": deny,
+                    })));
+            }
+            other => {
+                return Some(Message::new(MessageType::PolicyAck)
+                    .with_agent_id(&self.agent_id)
+                    .with_payload(serde_json::json!({
+                        "status": "error",
+                        "reason": format!("unknown action '{}'. Use: add_allow, add_deny, remove, list", other)
+                    })));
+            }
+        };
+
+        info!("Policy update: {}", result);
+        Some(Message::new(MessageType::PolicyAck)
+            .with_agent_id(&self.agent_id)
+            .with_payload(serde_json::json!({
+                "status": "ok",
+                "result": result,
+            })))
     }
 
     /// Handle ConfigUpdate from relay — apply new config and send ConfigAck.

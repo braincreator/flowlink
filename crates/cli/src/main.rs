@@ -78,6 +78,20 @@ enum Commands {
         #[arg(short, long, default_value = "flowlink.json")]
         config: String,
     },
+    /// Approve or reject pending agent commands, manage policy rules
+    Approve {
+        #[command(subcommand)]
+        action: ApproveAction,
+        #[arg(short, long, default_value = "flowlink.json")]
+        config: String,
+    },
+    /// Manage runtime policy rules (allow/deny patterns)
+    Policy {
+        #[command(subcommand)]
+        action: PolicyAction,
+        #[arg(short, long, default_value = "flowlink.json")]
+        config: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -95,6 +109,51 @@ enum DeviceAction {
         /// Device ID to remove
         #[arg(short, long)]
         id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ApproveAction {
+    /// List pending approval requests
+    List,
+    /// Approve a pending request
+    Ok {
+        /// Request ID to approve
+        #[arg(short, long)]
+        id: String,
+    },
+    /// Reject a pending request
+    Deny {
+        /// Request ID to reject
+        #[arg(short, long)]
+        id: String,
+    },
+    /// Approve and add permanent allow rule
+    Always {
+        /// Request ID to approve permanently
+        #[arg(short, long)]
+        id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PolicyAction {
+    /// List current runtime rules
+    List,
+    /// Add an allow rule (glob pattern, * = wildcard)
+    Allow {
+        /// Pattern (e.g. "docker *", "npm *")
+        pattern: String,
+    },
+    /// Add a deny rule (glob pattern)
+    Deny {
+        /// Pattern
+        pattern: String,
+    },
+    /// Remove a rule
+    Remove {
+        /// Exact pattern to remove
+        pattern: String,
     },
 }
 
@@ -158,6 +217,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Status { target, config } => cmd_status(&target, &config),
         Commands::ConfigInit { output } => cmd_config_init(&output),
         Commands::Devices { action, config } => cmd_devices(action, &config),
+        Commands::Approve { action, config } => cmd_approve(action, &config),
+        Commands::Policy { action, config } => cmd_policy(action, &config),
     }
 }
 
@@ -387,6 +448,68 @@ fn cmd_devices(action: DeviceAction, _config: &str) -> anyhow::Result<()> {
             println!("📱 Removing device {}...\n", id);
             println!("  ⚠️  Device removal requires relay connection.");
             println!("  Use the MCP tool `flowlink_devices` or the dashboard.");
+        }
+    }
+    Ok(())
+}
+
+fn cmd_approve(action: ApproveAction, config: &str) -> anyhow::Result<()> {
+    match action {
+        ApproveAction::List => {
+            // Show pending approvals from relay
+            println!("📋 FlowLink Pending Approvals\n");
+            match flowlink_core::config::AgentConfig::load(config) {
+                Ok(cfg) => {
+                    let relay = cfg.relay_url.replace("wss://", "https://").replace("ws://", "http://");
+                    println!("  Relay: {}", relay);
+                    println!("  API:   {}/api/approvals", relay);
+                    println!("\n  curl {}/api/approvals", relay);
+                }
+                Err(e) => println!("  ❌ Cannot load config: {}", e),
+            }
+        }
+        ApproveAction::Ok { id } => {
+            println!("✅ Approving request {}...\n", id);
+            println!("  POST /api/approvals/{}/approve", id);
+            println!("  ⚠️  Requires relay connection.");
+        }
+        ApproveAction::Deny { id } => {
+            println!("❌ Rejecting request {}...\n", id);
+            println!("  POST /api/approvals/{}/reject", id);
+            println!("  ⚠️  Requires relay connection.");
+        }
+        ApproveAction::Always { id } => {
+            println!("✅ Approve + Always for request {}...\n", id);
+            println!("  This will:");
+            println!("  1. Approve the pending request");
+            println!("  2. Add a permanent allow rule for this command");
+            println!("  ⚠️  Requires relay connection.");
+        }
+    }
+    Ok(())
+}
+
+fn cmd_policy(action: PolicyAction, _config: &str) -> anyhow::Result<()> {
+    match action {
+        PolicyAction::List => {
+            println!("🔒 FlowLink Runtime Policy Rules\n");
+            println!("  ⚠️  Connect to a relay to view active rules.");
+            println!("  Use MCP tool `flowlink_policy` with action=list.");
+        }
+        PolicyAction::Allow { pattern } => {
+            println!("🔒 Adding allow rule: '{}'\n", pattern);
+            println!("  Commands matching this pattern will bypass all policy checks.");
+            println!("  Use * as wildcard (e.g. 'docker *' matches 'docker ps', 'docker rm ...')");
+            println!("  ⚠️  Requires relay connection.");
+        }
+        PolicyAction::Deny { pattern } => {
+            println!("🚫 Adding deny rule: '{}'\n", pattern);
+            println!("  Commands matching this pattern will always be blocked.");
+            println!("  ⚠️  Requires relay connection.");
+        }
+        PolicyAction::Remove { pattern } => {
+            println!("🗑️  Removing rule: '{}'\n", pattern);
+            println!("  ⚠️  Requires relay connection.");
         }
     }
     Ok(())

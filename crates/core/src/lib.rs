@@ -74,6 +74,8 @@ pub enum MessageType {
     // Configuration
     ConfigUpdate,
     ConfigAck,
+    PolicyUpdate,
+    PolicyAck,
 
     // Autonomous Tasks (L2)
     Task,
