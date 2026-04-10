@@ -21,3 +21,4 @@ dist/
 *.tar.gz
 relay.test
 flowlink-relay-linux-*
+video/node_modules
