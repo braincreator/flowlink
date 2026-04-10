@@ -53,6 +53,49 @@ enum Commands {
     },
     /// Version info
     Version,
+    /// Run diagnostics — check config, connectivity, dependencies
+    Doctor {
+        #[arg(short, long, default_value = "flowlink.json")]
+        config: String,
+    },
+    /// Show live status of agent or relay
+    Status {
+        /// "agent" or "relay"
+        #[arg(short, long, default_value = "agent")]
+        target: String,
+        #[arg(short, long, default_value = "flowlink.json")]
+        config: String,
+    },
+    /// Create a new agent config interactively
+    ConfigInit {
+        #[arg(short, long, default_value = "flowlink.json")]
+        output: String,
+    },
+    /// Manage trusted devices (list, pair, remove)
+    Devices {
+        #[command(subcommand)]
+        action: DeviceAction,
+        #[arg(short, long, default_value = "flowlink.json")]
+        config: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DeviceAction {
+    /// List all paired devices
+    List,
+    /// Start pairing a new device
+    Pair {
+        /// Device name/label
+        #[arg(short, long)]
+        name: String,
+    },
+    /// Remove a paired device
+    Remove {
+        /// Device ID to remove
+        #[arg(short, long)]
+        id: String,
+    },
 }
 
 #[tokio::main]
@@ -111,6 +154,10 @@ async fn main() -> anyhow::Result<()> {
             println!("flowlink {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        Commands::Doctor { config } => cmd_doctor(&config),
+        Commands::Status { target, config } => cmd_status(&target, &config),
+        Commands::ConfigInit { output } => cmd_config_init(&output),
+        Commands::Devices { action, config } => cmd_devices(action, &config),
     }
 }
 
@@ -123,6 +170,226 @@ fn read_input(path: &Option<String>) -> anyhow::Result<Vec<u8>> {
             Ok(buf)
         }
     }
+}
+
+// ═══════════════════════════════════════════════
+// Command Implementations
+// ═══════════════════════════════════════════════
+
+fn cmd_doctor(config_path: &str) -> anyhow::Result<()> {
+    println!("🩺 FlowLink Doctor — Diagnostics\n");
+
+    let mut passed = 0u32;
+    let mut failed = 0u32;
+
+    // 1. Config file check
+    print!("  Config file... ");
+    match flowlink_core::config::AgentConfig::load(config_path) {
+        Ok(cfg) => {
+            println!("✅ OK (agent_id={}, relay={})", cfg.agent_id, cfg.relay_url);
+            passed += 1;
+
+            // 1a. Relay URL format
+            print!("  Relay URL format... ");
+            if cfg.relay_url.starts_with("wss://") || cfg.relay_url.starts_with("ws://") {
+                println!("✅ OK");
+                passed += 1;
+            } else {
+                println!("❌ FAIL (must start with ws:// or wss://)");
+                failed += 1;
+            }
+
+            // 1b. Token present
+            print!("  Agent token... ");
+            if !cfg.token.is_empty() {
+                println!("✅ OK (len={})", cfg.token.len());
+                passed += 1;
+            } else {
+                println!("❌ FAIL (empty token)");
+                failed += 1;
+            }
+
+            // 1c. Sandbox config
+            print!("  Sandbox config... ");
+            if cfg.sandbox.max_exec_timeout > 0 {
+                println!("✅ OK (timeout={}s, sudo={})", cfg.sandbox.max_exec_timeout, cfg.sandbox.allow_sudo);
+                passed += 1;
+            } else {
+                println!("❌ FAIL");
+                failed += 1;
+            }
+
+            // 1d. Approval mode
+            print!("  Approval mode... ");
+            if matches!(cfg.approval.mode.as_str(), "auto" | "soft_ask" | "hard_ask") {
+                println!("✅ OK ({})", cfg.approval.mode);
+                passed += 1;
+            } else {
+                println!("❌ FAIL (invalid mode: {})", cfg.approval.mode);
+                failed += 1;
+            }
+
+            // 1e. Shield config
+            print!("  Shield config... ");
+            if cfg.shield.enabled {
+                println!("✅ ENABLED (AST={}, timeout={}s)", cfg.shield.enable_ast, cfg.shield.auto_deny_timeout);
+            } else {
+                println!("⚠️  disabled (recommended for production)");
+            }
+            passed += 1;
+        }
+        Err(e) => {
+            println!("❌ FAIL ({})", e);
+            failed += 1;
+        }
+    }
+
+    // 2. Check for keypair
+    print!("  Keypair... ");
+    let keypair_paths = ["keypair.json", ".flowlink/keypair.json", "keys/keypair.json"];
+    let keypair_found = keypair_paths.iter().any(|p| std::path::Path::new(p).exists());
+    if keypair_found {
+        println!("✅ OK");
+        passed += 1;
+    } else {
+        println!("⚠️  not found (run `flowlink keygen` to create)");
+    }
+
+    // 3. Check for config.example.json
+    print!("  Config example... ");
+    if std::path::Path::new("config.example.json").exists() {
+        println!("✅ OK");
+        passed += 1;
+    } else {
+        println!("⚠️  not found");
+    }
+
+    // 4. System info
+    print!("  Platform... ");
+    println!("✅ {} / {}", std::env::consts::OS, std::env::consts::ARCH);
+    passed += 1;
+
+    println!("\n📊 Results: {} passed, {} failed", passed, failed);
+    if failed > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn cmd_status(target: &str, config_path: &str) -> anyhow::Result<()> {
+    match target {
+        "agent" => {
+            match flowlink_core::config::AgentConfig::load(config_path) {
+                Ok(cfg) => {
+                    println!("🤖 FlowLink Agent Status\n");
+                    println!("  Agent ID:  {}", cfg.agent_id);
+                    println!("  Label:     {}", if cfg.label.is_empty() { "(none)" } else { &cfg.label });
+                    println!("  Relay:     {}", cfg.relay_url);
+                    println!("  Heartbeat: {}s", cfg.heartbeat_sec);
+                    println!("  Read-only: {}", cfg.read_only);
+                    println!("  Sandbox:   timeout={}s sudo={}", cfg.sandbox.max_exec_timeout, cfg.sandbox.allow_sudo);
+                    println!("  Approval:  {}", cfg.approval.mode);
+                    println!("  Shield:    {}", if cfg.shield.enabled { "enabled" } else { "disabled" });
+                    println!("  Backup:    {}", if cfg.backup.enabled { "enabled" } else { "disabled" });
+                    println!("  LLM Proxy: {}", if cfg.use_relay_llm { "via relay" } else { "local" });
+                }
+                Err(e) => {
+                    println!("❌ Cannot load config: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        "relay" => {
+            let relay_config = config_path.replace("flowlink.json", "relay.json");
+            match flowlink_core::config::RelayConfig::load(&relay_config) {
+                Ok(cfg) => {
+                    println!("🌐 FlowLink Relay Status\n");
+                    println!("  Name:     {}", cfg.client_name);
+                    println!("  WSS:      {}", cfg.wss_addr);
+                    println!("  HTTP:     {}", cfg.http_addr);
+                    println!("  LLM:      {}", if cfg.llm.enabled { "enabled" } else { "disabled" });
+                    println!("  Billing:  {}", if cfg.billing.enabled { "enabled" } else { "disabled" });
+                    println!("  TLS:      {}", if cfg.tls.insecure { "insecure" } else { "secure" });
+                    println!("  WSS TLS:  {}", if cfg.wss_tls.is_enabled() { "enabled" } else { "disabled" });
+                }
+                Err(e) => {
+                    println!("❌ Cannot load relay config ({}): {}", relay_config, e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        _ => {
+            println!("❌ Unknown target: '{}'. Use 'agent' or 'relay'.", target);
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_config_init(output: &str) -> anyhow::Result<()> {
+    println!("🔧 FlowLink Config Generator\n");
+
+    let hostname = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "my-agent".into());
+
+    let agent_id = format!("agent-{}", &hostname.replace(['.', '_'], "-")[..hostname.len().min(16)]);
+
+    println!("  Hostname detected: {}", hostname);
+    println!("  Agent ID:          {}", agent_id);
+
+    let config = flowlink_core::config::AgentConfig {
+        agent_id: agent_id.clone(),
+        token: "CHANGE_ME_TO_YOUR_TOKEN".into(),
+        relay_url: "wss://your-relay.example.com".into(),
+        heartbeat_sec: 30,
+        label: hostname.clone(),
+        work_dir: String::new(),
+        read_only: false,
+        use_relay_llm: false,
+        sandbox: flowlink_core::config::SandboxConfig::default(),
+        approval: flowlink_core::config::ApprovalConfig::default(),
+        backup: flowlink_core::config::BackupConfig::default(),
+        shield: flowlink_core::config::ShieldConfig::default(),
+        tls: flowlink_core::config::TlsConfig::default(),
+    };
+
+    config.save(output)?;
+    println!("\n✅ Config saved to: {}", output);
+    println!("\n⚠️  Next steps:");
+    println!("  1. Edit {} and set your token + relay URL", output);
+    println!("  2. Run `flowlink doctor` to verify");
+    println!("  3. Run `flowlink agent` to connect");
+
+    Ok(())
+}
+
+fn cmd_devices(action: DeviceAction, _config: &str) -> anyhow::Result<()> {
+    match action {
+        DeviceAction::List => {
+            println!("📱 FlowLink Paired Devices\n");
+            // Devices are managed via the relay's pairing system.
+            // In local mode, show the device store path.
+            let device_db = std::path::Path::new("~/.flowlink/devices.json");
+            println!("  Device store: {}", device_db.display());
+            println!("  Status: Connect to a relay to manage devices remotely.");
+            println!("\n  Use `flowlink devices pair --name <label>` to add a new device.");
+        }
+        DeviceAction::Pair { name } => {
+            println!("📱 Pairing new device...\n");
+            let code = format!("{:06}", rand::random::<u32>() % 1_000_000);
+            println!("  Device name: {}", name);
+            println!("  Pairing code: {}", code);
+            println!("\n  ⚠️  Send this code to the relay to complete pairing.");
+            println!("  Use the MCP tool `flowlink_devices` or the dashboard.");
+        }
+        DeviceAction::Remove { id } => {
+            println!("📱 Removing device {}...\n", id);
+            println!("  ⚠️  Device removal requires relay connection.");
+            println!("  Use the MCP tool `flowlink_devices` or the dashboard.");
+        }
+    }
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════

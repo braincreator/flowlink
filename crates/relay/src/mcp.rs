@@ -124,6 +124,43 @@ fn mcp_tools() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "name": "flowlink_kill",
+            "description": "Emergency kill switch — immediately disconnect an agent from the relay. Use when an agent is compromised or running unauthorized commands.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["agent"],
+                "properties": {
+                    "agent": { "type": "string", "description": "Agent ID or label to kill" },
+                    "reason": { "type": "string", "description": "Reason for killing the agent (audited)" }
+                }
+            }
+        }),
+        json!({
+            "name": "flowlink_health",
+            "description": "Health check for a connected agent — returns connection latency, heartbeat age, and system load.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["agent"],
+                "properties": {
+                    "agent": { "type": "string", "description": "Agent ID or label" }
+                }
+            }
+        }),
+        json!({
+            "name": "flowlink_config_update",
+            "description": "Update an agent's configuration remotely (read_only, label, work_dir). Agent will apply changes immediately.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["agent"],
+                "properties": {
+                    "agent": { "type": "string", "description": "Agent ID or label" },
+                    "read_only": { "type": "boolean", "description": "Set agent to read-only mode" },
+                    "label": { "type": "string", "description": "Update agent label" },
+                    "work_dir": { "type": "string", "description": "Set agent working directory" }
+                }
+            }
+        }),
     ]
 }
 
@@ -179,6 +216,9 @@ async fn handle_tools_call(state: AppState, req: McpRequest) -> axum::response::
         "flowlink_write" => mcp_write(&state, req.id, &args).await,
         "flowlink_list" => mcp_list(&state, req.id, &args).await,
         "flowlink_sysinfo" => mcp_sysinfo(&state, req.id, &args).await,
+        "flowlink_kill" => mcp_kill(&state, req.id, &args).await,
+        "flowlink_health" => mcp_health(&state, req.id, &args),
+        "flowlink_config_update" => mcp_config_update(&state, req.id, &args).await,
         _ => mcp_err(req.id, -32602, format!("unknown tool: {name}")).into_response(),
     }
 }
@@ -341,6 +381,158 @@ async fn mcp_sysinfo(state: &AppState, id: Option<Value>, args: &Value) -> axum:
             "content": [{ "type": "text", "text": format!("Sysinfo request sent to {resolved}") }]
         })).into_response(),
         Err(e) => mcp_err(id, -32603, e.to_string()).into_response(),
+    }
+}
+
+// ═══════════════════════════════════════════════
+// Kill Switch / Health / Config Update
+// ═══════════════════════════════════════════════
+
+async fn mcp_kill(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
+    let agent_id = match get_arg(args, "agent") {
+        Some(v) => v,
+        None => return mcp_err(id, -32602, "agent: required").into_response(),
+    };
+    let reason = get_arg(args, "reason").unwrap_or_else(|| "No reason provided".into());
+
+    let resolved = match resolve_agent(&state.pool, &agent_id) {
+        Some(id) => id,
+        None => return mcp_err(id, -32602, format!("agent not found: {agent_id}")).into_response(),
+    };
+
+    // Send disconnect message and remove from pool
+    let msg = flowlink_core::Message::new(flowlink_core::MessageType::Disconnect)
+        .with_agent_id(&resolved)
+        .with_priority(flowlink_core::Priority::System)
+        .with_payload(serde_json::json!({
+            "reason": reason,
+            "killed": true,
+            "timestamp": chrono::Utc::now().timestamp()
+        }));
+
+    match state.handler.send_to_agent(&resolved, msg).await {
+        Ok(()) => {
+            state.pool.unregister(&resolved);
+            state.handler.remove_sender(&resolved);
+            mcp_ok(id, json!({
+                "content": [{ "type": "text", "text": format!("🛑 Agent {} killed. Reason: {}", resolved, reason) }]
+            })).into_response()
+        }
+        Err(e) => {
+            state.pool.unregister(&resolved);
+            state.handler.remove_sender(&resolved);
+            mcp_ok(id, json!({
+                "content": [{ "type": "text", "text": format!("🛑 Agent {} force-disconnected (send failed: {}). Reason: {}", resolved, e, reason) }]
+            })).into_response()
+        }
+    }
+}
+
+fn mcp_health(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
+    let agent_id = match get_arg(args, "agent") {
+        Some(v) => v,
+        None => return mcp_err(id, -32602, "agent: required").into_response(),
+    };
+
+    let resolved = match resolve_agent(&state.pool, &agent_id) {
+        Some(id) => id,
+        None => return mcp_err(id, -32602, format!("agent not found: {agent_id}")).into_response(),
+    };
+
+    let agent = match state.pool.get(&resolved) {
+        Some(a) => a,
+        None => return mcp_err(id, -32603, "agent info not in pool").into_response(),
+    };
+
+    let now = chrono::Utc::now().timestamp();
+    let heartbeat_age = now - agent.last_heartbeat;
+    let connected_seconds = now - agent.connected_at;
+    let online = heartbeat_age < 120;
+
+    let status = if online { "🟢 HEALTHY" } else { "🔴 UNHEALTHY" };
+    let mut text = format!(
+        "{} Agent: {} ({})\n  Heartbeat: {}s ago\n  Connected: {}s ago\n  OS/Arch: {}/{}",
+        status, agent.hostname, agent.agent_id,
+        heartbeat_age, connected_seconds, agent.os, agent.arch
+    );
+
+    if !agent.labels.is_empty() {
+        text.push_str(&format!("\n  Labels: {}", agent.labels.join(", ")));
+    }
+    if !agent.capabilities.is_empty() {
+        text.push_str(&format!("\n  Capabilities: {}", agent.capabilities.join(", ")));
+    }
+
+    let mut health_data = json!({
+        "agent_id": agent.agent_id,
+        "hostname": agent.hostname,
+        "online": online,
+        "heartbeat_age_sec": heartbeat_age,
+        "connected_sec": connected_seconds,
+        "os": agent.os,
+        "arch": agent.arch,
+    });
+
+    if !online {
+        health_data["warning"] = json!("Heartbeat stale — agent may be disconnected");
+    }
+
+    mcp_ok(id, json!({
+        "content": [
+            { "type": "text", "text": text },
+            { "type": "text", "text": serde_json::to_string_pretty(&health_data).unwrap_or_default() }
+        ]
+    })).into_response()
+}
+
+async fn mcp_config_update(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
+    let agent_id = match get_arg(args, "agent") {
+        Some(v) => v,
+        None => return mcp_err(id, -32602, "agent: required").into_response(),
+    };
+
+    let resolved = match resolve_agent(&state.pool, &agent_id) {
+        Some(id) => id,
+        None => return mcp_err(id, -32602, format!("agent not found: {agent_id}")).into_response(),
+    };
+
+    // Build ConfigUpdate payload with only provided fields
+    let mut payload = serde_json::json!({
+        "request_id": flowlink_core::request_id()
+    });
+
+    if let Some(ro) = args.get("read_only").and_then(|v| v.as_bool()) {
+        payload["read_only"] = json!(ro);
+    }
+    if let Some(label) = args.get("label").and_then(|v| v.as_str()) {
+        payload["label"] = json!(label);
+    }
+    if let Some(workdir) = args.get("work_dir").and_then(|v| v.as_str()) {
+        payload["work_dir"] = json!(workdir);
+    }
+
+    let msg = flowlink_core::Message::new(flowlink_core::MessageType::ConfigUpdate)
+        .with_agent_id(&resolved)
+        .with_priority(flowlink_core::Priority::System)
+        .with_payload(payload);
+
+    match state.handler.send_to_agent(&resolved, msg).await {
+        Ok(()) => {
+            let changes: Vec<String> = [
+                args.get("read_only").map(|v| format!("read_only={}", v.as_bool().unwrap_or(false))),
+                args.get("label").map(|v| format!("label={}", v.as_str().unwrap_or(""))),
+                args.get("work_dir").map(|v| format!("work_dir={}", v.as_str().unwrap_or(""))),
+            ].into_iter().flatten().collect();
+
+            if changes.is_empty() {
+                mcp_err(id, -32602, "No fields to update. Provide at least one of: read_only, label, work_dir").into_response()
+            } else {
+                mcp_ok(id, json!({
+                    "content": [{ "type": "text", "text": format!("✅ Config update sent to agent {}. Changes: {}", resolved, changes.join(", ")) }]
+                })).into_response()
+            }
+        }
+        Err(e) => mcp_err(id, -32603, format!("agent error: {e}")).into_response(),
     }
 }
 

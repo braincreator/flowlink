@@ -1,6 +1,9 @@
 //! Plan definitions and registry
 //!
 //! Three tiers: Trial, Starter, Pro
+//! Strategy: ALL features available on every plan. Only limits differ.
+//! This eliminates feature gating complexity and makes upgrades natural.
+//!
 //! All prices in RUB (Russian market)
 
 use serde::{Deserialize, Serialize};
@@ -31,7 +34,8 @@ impl std::fmt::Display for PlanId {
     }
 }
 
-/// Plan limits
+/// Plan limits — the ONLY thing that differs between plans.
+/// Features are identical across all tiers.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PlanLimits {
     /// Max hosts (0 = unlimited)
@@ -63,7 +67,7 @@ pub struct Plan {
     pub name: String,
     /// Description
     pub description: String,
-    /// Tier level (higher = more features)
+    /// Tier level (higher = more resources)
     pub tier: u32,
     /// Price per month in kopecks (1/100 RUB). 0 = free
     pub price_kopecks: u64,
@@ -71,7 +75,7 @@ pub struct Plan {
     pub annual_price_kopecks: Option<u64>,
     /// Plan limits
     pub limits: PlanLimits,
-    /// Features list (for display)
+    /// Features list (for display — identical across all plans)
     pub features: Vec<String>,
     /// Is this plan available for new signups
     pub available: bool,
@@ -83,8 +87,23 @@ pub struct Plan {
     pub billing_period: String,
 }
 
+/// All features available on every plan.
+/// Copy-paste into each plan — no conditional feature logic needed.
+fn all_features() -> Vec<String> {
+    vec![
+        "Pattern blocking".to_string(),
+        "AST-анализ обфускации".to_string(),
+        "E2EE шифрование".to_string(),
+        "Telegram бот".to_string(),
+        "Web dashboard".to_string(),
+        "Device trust".to_string(),
+        "MCP protocol".to_string(),
+        "Audit log + HMAC".to_string(),
+    ]
+}
+
 impl Plan {
-    /// Trial plan — free for 7 days
+    /// Trial plan — free for 7 days, 1 host
     pub fn trial() -> Self {
         Self {
             id: PlanId::Trial.as_str().to_string(),
@@ -104,14 +123,7 @@ impl Plan {
                 exec_timeout_sec: 60,
                 shield_level: "basic".to_string(),
             },
-            features: vec![
-                "1 host".to_string(),
-                "1 user".to_string(),
-                "3 day logs".to_string(),
-                "Pattern blocking".to_string(),
-                "Manual backup".to_string(),
-                "E2EE".to_string(),
-            ],
+            features: all_features(),
             available: true,
             legacy: false,
             trial_days: Some(7),
@@ -119,36 +131,27 @@ impl Plan {
         }
     }
 
-    /// Starter plan — 990 ₽/мес
+    /// Starter plan — 1 990 ₽/мес
     pub fn starter() -> Self {
         Self {
             id: PlanId::Starter.as_str().to_string(),
             name: "Starter".to_string(),
             description: "Для фрилансеров и small teams".to_string(),
             tier: 1,
-            price_kopecks: 99_000, // 990 RUB/month
-            annual_price_kopecks: Some(950_400), // 9 504 RUB/year (~20% discount)
+            price_kopecks: 199_000, // 1 990 RUB/month
+            annual_price_kopecks: Some(1_910_400), // 19 104 RUB/year (~20% discount)
             limits: PlanLimits {
-                max_hosts: 3,
-                max_users: 3,
+                max_hosts: 5,
+                max_users: 5,
                 backup_storage_mb: 5120,
                 max_snapshots: 50,
-                retention_days: 14,
-                audit_retention_days: 14,
+                retention_days: 30,
+                audit_retention_days: 30,
                 max_file_size_mb: 100,
                 exec_timeout_sec: 300,
                 shield_level: "advanced".to_string(),
             },
-            features: vec![
-                "3 сервера".to_string(),
-                "3 пользователя".to_string(),
-                "Telegram бот".to_string(),
-                "Web dashboard".to_string(),
-                "E2EE шифрование".to_string(),
-                "Device trust".to_string(),
-                "MCP protocol".to_string(),
-                "Email поддержка".to_string(),
-            ],
+            features: all_features(),
             available: true,
             legacy: false,
             trial_days: None,
@@ -156,37 +159,27 @@ impl Plan {
         }
     }
 
-    /// Pro plan — 4 990 ₽/мес
+    /// Pro plan — 5 990 ₽/мес
     pub fn pro() -> Self {
         Self {
             id: PlanId::Pro.as_str().to_string(),
             name: "Pro".to_string(),
             description: "Для стартапов, IT-отделов и DevOps teams".to_string(),
             tier: 2,
-            price_kopecks: 499_000, // 4 990 RUB/month
-            annual_price_kopecks: Some(4_790_400), // 47 904 RUB/year (~20% discount)
+            price_kopecks: 599_000, // 5 990 RUB/month
+            annual_price_kopecks: Some(5_750_800), // 57 508 RUB/year (~20% discount)
             limits: PlanLimits {
-                max_hosts: 25,
-                max_users: 10,
+                max_hosts: 50,
+                max_users: 25,
                 backup_storage_mb: 0, // unlimited
-                max_snapshots: 0, // unlimited
-                retention_days: 90,
-                audit_retention_days: 90,
+                max_snapshots: 0,    // unlimited
+                retention_days: 365,
+                audit_retention_days: 365,
                 max_file_size_mb: 0, // configurable
                 exec_timeout_sec: 0, // configurable
                 shield_level: "enterprise".to_string(),
             },
-            features: vec![
-                "25 серверов".to_string(),
-                "10 пользователей".to_string(),
-                "K8s operator".to_string(),
-                "SIEM export".to_string(),
-                "RBAC".to_string(),
-                "Approval workflow".to_string(),
-                "Forensics".to_string(),
-                "Audit log + HMAC".to_string(),
-                "Priority поддержка".to_string(),
-            ],
+            features: all_features(),
             available: true,
             legacy: false,
             trial_days: None,
@@ -342,28 +335,38 @@ mod tests {
     }
 
     #[test]
-    fn test_individual_plan_limits() {
-        let individual = Plan::starter();
-        assert_eq!(individual.limits.max_hosts, 3);
-        assert_eq!(individual.limits.max_users, 3);
-        assert_eq!(individual.limits.backup_storage_mb, 5120);
-        assert_eq!(individual.price_kopecks, 99_000);
-        assert_eq!(individual.limits.shield_level, "advanced");
-        assert_eq!(individual.trial_days, None);
-        assert_eq!(individual.annual_price_kopecks, Some(950_400));
+    fn test_starter_plan_limits() {
+        let starter = Plan::starter();
+        assert_eq!(starter.limits.max_hosts, 5);
+        assert_eq!(starter.limits.max_users, 5);
+        assert_eq!(starter.limits.backup_storage_mb, 5120);
+        assert_eq!(starter.price_kopecks, 199_000);
+        assert_eq!(starter.limits.shield_level, "advanced");
+        assert_eq!(starter.trial_days, None);
+        assert_eq!(starter.annual_price_kopecks, Some(1_910_400));
     }
 
     #[test]
-    fn test_business_unlimited() {
-        let business = Plan::pro();
-        assert!(Plan::is_unlimited(business.limits.max_snapshots));
-        assert!(Plan::is_unlimited(business.limits.max_file_size_mb));
-        assert!(Plan::is_unlimited(business.limits.exec_timeout_sec));
-        assert_eq!(business.limits.max_hosts, 25);
-        assert_eq!(business.limits.max_users, 10);
-        assert_eq!(business.limits.audit_retention_days, 90);
-        assert_eq!(business.price_kopecks, 499_000);
-        assert_eq!(business.trial_days, None);
+    fn test_pro_unlimited() {
+        let pro = Plan::pro();
+        assert!(Plan::is_unlimited(pro.limits.max_snapshots));
+        assert!(Plan::is_unlimited(pro.limits.max_file_size_mb));
+        assert!(Plan::is_unlimited(pro.limits.exec_timeout_sec));
+        assert_eq!(pro.limits.max_hosts, 50);
+        assert_eq!(pro.limits.max_users, 25);
+        assert_eq!(pro.limits.audit_retention_days, 365);
+        assert_eq!(pro.price_kopecks, 599_000);
+        assert_eq!(pro.trial_days, None);
+    }
+
+    #[test]
+    fn test_all_features_identical() {
+        let trial = Plan::trial();
+        let starter = Plan::starter();
+        let pro = Plan::pro();
+        // Core feature set is the same across all plans
+        assert_eq!(trial.features, starter.features);
+        assert_eq!(starter.features, pro.features);
     }
 
     #[test]
@@ -400,17 +403,17 @@ mod tests {
         let registry = PlanRegistry::new();
         registry.deprecate("starter");
         let available = registry.list_available();
-        assert_eq!(available.len(), 2); // Free + Business
-        let individual = registry.get("starter").unwrap();
-        assert!(!individual.available);
-        assert!(individual.legacy);
+        assert_eq!(available.len(), 2); // Trial + Pro
+        let starter = registry.get("starter").unwrap();
+        assert!(!starter.available);
+        assert!(starter.legacy);
     }
 
     #[test]
     fn test_format_price() {
-        assert_eq!(Plan::format_price(199_900), "1999.00 ₽");
+        assert_eq!(Plan::format_price(199_000), "1990.00 ₽");
         assert_eq!(Plan::format_price(0), "0.00 ₽");
-        assert_eq!(Plan::format_price(499_000), "4990.00 ₽");
+        assert_eq!(Plan::format_price(599_000), "5990.00 ₽");
     }
 
     #[test]

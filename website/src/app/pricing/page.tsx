@@ -15,6 +15,11 @@ interface ApiPlan {
   trial_days: number | null;
   available: boolean;
   legacy: boolean;
+  limits?: {
+    max_hosts: number;
+    max_users: number;
+    retention_days: number;
+  };
 }
 
 function mapPlan(p: ApiPlan, index: number): Plan {
@@ -24,15 +29,37 @@ function mapPlan(p: ApiPlan, index: number): Plan {
     : monthlyPrice;
   const isTrial = p.tier === 0;
 
+  // Build display features: resource limits first (value proposition), then tech features
+  const displayFeatures: string[] = [];
+  if (p.limits) {
+    // Resource limits (most important for customers)
+    displayFeatures.push(`${p.limits.max_hosts} хост${p.limits.max_hosts === 1 ? "" : p.limits.max_hosts < 5 ? "а" : "ов"}`);
+    displayFeatures.push(`${p.limits.max_users} пользователь`);
+    if (p.limits.retention_days === 365) {
+      displayFeatures.push("Бессрочное хранение логов");
+    } else if (p.limits.retention_days > 0) {
+      displayFeatures.push(`Логи хранятся ${p.limits.retention_days} дней`);
+    }
+    if (p.limits?.backup_storage_mb === 0) {
+      displayFeatures.push("Безлимитное облако для бэкапов");
+    } else if (p.limits?.backup_storage_mb && p.limits.backup_storage_mb > 1024) {
+      displayFeatures.push(`${p.limits.backup_storage_mb / 1024} ГБ облако для бэкапов`);
+    } else if (p.limits?.backup_storage_mb && p.limits.backup_storage_mb > 0) {
+      displayFeatures.push(`${p.limits.backup_storage_mb} МБ облако для бэкапов`);
+    }
+  }
+  // Add tech features (now identical across plans)
+  displayFeatures.push(...(p.features || []));
+
   return {
     id: p.id,
     name: p.name,
     monthlyPrice,
     annualPrice: Math.round(annualPrice),
-    features: p.features || [],
+    features: displayFeatures,
     popular: index === 1,
     cta: isTrial ? "Начать бесплатно" : "Начать trial",
-    ctaHref: isTrial ? "/signup" : "/checkout",
+    ctaHref: isTrial ? "/signup" : `/checkout?plan=${p.id}`,
   };
 }
 
@@ -53,6 +80,7 @@ export default function PricingPage() {
         );
       })
       .catch(() => {
+        // Fallback — same structure as API response
         setPlans([
           {
             id: "trial",
@@ -60,11 +88,17 @@ export default function PricingPage() {
             monthlyPrice: 0,
             annualPrice: 0,
             features: [
-              "1 сервер",
+              "1 хост",
               "1 пользователь",
-              "Unlimited undo",
-              "Policy Engine",
-              "Community support",
+              "3 дней логов",
+              "Pattern blocking",
+              "AST-анализ обфускации",
+              "E2EE шифрование",
+              "Telegram бот",
+              "Web dashboard",
+              "Device trust",
+              "MCP protocol",
+              "Audit log + HMAC",
             ],
             cta: "Начать бесплатно",
             ctaHref: "/signup",
@@ -72,40 +106,45 @@ export default function PricingPage() {
           {
             id: "starter",
             name: "Starter",
-            monthlyPrice: 990,
-            annualPrice: 792,
+            monthlyPrice: 1990,
+            annualPrice: 1592,
             features: [
-              "3 сервера",
-              "3 пользователя",
+              "5 хостов",
+              "5 пользователей",
+              "30 дней логов",
+              "Pattern blocking",
+              "AST-анализ обфускации",
+              "E2EE шифрование",
               "Telegram бот",
               "Web dashboard",
-              "E2EE шифрование",
               "Device trust",
               "MCP protocol",
-              "Email поддержка",
+              "Audit log + HMAC",
             ],
             popular: true,
             cta: "Начать trial",
-            ctaHref: "/checkout",
+            ctaHref: "/checkout?plan=starter",
           },
           {
             id: "pro",
             name: "Pro",
-            monthlyPrice: 4990,
-            annualPrice: 3992,
+            monthlyPrice: 5990,
+            annualPrice: 4792,
             features: [
-              "25 серверов",
-              "10 пользователей",
-              "K8s operator",
-              "SIEM export",
-              "RBAC",
-              "Approval workflow",
-              "Forensics",
+              "50 хостов",
+              "25 пользователей",
+              "Годовое хранение логов",
+              "Pattern blocking",
+              "AST-анализ обфускации",
+              "E2EE шифрование",
+              "Telegram бот",
+              "Web dashboard",
+              "Device trust",
+              "MCP protocol",
               "Audit log + HMAC",
-              "Priority поддержка",
             ],
             cta: "Начать trial",
-            ctaHref: "/checkout",
+            ctaHref: "/checkout?plan=pro",
           },
         ]);
       })
@@ -116,7 +155,7 @@ export default function PricingPage() {
     <div>
       <section className="container" style={{ paddingTop: 120, paddingBottom: 80 }}>
         <h2>Тарифы</h2>
-        <p className="section-sub">Начни бесплатно — масштабируйся когда нужно</p>
+        <p className="section-sub">Все функции — в каждом плане. Плати только за масштаб.</p>
 
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 40 }}>
           <PricingToggle annual={annual} onChange={setAnnual} />

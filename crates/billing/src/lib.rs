@@ -152,6 +152,11 @@ impl BillingEngine {
         }
 
         tracing::info!(count, "Loaded billing accounts from persistence");
+
+        // Plans are loaded from DB on demand via engine.plans.load_from_db()
+        // Built-in defaults are used when DB is unavailable
+        tracing::info!("Plans registry ready (auto-loading from DB if available)");
+
         Ok(count)
     }
 
