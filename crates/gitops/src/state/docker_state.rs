@@ -85,7 +85,9 @@ impl DockerCollector {
     }
 
     pub fn with_docker(docker: Docker) -> Self {
-        Self { docker: Some(docker) }
+        Self {
+            docker: Some(docker),
+        }
     }
 
     fn compute_checksum(containers: &[ContainerInfo]) -> String {
@@ -102,7 +104,10 @@ impl DockerCollector {
     }
 
     async fn list_containers(&self) -> Result<Vec<ContainerInfo>> {
-        let docker = self.docker.as_ref().ok_or_else(|| anyhow!("Docker not available"))?;
+        let docker = self
+            .docker
+            .as_ref()
+            .ok_or_else(|| anyhow!("Docker not available"))?;
 
         let options = Some(ListContainersOptions::<String> {
             all: true,
@@ -137,7 +142,10 @@ impl DockerCollector {
                     p.public_port.map(|host_port| PortMapping {
                         host_port,
                         container_port: p.private_port,
-                        protocol: p.typ.map(|t| format!("{:?}", t)).unwrap_or_else(|| "tcp".to_string()),
+                        protocol: p
+                            .typ
+                            .map(|t| format!("{:?}", t))
+                            .unwrap_or_else(|| "tcp".to_string()),
                     })
                 })
                 .collect();
@@ -154,7 +162,10 @@ impl DockerCollector {
     }
 
     async fn start_container(&self, container_name: &str) -> Result<()> {
-        let docker = self.docker.as_ref().ok_or_else(|| anyhow!("Docker not available"))?;
+        let docker = self
+            .docker
+            .as_ref()
+            .ok_or_else(|| anyhow!("Docker not available"))?;
 
         docker
             .start_container(container_name, None::<StartContainerOptions<String>>)
@@ -166,11 +177,12 @@ impl DockerCollector {
     }
 
     async fn stop_container(&self, container_name: &str) -> Result<()> {
-        let docker = self.docker.as_ref().ok_or_else(|| anyhow!("Docker not available"))?;
+        let docker = self
+            .docker
+            .as_ref()
+            .ok_or_else(|| anyhow!("Docker not available"))?;
 
-        let options = Some(StopContainerOptions {
-            t: 10,
-        });
+        let options = Some(StopContainerOptions { t: 10 });
 
         docker
             .stop_container(container_name, options)
@@ -269,7 +281,9 @@ impl StateCollector for DockerCollector {
             if let Some(current_container) = current_map.get(&desired_container.name) {
                 if current_container.status != desired_container.status {
                     let result = match &desired_container.status {
-                        ContainerStatus::Running => self.start_container(&desired_container.name).await,
+                        ContainerStatus::Running => {
+                            self.start_container(&desired_container.name).await
+                        }
                         ContainerStatus::Stopped | ContainerStatus::Paused => {
                             self.stop_container(&desired_container.name).await
                         }
@@ -375,10 +389,7 @@ mod tests {
             ContainerStatus::from("Up 2 hours"),
             ContainerStatus::Running
         );
-        assert_eq!(
-            ContainerStatus::from("running"),
-            ContainerStatus::Running
-        );
+        assert_eq!(ContainerStatus::from("running"), ContainerStatus::Running);
         assert_eq!(
             ContainerStatus::from("Exited (0) 10 seconds ago"),
             ContainerStatus::Stopped

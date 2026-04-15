@@ -45,4 +45,20 @@ export interface DashboardStats {
   shieldStatus: 'active' | 'degraded' | 'offline';
 }
 
-export type TabId = 'overview' | 'shield' | 'agents' | 'audit' | 'menu';
+export type TabId = 'overview' | 'shield' | 'agents' | 'audit' | 'plans' | 'settings' | 'transactions' | 'notifications' | 'menu';
+
+export interface AccountInfo {
+  plan_id?: string;
+  plan_name?: string;
+  active: boolean;
+  servers_count: number;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar_url?: string;
+  };
+  created_at: number;
+  last_login: number;
+}
+

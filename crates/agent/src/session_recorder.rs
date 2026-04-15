@@ -1,11 +1,11 @@
 // FlowLink Agent — Session Recorder
 // Records terminal sessions in asciinema v2 format
 
+use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::time::Instant;
-use anyhow::{Context, Result};
 
 // ═══════════════════════════════════════════════
 // Session Recorder
@@ -59,8 +59,15 @@ impl SessionRecorder {
     /// Record output (stdout/stderr). Event type "o" for output.
     pub fn record_output(&mut self, data: &[u8]) -> Result<()> {
         self.elapsed_secs = self.start_time.elapsed().as_secs_f64();
-        let output = String::from_utf8_lossy(data).replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
-        writeln!(self.journal, "[{:.6}, \"o\", \"{}\"]", self.elapsed_secs, output)?;
+        let output = String::from_utf8_lossy(data)
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t");
+        writeln!(
+            self.journal,
+            "[{:.6}, \"o\", \"{}\"]",
+            self.elapsed_secs, output
+        )?;
         self.journal.flush()?;
         Ok(())
     }
@@ -68,8 +75,15 @@ impl SessionRecorder {
     /// Record input (what user typed). Event type "i" for input.
     pub fn record_input(&mut self, data: &str) -> Result<()> {
         self.elapsed_secs = self.start_time.elapsed().as_secs_f64();
-        let escaped = data.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
-        writeln!(self.journal, "[{:.6}, \"i\", \"{}\"]", self.elapsed_secs, escaped)?;
+        let escaped = data
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t");
+        writeln!(
+            self.journal,
+            "[{:.6}, \"i\", \"{}\"]",
+            self.elapsed_secs, escaped
+        )?;
         self.journal.flush()?;
         Ok(())
     }

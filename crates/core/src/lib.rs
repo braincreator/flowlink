@@ -509,15 +509,14 @@ mod tests {
 
     #[test]
     fn test_message_with_payload() {
-        let msg = Message::new(MessageType::ExecRequest)
-            .with_payload(ExecRequestPayload {
-                command: "ls".into(),
-                shell: None,
-                env: None,
-                dir: None,
-                timeout_sec: 30,
-                request_id: "r1".into(),
-            });
+        let msg = Message::new(MessageType::ExecRequest).with_payload(ExecRequestPayload {
+            command: "ls".into(),
+            shell: None,
+            env: None,
+            dir: None,
+            timeout_sec: 30,
+            request_id: "r1".into(),
+        });
         assert!(msg.payload.is_some());
         let p: ExecRequestPayload = serde_json::from_value(msg.payload.unwrap()).unwrap();
         assert_eq!(p.command, "ls");
@@ -581,9 +580,14 @@ mod tests {
     #[test]
     fn test_connect_payload_roundtrip() {
         let p = ConnectPayload {
-            agent_id: "a1".into(), token: "t1".into(),
-            hostname: "host".into(), os: "linux".into(), arch: "x86_64".into(),
-            client_version: Some("1.0".into()), public_key: None, protocol_version: Some(1),
+            agent_id: "a1".into(),
+            token: "t1".into(),
+            hostname: "host".into(),
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            client_version: Some("1.0".into()),
+            public_key: None,
+            protocol_version: Some(1),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: ConnectPayload = serde_json::from_str(&json).unwrap();
@@ -594,9 +598,12 @@ mod tests {
     #[test]
     fn test_exec_request_payload_roundtrip() {
         let p = ExecRequestPayload {
-            command: "echo hi".into(), shell: Some("/bin/bash".into()),
+            command: "echo hi".into(),
+            shell: Some("/bin/bash".into()),
             env: Some([("X".into(), "1".into())].into_iter().collect()),
-            dir: Some("/tmp".into()), timeout_sec: 10, request_id: "r1".into(),
+            dir: Some("/tmp".into()),
+            timeout_sec: 10,
+            request_id: "r1".into(),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: ExecRequestPayload = serde_json::from_str(&json).unwrap();
@@ -606,7 +613,12 @@ mod tests {
 
     #[test]
     fn test_exec_done_payload_roundtrip() {
-        let p = ExecDonePayload { request_id: "r1".into(), exit_code: 0, duration_ms: 100, error: None };
+        let p = ExecDonePayload {
+            request_id: "r1".into(),
+            exit_code: 0,
+            duration_ms: 100,
+            error: None,
+        };
         let json = serde_json::to_string(&p).unwrap();
         let back: ExecDonePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back.exit_code, 0);
@@ -615,8 +627,11 @@ mod tests {
     #[test]
     fn test_approval_request_payload_roundtrip() {
         let p = ApprovalRequestPayload {
-            request_id: "r1".into(), command: "rm -rf /".into(),
-            risk: "high".into(), mode: "hard_ask".into(), timestamp: 1234,
+            request_id: "r1".into(),
+            command: "rm -rf /".into(),
+            risk: "high".into(),
+            mode: "hard_ask".into(),
+            timestamp: 1234,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: ApprovalRequestPayload = serde_json::from_str(&json).unwrap();
@@ -625,7 +640,10 @@ mod tests {
 
     #[test]
     fn test_error_payload_roundtrip() {
-        let p = ErrorPayload { code: "EXEC_FAILED".into(), message: "boom".into() };
+        let p = ErrorPayload {
+            code: "EXEC_FAILED".into(),
+            message: "boom".into(),
+        };
         let json = serde_json::to_string(&p).unwrap();
         let back: ErrorPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back.code, "EXEC_FAILED");
@@ -679,7 +697,12 @@ mod tests {
 
     #[test]
     fn test_file_write_payload_roundtrip() {
-        let p = FileWritePayload { path: "/a/b".into(), content: "data".into(), encoding: "utf-8".into(), mode: Some(0o644) };
+        let p = FileWritePayload {
+            path: "/a/b".into(),
+            content: "data".into(),
+            encoding: "utf-8".into(),
+            mode: Some(0o644),
+        };
         let json = serde_json::to_string(&p).unwrap();
         let back: FileWritePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back.mode, Some(0o644));
@@ -688,9 +711,12 @@ mod tests {
     #[test]
     fn test_connected_payload_roundtrip() {
         let p = ConnectedPayload {
-            agent_id: "a1".into(), relay_id: "relay1".into(),
-            heartbeat_interval_sec: 30, server_time: 1000,
-            relay_public_key: Some("pk".into()), relay_key_id: Some("kid".into()),
+            agent_id: "a1".into(),
+            relay_id: "relay1".into(),
+            heartbeat_interval_sec: 30,
+            server_time: 1000,
+            relay_public_key: Some("pk".into()),
+            relay_key_id: Some("kid".into()),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: ConnectedPayload = serde_json::from_str(&json).unwrap();
@@ -700,8 +726,10 @@ mod tests {
     #[test]
     fn test_encrypted_data_serialization() {
         let ed = EncryptedData {
-            key_id: "k1".into(), sender_key_id: Some("k2".into()),
-            nonce: Some("n".into()), ciphertext: "ct".into(),
+            key_id: "k1".into(),
+            sender_key_id: Some("k2".into()),
+            nonce: Some("n".into()),
+            ciphertext: "ct".into(),
             ephemeral_pub_key: None,
         };
         let json = serde_json::to_string(&ed).unwrap();
@@ -718,22 +746,50 @@ mod tests {
     #[test]
     fn test_all_message_types_serialize_roundtrip() {
         let variants = vec![
-            MessageType::Connect, MessageType::Connected, MessageType::Disconnect,
-            MessageType::Heartbeat, MessageType::HeartbeatAck,
-            MessageType::ExecRequest, MessageType::ExecOutput, MessageType::ExecDone,
-            MessageType::ExecApprove, MessageType::ExecReject,
-            MessageType::NeedsApproval, MessageType::ApprovalRequest, MessageType::ApprovalResponse,
-            MessageType::FileRead, MessageType::FileWrite, MessageType::FileList, MessageType::FileResponse,
-            MessageType::SysInfo, MessageType::SysInfoResp,
-            MessageType::ConfigUpdate, MessageType::ConfigAck,
-            MessageType::Task, MessageType::TaskProgress, MessageType::TaskDone, MessageType::TaskCancel,
-            MessageType::SkillPush, MessageType::SkillList, MessageType::SkillDelete,
-            MessageType::LlmRequest, MessageType::LlmResponse,
-            MessageType::BackupRequest, MessageType::BackupResponse, MessageType::BackupList,
-            MessageType::BackupListResp, MessageType::BackupRestore, MessageType::BackupRestoreOk,
-            MessageType::BackupDelete, MessageType::BackupDeleteOk, MessageType::BackupProgress,
-            MessageType::PairingRequest, MessageType::PairingConfirm, MessageType::PairingResponse,
-            MessageType::ShieldAlert, MessageType::ShieldAlertResponse,
+            MessageType::Connect,
+            MessageType::Connected,
+            MessageType::Disconnect,
+            MessageType::Heartbeat,
+            MessageType::HeartbeatAck,
+            MessageType::ExecRequest,
+            MessageType::ExecOutput,
+            MessageType::ExecDone,
+            MessageType::ExecApprove,
+            MessageType::ExecReject,
+            MessageType::NeedsApproval,
+            MessageType::ApprovalRequest,
+            MessageType::ApprovalResponse,
+            MessageType::FileRead,
+            MessageType::FileWrite,
+            MessageType::FileList,
+            MessageType::FileResponse,
+            MessageType::SysInfo,
+            MessageType::SysInfoResp,
+            MessageType::ConfigUpdate,
+            MessageType::ConfigAck,
+            MessageType::Task,
+            MessageType::TaskProgress,
+            MessageType::TaskDone,
+            MessageType::TaskCancel,
+            MessageType::SkillPush,
+            MessageType::SkillList,
+            MessageType::SkillDelete,
+            MessageType::LlmRequest,
+            MessageType::LlmResponse,
+            MessageType::BackupRequest,
+            MessageType::BackupResponse,
+            MessageType::BackupList,
+            MessageType::BackupListResp,
+            MessageType::BackupRestore,
+            MessageType::BackupRestoreOk,
+            MessageType::BackupDelete,
+            MessageType::BackupDeleteOk,
+            MessageType::BackupProgress,
+            MessageType::PairingRequest,
+            MessageType::PairingConfirm,
+            MessageType::PairingResponse,
+            MessageType::ShieldAlert,
+            MessageType::ShieldAlertResponse,
             MessageType::Error,
         ];
         for v in variants {
@@ -757,7 +813,13 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let back: Message = serde_json::from_str(&json).unwrap();
         assert!(json.len() > 5000, "payload should be substantial");
-        assert_eq!(back.payload.as_ref().unwrap()["data"].as_str().unwrap().len(), 5000);
+        assert_eq!(
+            back.payload.as_ref().unwrap()["data"]
+                .as_str()
+                .unwrap()
+                .len(),
+            5000
+        );
     }
 
     #[test]
@@ -774,17 +836,26 @@ mod tests {
 
     #[test]
     fn test_pairing_payloads_roundtrip() {
-        let pr = PairingRequestPayload { agent_id: "a1".into(), device_name: "phone".into() };
+        let pr = PairingRequestPayload {
+            agent_id: "a1".into(),
+            device_name: "phone".into(),
+        };
         let json = serde_json::to_string(&pr).unwrap();
         let back: PairingRequestPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back.device_name, "phone");
 
-        let pc = PairingConfirmPayload { code: "123456".into(), device_name: "phone".into() };
+        let pc = PairingConfirmPayload {
+            code: "123456".into(),
+            device_name: "phone".into(),
+        };
         let json = serde_json::to_string(&pc).unwrap();
         let back: PairingConfirmPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back.code, "123456");
 
-        let prs = PairingResponsePayload { token: "tok".into(), device_id: "d1".into() };
+        let prs = PairingResponsePayload {
+            token: "tok".into(),
+            device_id: "d1".into(),
+        };
         let json = serde_json::to_string(&prs).unwrap();
         let back: PairingResponsePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back.device_id, "d1");
@@ -793,17 +864,25 @@ mod tests {
     #[test]
     fn test_shield_payloads_roundtrip() {
         let sa = ShieldAlertPayload {
-            alert_id: "al1".into(), pid: 1234, uid: 1000,
-            username: "bob".into(), command: "rm".into(),
-            rule_name: "no_rm".into(), action: "blocked".into(),
-            snapshot: None, timestamp: 100,
+            alert_id: "al1".into(),
+            pid: 1234,
+            uid: 1000,
+            username: "bob".into(),
+            command: "rm".into(),
+            rule_name: "no_rm".into(),
+            action: "blocked".into(),
+            snapshot: None,
+            timestamp: 100,
         };
         let json = serde_json::to_string(&sa).unwrap();
         let back: ShieldAlertPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back.action, "blocked");
 
         let sar = ShieldAlertResponsePayload {
-            alert_id: "al1".into(), approved: true, reason: Some("ok".into()), from: Some("admin".into()),
+            alert_id: "al1".into(),
+            approved: true,
+            reason: Some("ok".into()),
+            from: Some("admin".into()),
         };
         let json = serde_json::to_string(&sar).unwrap();
         let back: ShieldAlertResponsePayload = serde_json::from_str(&json).unwrap();
@@ -812,12 +891,23 @@ mod tests {
 
     #[test]
     fn test_backup_payloads_roundtrip() {
-        let br = BackupRequestPayload { request_id: "r1".into(), description: Some("daily".into()), paths: Some(vec!["/home".into()]) };
+        let br = BackupRequestPayload {
+            request_id: "r1".into(),
+            description: Some("daily".into()),
+            paths: Some(vec!["/home".into()]),
+        };
         let json = serde_json::to_string(&br).unwrap();
         let back: BackupRequestPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(back.paths.as_ref().unwrap()[0], "/home");
 
-        let snapshot = Snapshot { id: "s1".into(), description: Some("desc".into()), timestamp: 100, size: 1024, paths: vec!["/a".into()], filename: "f.tar".into() };
+        let snapshot = Snapshot {
+            id: "s1".into(),
+            description: Some("desc".into()),
+            timestamp: 100,
+            size: 1024,
+            paths: vec!["/a".into()],
+            filename: "f.tar".into(),
+        };
         let json = serde_json::to_string(&snapshot).unwrap();
         let back: Snapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(back.filename, "f.tar");
@@ -843,8 +933,11 @@ mod tests {
     #[test]
     fn test_message_with_e2ee() {
         let ed = EncryptedData {
-            key_id: "k1".into(), sender_key_id: None, nonce: None,
-            ciphertext: "abc".into(), ephemeral_pub_key: Some("epk".into()),
+            key_id: "k1".into(),
+            sender_key_id: None,
+            nonce: None,
+            ciphertext: "abc".into(),
+            ephemeral_pub_key: Some("epk".into()),
         };
         let msg = Message::new(MessageType::LlmRequest).with_payload(serde_json::json!({}));
         let mut msg = msg;
@@ -867,11 +960,17 @@ mod tests {
     #[test]
     fn test_system_info_payload_roundtrip() {
         let p = SystemInfoPayload {
-            hostname: "h1".into(), os: "linux".into(), arch: "x86_64".into(),
-            cpu_count: 8, cpu_model: Some("i7".into()),
-            mem_total_bytes: 16000000000, mem_used_bytes: 8000000000,
-            disk_total_bytes: 500000000000, disk_used_bytes: 100000000000,
-            uptime_seconds: 86400, load_avg: Some(vec![1.0, 0.5, 0.3]),
+            hostname: "h1".into(),
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            cpu_count: 8,
+            cpu_model: Some("i7".into()),
+            mem_total_bytes: 16000000000,
+            mem_used_bytes: 8000000000,
+            disk_total_bytes: 500000000000,
+            disk_used_bytes: 100000000000,
+            uptime_seconds: 86400,
+            load_avg: Some(vec![1.0, 0.5, 0.3]),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: SystemInfoPayload = serde_json::from_str(&json).unwrap();
@@ -882,9 +981,19 @@ mod tests {
     #[test]
     fn test_file_response_with_entries() {
         let p = FileResponsePayload {
-            request_id: None, path: Some("/tmp".into()),
-            content: None, encoding: None, mode: None, size: None, is_dir: Some(true),
-            entries: Some(vec![FileEntry { name: "a.txt".into(), size: 100, is_dir: false, mode: 0o644 }]),
+            request_id: None,
+            path: Some("/tmp".into()),
+            content: None,
+            encoding: None,
+            mode: None,
+            size: None,
+            is_dir: Some(true),
+            entries: Some(vec![FileEntry {
+                name: "a.txt".into(),
+                size: 100,
+                is_dir: false,
+                mode: 0o644,
+            }]),
             error: None,
         };
         let json = serde_json::to_string(&p).unwrap();
@@ -895,22 +1004,50 @@ mod tests {
     #[test]
     fn test_message_type_count() {
         let all = vec![
-            MessageType::Connect, MessageType::Connected, MessageType::Disconnect,
-            MessageType::Heartbeat, MessageType::HeartbeatAck,
-            MessageType::ExecRequest, MessageType::ExecOutput, MessageType::ExecDone,
-            MessageType::ExecApprove, MessageType::ExecReject,
-            MessageType::NeedsApproval, MessageType::ApprovalRequest, MessageType::ApprovalResponse,
-            MessageType::FileRead, MessageType::FileWrite, MessageType::FileList, MessageType::FileResponse,
-            MessageType::SysInfo, MessageType::SysInfoResp,
-            MessageType::ConfigUpdate, MessageType::ConfigAck,
-            MessageType::Task, MessageType::TaskProgress, MessageType::TaskDone, MessageType::TaskCancel,
-            MessageType::SkillPush, MessageType::SkillList, MessageType::SkillDelete,
-            MessageType::LlmRequest, MessageType::LlmResponse,
-            MessageType::BackupRequest, MessageType::BackupResponse, MessageType::BackupList,
-            MessageType::BackupListResp, MessageType::BackupRestore, MessageType::BackupRestoreOk,
-            MessageType::BackupDelete, MessageType::BackupDeleteOk, MessageType::BackupProgress,
-            MessageType::PairingRequest, MessageType::PairingConfirm, MessageType::PairingResponse,
-            MessageType::ShieldAlert, MessageType::ShieldAlertResponse,
+            MessageType::Connect,
+            MessageType::Connected,
+            MessageType::Disconnect,
+            MessageType::Heartbeat,
+            MessageType::HeartbeatAck,
+            MessageType::ExecRequest,
+            MessageType::ExecOutput,
+            MessageType::ExecDone,
+            MessageType::ExecApprove,
+            MessageType::ExecReject,
+            MessageType::NeedsApproval,
+            MessageType::ApprovalRequest,
+            MessageType::ApprovalResponse,
+            MessageType::FileRead,
+            MessageType::FileWrite,
+            MessageType::FileList,
+            MessageType::FileResponse,
+            MessageType::SysInfo,
+            MessageType::SysInfoResp,
+            MessageType::ConfigUpdate,
+            MessageType::ConfigAck,
+            MessageType::Task,
+            MessageType::TaskProgress,
+            MessageType::TaskDone,
+            MessageType::TaskCancel,
+            MessageType::SkillPush,
+            MessageType::SkillList,
+            MessageType::SkillDelete,
+            MessageType::LlmRequest,
+            MessageType::LlmResponse,
+            MessageType::BackupRequest,
+            MessageType::BackupResponse,
+            MessageType::BackupList,
+            MessageType::BackupListResp,
+            MessageType::BackupRestore,
+            MessageType::BackupRestoreOk,
+            MessageType::BackupDelete,
+            MessageType::BackupDeleteOk,
+            MessageType::BackupProgress,
+            MessageType::PairingRequest,
+            MessageType::PairingConfirm,
+            MessageType::PairingResponse,
+            MessageType::ShieldAlert,
+            MessageType::ShieldAlertResponse,
             MessageType::Error,
         ];
         assert_eq!(all.len(), 45, "expected 45 message type variants");

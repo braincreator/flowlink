@@ -38,9 +38,7 @@ pub enum ApplyResult {
         failed: Vec<(String, String)>,
     },
     /// Apply completely failed
-    Failed {
-        reason: String,
-    },
+    Failed { reason: String },
 }
 
 /// Trait for collecting and managing component state

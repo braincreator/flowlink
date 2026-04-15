@@ -3,8 +3,8 @@
 pub mod queue;
 
 use crate::types::*;
-use serde::{Serialize, Deserialize};
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -80,7 +80,10 @@ impl ApprovalManager {
     pub async fn reject(&self, id: &str, identity: ApprovalIdentity, reason: String) -> Result<()> {
         let mut queue = self.queue.write().await;
         if let Some(req) = queue.get_mut(id) {
-            req.status = ApprovalStatus::Rejected { by: identity, reason };
+            req.status = ApprovalStatus::Rejected {
+                by: identity,
+                reason,
+            };
             tracing::info!("Approval {} rejected", id);
             Ok(())
         } else {
@@ -91,8 +94,14 @@ impl ApprovalManager {
     /// Get pending approvals
     pub async fn get_pending(&self) -> Vec<ApprovalRequest> {
         let queue = self.queue.read().await;
-        queue.values()
-            .filter(|r| matches!(r.status, ApprovalStatus::PendingApproval | ApprovalStatus::PendingBackup))
+        queue
+            .values()
+            .filter(|r| {
+                matches!(
+                    r.status,
+                    ApprovalStatus::PendingApproval | ApprovalStatus::PendingBackup
+                )
+            })
             .cloned()
             .collect()
     }

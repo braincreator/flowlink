@@ -3,12 +3,12 @@
 // Port of internal/crypto/crypto.go
 
 use aes_gcm::aead::{Aead, KeyInit, OsRng};
-use aes_gcm::{Aes256Gcm, AeadCore, Nonce};
+use aes_gcm::{AeadCore, Aes256Gcm, Nonce};
 use anyhow::Result;
+use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use rand::rngs::OsRng as RandRng;
 use serde::{Deserialize, Serialize};
 use x25519_dalek::{PublicKey, StaticSecret};
-use base64::{Engine, engine::general_purpose::STANDARD as B64};
 
 // Re-export sha2 for streaming hash use cases
 pub use sha2::{Digest, Sha256};
@@ -113,8 +113,8 @@ impl KeyPair {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedEnvelope {
-    pub key_id: String,           // recipient key_id
-    pub sender_key_id: String,    // sender key_id
+    pub key_id: String,            // recipient key_id
+    pub sender_key_id: String,     // sender key_id
     pub sender_public_key: String, // sender's actual public key (base64)
     pub nonce: String,
     pub ciphertext: String,
@@ -125,17 +125,15 @@ pub struct EncryptedEnvelope {
 // ═══════════════════════════════════════════════
 
 /// Derive a shared AES-256 key from X25519 key exchange
-fn derive_shared_key(
-    my_secret: &StaticSecret,
-    their_public: &PublicKey,
-) -> [u8; AES_KEY_SIZE] {
+fn derive_shared_key(my_secret: &StaticSecret, their_public: &PublicKey) -> [u8; AES_KEY_SIZE] {
     let shared = my_secret.diffie_hellman(their_public);
     let shared_bytes = shared.as_bytes();
 
     // HKDF-SHA256 to derive final key
     let hk = hkdf::Hkdf::<Sha256>::new(None, shared_bytes);
     let mut key = [0u8; AES_KEY_SIZE];
-    hk.expand(b"flowlink-e2ee-v1", &mut key).expect("HKDF expand failed");
+    hk.expand(b"flowlink-e2ee-v1", &mut key)
+        .expect("HKDF expand failed");
     key
 }
 
@@ -171,10 +169,7 @@ pub fn encrypt(
 }
 
 /// Decrypt ciphertext using our private key + their public key
-pub fn decrypt(
-    my_keypair: &KeyPair,
-    envelope: &EncryptedEnvelope,
-) -> Result<Vec<u8>> {
+pub fn decrypt(my_keypair: &KeyPair, envelope: &EncryptedEnvelope) -> Result<Vec<u8>> {
     let my_secret = my_keypair.secret()?;
 
     // Use sender's actual public key for DH
@@ -290,7 +285,8 @@ mod tests {
         let alice = KeyPair::generate();
         let bob = KeyPair::generate();
         let mut envelope = encrypt(&alice, &bob.public_key, b"secret").unwrap();
-        envelope.nonce = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 12]);
+        envelope.nonce =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 12]);
         assert!(decrypt(&bob, &envelope).is_err());
     }
 
@@ -340,7 +336,7 @@ mod tests {
     fn test_multiple_keypairs_all_different() {
         let keys: Vec<_> = (0..20).map(|_| KeyPair::generate()).collect();
         for i in 0..keys.len() {
-            for j in (i+1)..keys.len() {
+            for j in (i + 1)..keys.len() {
                 assert_ne!(keys[i].public_key, keys[j].public_key);
                 assert_ne!(keys[i].private_key, keys[j].private_key);
                 assert_ne!(keys[i].key_id, keys[j].key_id);
@@ -368,14 +364,14 @@ mod tests {
     #[test]
     fn test_invalid_public_key_too_short() {
         let short = B64.encode([0u8; 16]);
- let result: Result<[u8;32], _> = B64.decode(&short).unwrap().try_into();
+        let result: Result<[u8; 32], _> = B64.decode(&short).unwrap().try_into();
         assert!(result.is_err());
     }
 
     #[test]
     fn test_invalid_public_key_too_long() {
         let long = B64.encode([0u8; 64]);
-        let result: Result<[u8;32], _> = B64.decode(&long).unwrap().try_into();
+        let result: Result<[u8; 32], _> = B64.decode(&long).unwrap().try_into();
         assert!(result.is_err());
     }
 
@@ -505,8 +501,14 @@ mod tests {
     fn test_hkdf_deterministic() {
         let alice = KeyPair::generate();
         let bob = KeyPair::generate();
-        let secret1 = alice.secret().unwrap().diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
-        let secret2 = alice.secret().unwrap().diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
+        let secret1 = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
+        let secret2 = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
         assert_eq!(secret1.as_bytes(), secret2.as_bytes());
     }
 
@@ -514,11 +516,15 @@ mod tests {
     fn test_hkdf_different_info_different_keys() {
         let alice = KeyPair::generate();
         let bob = KeyPair::generate();
-        let shared = alice.secret().unwrap().diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
+        let shared = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
 
         let hk1 = hkdf::Hkdf::<Sha256>::new(None, shared.as_bytes());
         let hk2 = hkdf::Hkdf::<Sha256>::new(None, shared.as_bytes());
-        let mut k1 = [0u8; 32]; let mut k2 = [0u8; 32];
+        let mut k1 = [0u8; 32];
+        let mut k2 = [0u8; 32];
         hk1.expand(b"info-a", &mut k1).unwrap();
         hk2.expand(b"info-b", &mut k2).unwrap();
         assert_ne!(k1, k2);
@@ -528,7 +534,10 @@ mod tests {
     fn test_hkdf_empty_info() {
         let alice = KeyPair::generate();
         let bob = KeyPair::generate();
-        let shared = alice.secret().unwrap().diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
+        let shared = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
         let hk = hkdf::Hkdf::<Sha256>::new(None, shared.as_bytes());
         let mut key = [0u8; 32];
         hk.expand(b"", &mut key).unwrap();
@@ -539,7 +548,10 @@ mod tests {
     fn test_hkdf_long_info() {
         let alice = KeyPair::generate();
         let bob = KeyPair::generate();
-        let shared = alice.secret().unwrap().diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
+        let shared = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
         let hk = hkdf::Hkdf::<Sha256>::new(None, shared.as_bytes());
         let long_info = vec![b'x'; 1024];
         let mut key = [0u8; 32];
@@ -551,7 +563,10 @@ mod tests {
     fn test_derived_key_length() {
         let alice = KeyPair::generate();
         let bob = KeyPair::generate();
-        let shared = alice.secret().unwrap().diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
+        let shared = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
         let hk = hkdf::Hkdf::<Sha256>::new(None, shared.as_bytes());
         let mut key = [0u8; 32];
         hk.expand(b"flowlink-e2ee-v1", &mut key).unwrap();
@@ -564,12 +579,23 @@ mod tests {
         let bob = KeyPair::generate();
         let carol = KeyPair::generate();
 
-        let s1 = alice.secret().unwrap().diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
-        let s2 = alice.secret().unwrap().diffie_hellman(&PublicKey::from(carol.public_bytes().unwrap()));
+        let s1 = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
+        let s2 = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(carol.public_bytes().unwrap()));
 
-        let mut k1 = [0u8; 32]; let mut k2 = [0u8; 32];
-        hkdf::Hkdf::<Sha256>::new(None, s1.as_bytes()).expand(b"test", &mut k1).unwrap();
-        hkdf::Hkdf::<Sha256>::new(None, s2.as_bytes()).expand(b"test", &mut k2).unwrap();
+        let mut k1 = [0u8; 32];
+        let mut k2 = [0u8; 32];
+        hkdf::Hkdf::<Sha256>::new(None, s1.as_bytes())
+            .expand(b"test", &mut k1)
+            .unwrap();
+        hkdf::Hkdf::<Sha256>::new(None, s2.as_bytes())
+            .expand(b"test", &mut k2)
+            .unwrap();
         assert_ne!(k1, k2);
     }
 
@@ -626,7 +652,10 @@ mod tests {
     fn test_session_key_derivation_with_nonce() {
         let alice = KeyPair::generate();
         let bob = KeyPair::generate();
-        let shared = alice.secret().unwrap().diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
+        let shared = alice
+            .secret()
+            .unwrap()
+            .diffie_hellman(&PublicKey::from(bob.public_bytes().unwrap()));
 
         // Derive session key with nonce
         let nonce = b"session-nonce-12345";

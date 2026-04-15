@@ -82,11 +82,7 @@ impl RemoteLlm {
     }
 
     /// Simple chat with system + user messages.
-    pub async fn chat(
-        &self,
-        system_prompt: &str,
-        user_message: &str,
-    ) -> anyhow::Result<String> {
+    pub async fn chat(&self, system_prompt: &str, user_message: &str) -> anyhow::Result<String> {
         let messages = vec![
             LlmMessage {
                 role: "system".into(),
@@ -124,8 +120,14 @@ mod tests {
     #[test]
     fn test_messages_serialization() {
         let msgs = vec![
-            LlmMessage { role: "system".into(), content: "You are helpful.".into() },
-            LlmMessage { role: "user".into(), content: "Hello".into() },
+            LlmMessage {
+                role: "system".into(),
+                content: "You are helpful.".into(),
+            },
+            LlmMessage {
+                role: "user".into(),
+                content: "Hello".into(),
+            },
         ];
         let json = serde_json::to_value(&msgs).unwrap();
         assert_eq!(json.as_array().unwrap().len(), 2);

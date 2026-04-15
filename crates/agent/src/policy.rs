@@ -38,7 +38,10 @@ pub struct PolicyEngine {
 impl PolicyEngine {
     pub fn new(read_only: bool, allow_sudo: bool) -> Self {
         Self {
-            shield: AnalysisEngine { enable_ast: true, enable_interpreter: true },
+            shield: AnalysisEngine {
+                enable_ast: true,
+                enable_interpreter: true,
+            },
             read_only,
             allow_sudo,
             blocked_patterns: default_blocked_patterns(),
@@ -148,12 +151,22 @@ impl PolicyEngine {
         let parts: Vec<&str> = command.split_whitespace().collect();
         let (binary, args) = match parts.split_first() {
             Some((b, a)) => (b.to_string(), a.iter().map(|s| s.to_string()).collect()),
-            None => return PolicyResult {
-                allowed: true, blocked: false, reason: String::new(),
-                risk_level: RiskLevel::None, require_approval: false, snapshot_id: None,
-            },
+            None => {
+                return PolicyResult {
+                    allowed: true,
+                    blocked: false,
+                    reason: String::new(),
+                    risk_level: RiskLevel::None,
+                    require_approval: false,
+                    snapshot_id: None,
+                }
+            }
         };
-        let shield_cmd = ShieldCommand { binary, args, raw: command.clone() };
+        let shield_cmd = ShieldCommand {
+            binary,
+            args,
+            raw: command.clone(),
+        };
         let analysis = self.shield.analyze(&shield_cmd);
         if let Some(threat) = analysis.threat {
             return PolicyResult {
@@ -212,7 +225,10 @@ impl PolicyEngine {
                     return PolicyResult {
                         allowed: false,
                         blocked: true,
-                        reason: format!("EXEC_BLOCKED_SANDBOX: path '{}' outside allowed dirs", dir),
+                        reason: format!(
+                            "EXEC_BLOCKED_SANDBOX: path '{}' outside allowed dirs",
+                            dir
+                        ),
                         risk_level: RiskLevel::Medium,
                         require_approval: false,
                         snapshot_id: None,
@@ -234,13 +250,26 @@ impl PolicyEngine {
 
 fn is_write_command(cmd: &str) -> bool {
     let write_prefixes = [
-        "rm ", "mv ", "cp ", "mkdir ", "rmdir ", "chmod ", "chown ",
-        "dd ", "mkfs.", "shred ", "truncate ", "tee ",
-        "docker rm", "docker rmi", "docker system prune",
+        "rm ",
+        "mv ",
+        "cp ",
+        "mkdir ",
+        "rmdir ",
+        "chmod ",
+        "chown ",
+        "dd ",
+        "mkfs.",
+        "shred ",
+        "truncate ",
+        "tee ",
+        "docker rm",
+        "docker rmi",
+        "docker system prune",
     ];
     let lower = cmd.to_lowercase();
     write_prefixes.iter().any(|p| lower.starts_with(p))
-        || cmd.contains(" > ") || cmd.contains(" >> ")
+        || cmd.contains(" > ")
+        || cmd.contains(" >> ")
 }
 
 fn extract_target_dir(cmd: &str) -> Option<String> {
@@ -336,8 +365,11 @@ mod tests {
     #[test]
     fn test_sandbox_paths() {
         let tmp = tempfile::tempdir().unwrap();
-        let engine = PolicyEngine::new(false, false)
-            .with_allowed_dirs(vec![tmp.path().to_str().unwrap().into()]);
+        let engine = PolicyEngine::new(false, false).with_allowed_dirs(vec![tmp
+            .path()
+            .to_str()
+            .unwrap()
+            .into()]);
         let result = engine.check(&test_payload(&format!("cat {}/file", tmp.path().display())));
         assert!(result.allowed);
         let result2 = engine.check(&test_payload("cat /etc/passwd"));
@@ -347,8 +379,7 @@ mod tests {
 
     #[test]
     fn test_custom_blacklist() {
-        let engine = PolicyEngine::new(false, false)
-            .with_blocked_patterns(vec!["nmap".into()]);
+        let engine = PolicyEngine::new(false, false).with_blocked_patterns(vec!["nmap".into()]);
         let result = engine.check(&test_payload("nmap -sP 192.168.1.0/24"));
         assert!(result.blocked);
     }

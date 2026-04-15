@@ -1,8 +1,8 @@
 // RBAC — Role-Based Access Control types
 // Multi-tenant access control for FlowLink
 
-use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash, Eq)]
 pub enum Role {
@@ -46,13 +46,29 @@ impl Permission {
     pub fn all() -> HashSet<Permission> {
         use Permission::*;
         [
-            AgentRegister, AgentList, AgentRemove,
-            CommandExecute, CommandExecuteDestructive, CommandApprove,
-            FileRead, FileWrite, FileDelete,
-            ShieldView, ShieldApprove, ShieldReject, ShieldConfigure,
-            MetricsView, AuditLogView, UserManage, PolicyManage,
-            BackupCreate, BackupRestore, BackupDelete,
-        ].into_iter().collect()
+            AgentRegister,
+            AgentList,
+            AgentRemove,
+            CommandExecute,
+            CommandExecuteDestructive,
+            CommandApprove,
+            FileRead,
+            FileWrite,
+            FileDelete,
+            ShieldView,
+            ShieldApprove,
+            ShieldReject,
+            ShieldConfigure,
+            MetricsView,
+            AuditLogView,
+            UserManage,
+            PolicyManage,
+            BackupCreate,
+            BackupRestore,
+            BackupDelete,
+        ]
+        .into_iter()
+        .collect()
     }
 }
 
@@ -62,16 +78,30 @@ impl Role {
         match self {
             Role::Admin => Permission::all(),
             Role::Operator => [
-                CommandExecute, FileRead, FileWrite,
-                ShieldView, MetricsView, AuditLogView,
-                AgentList, BackupCreate, BackupRestore,
-            ].into_iter().collect(),
-            Role::Viewer => [
-                AgentList, ShieldView, MetricsView, AuditLogView,
-            ].into_iter().collect(),
+                CommandExecute,
+                FileRead,
+                FileWrite,
+                ShieldView,
+                MetricsView,
+                AuditLogView,
+                AgentList,
+                BackupCreate,
+                BackupRestore,
+            ]
+            .into_iter()
+            .collect(),
+            Role::Viewer => [AgentList, ShieldView, MetricsView, AuditLogView]
+                .into_iter()
+                .collect(),
             Role::Agent => [
-                AgentRegister, CommandExecute, FileRead, FileWrite, BackupCreate,
-            ].into_iter().collect(),
+                AgentRegister,
+                CommandExecute,
+                FileRead,
+                FileWrite,
+                BackupCreate,
+            ]
+            .into_iter()
+            .collect(),
         }
     }
 }
@@ -214,7 +244,6 @@ users:
         assert_eq!(paths, &["/home/app".to_string()]);
     }
 
-
     #[test]
     fn test_role_serialization_roundtrip() {
         for role in [Role::Admin, Role::Operator, Role::Viewer, Role::Agent] {
@@ -226,7 +255,12 @@ users:
 
     #[test]
     fn test_permission_serialization_roundtrip() {
-        for perm in [Permission::CommandExecute, Permission::FileRead, Permission::ShieldApprove, Permission::UserManage] {
+        for perm in [
+            Permission::CommandExecute,
+            Permission::FileRead,
+            Permission::ShieldApprove,
+            Permission::UserManage,
+        ] {
             let json = serde_json::to_string(&perm).unwrap();
             let back: Permission = serde_json::from_str(&json).unwrap();
             assert_eq!(perm, back);
@@ -251,8 +285,20 @@ users:
     #[test]
     fn test_token_expiry_validation() {
         let now = 2000u64;
-        let expired = RbacToken { user_id: "u".into(), roles: vec![], issued_at: 1000, expires_at: 1500, issuer: "x".into() };
-        let valid = RbacToken { user_id: "u".into(), roles: vec![], issued_at: 1000, expires_at: 3000, issuer: "x".into() };
+        let expired = RbacToken {
+            user_id: "u".into(),
+            roles: vec![],
+            issued_at: 1000,
+            expires_at: 1500,
+            issuer: "x".into(),
+        };
+        let valid = RbacToken {
+            user_id: "u".into(),
+            roles: vec![],
+            issued_at: 1000,
+            expires_at: 3000,
+            issuer: "x".into(),
+        };
         assert!(expired.expires_at < now, "expired token");
         assert!(valid.expires_at > now, "valid token");
     }
@@ -261,7 +307,9 @@ users:
     fn test_invalid_yaml_fails() {
         let yaml = "not valid yaml: [";
         #[derive(Deserialize)]
-        struct Cfg { users: Vec<RbacUser> }
+        struct Cfg {
+            users: Vec<RbacUser>,
+        }
         let result: Result<Cfg, _> = serde_yaml::from_str(yaml);
         assert!(result.is_err());
     }
@@ -269,7 +317,8 @@ users:
     #[test]
     fn test_user_with_allowed_paths() {
         let user = RbacUser {
-            id: "u1".into(), username: "op".into(),
+            id: "u1".into(),
+            username: "op".into(),
             roles: vec![Role::Operator],
             allowed_paths: Some(vec!["/home/app".into(), "/var/log".into()]),
             denied_commands: None,
@@ -283,7 +332,8 @@ users:
     #[test]
     fn test_user_with_denied_commands() {
         let user = RbacUser {
-            id: "u1".into(), username: "ag".into(),
+            id: "u1".into(),
+            username: "ag".into(),
             roles: vec![Role::Agent],
             allowed_paths: None,
             denied_commands: Some(vec!["sudo *".into(), "rm -rf *".into()]),
@@ -301,7 +351,8 @@ users:
         meta.insert("email".into(), "a@b.com".into());
         meta.insert("team".into(), "infra".into());
         let user = RbacUser {
-            id: "u1".into(), username: "admin".into(),
+            id: "u1".into(),
+            username: "admin".into(),
             roles: vec![Role::Admin, Role::Operator],
             allowed_paths: Some(vec!["/".into()]),
             denied_commands: Some(vec![]),

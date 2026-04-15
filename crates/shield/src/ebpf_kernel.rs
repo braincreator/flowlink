@@ -26,20 +26,76 @@ pub struct DangerousPattern {
 /// Default dangerous patterns for L1 kernel matching
 pub fn default_patterns() -> Vec<DangerousPattern> {
     vec![
-        DangerousPattern { binary: "rm".into(), check_args: true, check_paths: true },
-        DangerousPattern { binary: "shred".into(), check_args: false, check_paths: false },
-        DangerousPattern { binary: "mkfs.".into(), check_args: false, check_paths: false },
-        DangerousPattern { binary: "dd".into(), check_args: false, check_paths: true },
-        DangerousPattern { binary: "shutdown".into(), check_args: false, check_paths: false },
-        DangerousPattern { binary: "poweroff".into(), check_args: false, check_paths: false },
-        DangerousPattern { binary: "halt".into(), check_args: false, check_paths: false },
-        DangerousPattern { binary: "reboot".into(), check_args: false, check_paths: false },
-        DangerousPattern { binary: "iptables".into(), check_args: true, check_paths: false },
-        DangerousPattern { binary: "nft".into(), check_args: true, check_paths: false },
-        DangerousPattern { binary: "docker".into(), check_args: true, check_paths: false },
-        DangerousPattern { binary: "systemctl".into(), check_args: true, check_paths: false },
-        DangerousPattern { binary: "killall".into(), check_args: false, check_paths: false },
-        DangerousPattern { binary: "pkill".into(), check_args: false, check_paths: false },
+        DangerousPattern {
+            binary: "rm".into(),
+            check_args: true,
+            check_paths: true,
+        },
+        DangerousPattern {
+            binary: "shred".into(),
+            check_args: false,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "mkfs.".into(),
+            check_args: false,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "dd".into(),
+            check_args: false,
+            check_paths: true,
+        },
+        DangerousPattern {
+            binary: "shutdown".into(),
+            check_args: false,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "poweroff".into(),
+            check_args: false,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "halt".into(),
+            check_args: false,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "reboot".into(),
+            check_args: false,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "iptables".into(),
+            check_args: true,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "nft".into(),
+            check_args: true,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "docker".into(),
+            check_args: true,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "systemctl".into(),
+            check_args: true,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "killall".into(),
+            check_args: false,
+            check_paths: false,
+        },
+        DangerousPattern {
+            binary: "pkill".into(),
+            check_args: false,
+            check_paths: false,
+        },
     ]
 }
 
@@ -53,8 +109,8 @@ pub use real_kernel::*;
 #[cfg(all(target_os = "linux", feature = "ebpf"))]
 mod real_kernel {
     use super::*;
-    use aya::{Ebpf, programs::TracePoint, maps::RingBuffer};
     use aya::maps::Map;
+    use aya::{maps::RingBuffer, programs::TracePoint, Ebpf};
 
     /// eBPF kernel monitor — loads BPF program, manages maps + ring buffer
     pub struct EbpfKernelMonitor {
@@ -75,7 +131,8 @@ mod real_kernel {
                 .context("Failed to load eBPF program")?;
 
             // Attach tracepoint
-            let program: &mut TracePoint = ebpf.program_mut("on_execve")
+            let program: &mut TracePoint = ebpf
+                .program_mut("on_execve")
                 .context("BPF program 'on_execve' not found")?
                 .try_into()
                 .context("Not a tracepoint program")?;
@@ -84,7 +141,8 @@ mod real_kernel {
             info!("🛡 eBPF tracepoint attached: sys_enter_execve");
 
             // Populate allowed_uids map
-            let allowed_map: aya::maps::HashMap<_, u32, u32> = ebpf.map_mut("allowed_uids")
+            let allowed_map: aya::maps::HashMap<_, u32, u32> = ebpf
+                .map_mut("allowed_uids")
                 .context("allowed_uids map not found")?
                 .try_into()?;
             for uid in &allowed_uids {
@@ -94,7 +152,8 @@ mod real_kernel {
             info!("🛡 Allowed UIDs loaded: {:?}", allowed_uids);
 
             // Populate patterns map
-            let patterns_map: aya::maps::Array<_, DangerousPatternBpf> = ebpf.map_mut("patterns")
+            let patterns_map: aya::maps::Array<_, DangerousPatternBpf> = ebpf
+                .map_mut("patterns")
                 .context("patterns map not found")?
                 .try_into()?;
             for (i, pat) in patterns.iter().enumerate().take(32) {
@@ -112,7 +171,8 @@ mod real_kernel {
             info!("🛡 {} dangerous patterns loaded", patterns.len().min(32));
 
             // Ring buffer consumer
-            let events_map: RingBuffer = ebpf.map_mut("events")
+            let events_map: RingBuffer = ebpf
+                .map_mut("events")
                 .context("events ringbuf not found")?
                 .try_into()?;
 
@@ -127,9 +187,8 @@ mod real_kernel {
                             return 0;
                         }
                         // Safe: we control the layout from BPF side
-                        let raw: &KernelEventRaw = unsafe {
-                            &*(data.as_ptr() as *const KernelEventRaw)
-                        };
+                        let raw: &KernelEventRaw =
+                            unsafe { &*(data.as_ptr() as *const KernelEventRaw) };
                         let event = KernelEvent {
                             pid: raw.pid,
                             ppid: raw.ppid,
@@ -149,10 +208,13 @@ mod real_kernel {
                 }();
             });
 
-            Ok((Self {
-                _ebpf: ebpf,
-                _task: Some(task),
-            }, rx))
+            Ok((
+                Self {
+                    _ebpf: ebpf,
+                    _task: Some(task),
+                },
+                rx,
+            ))
         }
     }
 

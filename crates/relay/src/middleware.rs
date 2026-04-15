@@ -2,7 +2,7 @@
 // Port of internal/relay/middleware.go
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::auth::AuthManager;
+use crate::server::AppState;
 use crate::ratelimit::RateLimiter;
 use crate::rbac_manager::RbacManager;
 
@@ -45,6 +46,43 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for AccountIdExtractor {
             .or_else(|| parts.extensions.get::<ClientId>().map(|c| c.0.clone()))
             .unwrap_or_else(|| "default".to_string());
         std::future::ready(Ok(AccountIdExtractor(account)))
+    }
+}
+
+// ── JWT Auth Middleware (validates Bearer token via AuthEngine) ──
+
+/// JWT auth middleware — extracts account_id from Bearer token using AuthEngine.
+/// Sets `AccountId(String)` extension on the request for handlers to use.
+/// If AuthEngine is not configured (no jwt_secret), passes through (dev mode).
+pub async fn jwt_auth(
+    State(state): State<std::sync::Arc<AppState>>,
+    mut req: Request,
+    next: Next,
+) -> Response {
+    // Dev mode: no AuthEngine configured
+    let auth_engine = match &state.auth_engine {
+        Some(e) => e,
+        None => {
+            warn!("JWT_AUTH_DISABLED: no auth_engine configured (dev mode)");
+            return next.run(req).await;
+        }
+    };
+
+    let auth_header = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+    let token = match auth_header {
+        None => return json_error(StatusCode::UNAUTHORIZED, "token_missing", "Missing Authorization header"),
+        Some(h) => match h.strip_prefix("Bearer ") {
+            Some(t) => t,
+            None => return json_error(StatusCode::UNAUTHORIZED, "token_invalid", "Invalid Authorization format"),
+        },
+    };
+
+    match auth_engine.validate_access_token(token) {
+        Ok(claims) => {
+            req.extensions_mut().insert(AccountId(claims.account_id));
+            next.run(req).await
+        }
+        Err(_) => json_error(StatusCode::UNAUTHORIZED, "token_invalid", "Invalid or expired token"),
     }
 }
 

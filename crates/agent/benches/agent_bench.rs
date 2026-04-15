@@ -69,9 +69,7 @@ fn bench_fileops_read_write(c: &mut Criterion) {
     group.bench_function("write_10kb", |b| {
         b.iter(|| fileops.write(&path_str, &medium_data))
     });
-    group.bench_function("read_1kb", |b| {
-        b.iter(|| fileops.read(&path_str))
-    });
+    group.bench_function("read_1kb", |b| b.iter(|| fileops.read(&path_str)));
 
     group.finish();
 }
@@ -109,5 +107,14 @@ fn bench_dispatch_routing(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_policy_allow, bench_policy_deny, bench_policy_ask, bench_fileops_validate, bench_fileops_read_write, bench_sandbox_validate_command, bench_dispatch_routing);
+criterion_group!(
+    benches,
+    bench_policy_allow,
+    bench_policy_deny,
+    bench_policy_ask,
+    bench_fileops_validate,
+    bench_fileops_read_write,
+    bench_sandbox_validate_command,
+    bench_dispatch_routing
+);
 criterion_main!(benches);

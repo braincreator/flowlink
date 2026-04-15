@@ -4,26 +4,64 @@ use serde::Serialize;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub enum ThreatLevel { Critical, High, Medium, #[allow(dead_code)] Low }
+pub enum ThreatLevel {
+    Critical,
+    High,
+    Medium,
+    #[allow(dead_code)]
+    Low,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Threat {
-    pub id: String, pub name: String, pub description: String,
-    pub level: ThreatLevel, pub snapshot: bool, pub timeout_secs: u64,
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub level: ThreatLevel,
+    pub snapshot: bool,
+    pub timeout_secs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 impl Threat {
     pub(crate) fn critical(id: &str, name: &str, desc: String) -> Self {
-        Self { id: id.into(), name: name.into(), description: desc,
-               level: ThreatLevel::Critical, snapshot: true, timeout_secs: 60 }
+        Self {
+            id: id.into(),
+            name: name.into(),
+            description: desc,
+            level: ThreatLevel::Critical,
+            snapshot: true,
+            timeout_secs: 60,
+            suggestion: None,
+        }
     }
     pub(crate) fn high(id: &str, name: &str, desc: String) -> Self {
-        Self { id: id.into(), name: name.into(), description: desc,
-               level: ThreatLevel::High, snapshot: false, timeout_secs: 60 }
+        Self {
+            id: id.into(),
+            name: name.into(),
+            description: desc,
+            level: ThreatLevel::High,
+            snapshot: false,
+            timeout_secs: 60,
+            suggestion: None,
+        }
     }
     pub(crate) fn warn(id: &str, name: &str, desc: String) -> Self {
-        Self { id: id.into(), name: name.into(), description: desc,
-               level: ThreatLevel::Medium, snapshot: false, timeout_secs: 0 }
+        Self {
+            id: id.into(),
+            name: name.into(),
+            description: desc,
+            level: ThreatLevel::Medium,
+            snapshot: false,
+            timeout_secs: 0,
+            suggestion: None,
+        }
+    }
+
+    pub(crate) fn with_suggestion(mut self, s: &str) -> Self {
+        self.suggestion = Some(s.into());
+        self
     }
 }
 
@@ -38,9 +76,17 @@ impl fmt::Display for ThreatLevel {
     }
 }
 
-pub struct Command { pub binary: String, pub args: Vec<String>, pub raw: String }
+pub struct Command {
+    pub binary: String,
+    pub args: Vec<String>,
+    pub raw: String,
+}
 
-pub struct AnalysisResult { pub threat: Option<Threat>, pub level_used: u8, pub safe: bool }
+pub struct AnalysisResult {
+    pub threat: Option<Threat>,
+    pub level_used: u8,
+    pub safe: bool,
+}
 
 #[allow(dead_code)]
 pub struct PolicyAwareResult {
@@ -50,7 +96,9 @@ pub struct PolicyAwareResult {
 }
 
 /// Extract basename from a path (e.g. "/usr/bin/rm" → "rm")
-pub fn bn(p: &str) -> &str { p.rsplit('/').next().unwrap_or(p) }
+pub fn bn(p: &str) -> &str {
+    p.rsplit('/').next().unwrap_or(p)
+}
 
 #[cfg(test)]
 mod tests {
@@ -110,7 +158,12 @@ mod tests {
 
     #[test]
     fn threat_level_roundtrip_via_value() {
-        for level in &[ThreatLevel::Critical, ThreatLevel::High, ThreatLevel::Medium, ThreatLevel::Low] {
+        for level in &[
+            ThreatLevel::Critical,
+            ThreatLevel::High,
+            ThreatLevel::Medium,
+            ThreatLevel::Low,
+        ] {
             let json = serde_json::to_string(level).unwrap();
             let val: serde_json::Value = serde_json::from_str(&json).unwrap();
             let expected = serde_json::to_value(level).unwrap();

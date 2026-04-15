@@ -1,9 +1,8 @@
 //! Daily usage persistence
 
 use anyhow::Result;
-use chrono::{Utc, NaiveDate};
+use chrono::{NaiveDate, Utc};
 use sqlx::PgPool;
-
 
 #[derive(Debug, Clone, Default)]
 pub struct UsageRow {
@@ -46,17 +45,23 @@ impl UsageRepo {
         let row: Option<(i64, i64, i64, i64, i64, i64)> = sqlx::query_as(
             "SELECT api_requests, tokens, active_agents, storage_bytes,
                     api_requests_total, tokens_total
-             FROM usage_daily WHERE account_id = $1 AND date = $2"
+             FROM usage_daily WHERE account_id = $1 AND date = $2",
         )
         .bind(account_id)
         .bind(today)
         .fetch_optional(pool)
         .await?;
 
-        Ok(row.map(|(a, t, ag, s, at, tt)| UsageRow {
-            api_requests: a, tokens: t, active_agents: ag,
-            storage_bytes: s, api_requests_total: at, tokens_total: tt,
-        }).unwrap_or_default())
+        Ok(row
+            .map(|(a, t, ag, s, at, tt)| UsageRow {
+                api_requests: a,
+                tokens: t,
+                active_agents: ag,
+                storage_bytes: s,
+                api_requests_total: at,
+                tokens_total: tt,
+            })
+            .unwrap_or_default())
     }
 
     /// Get usage for a date range
@@ -71,7 +76,7 @@ impl UsageRepo {
                     api_requests_total, tokens_total
              FROM usage_daily
              WHERE account_id = $1 AND date BETWEEN $2 AND $3
-             ORDER BY date"
+             ORDER BY date",
         )
         .bind(account_id)
         .bind(from)
@@ -79,12 +84,22 @@ impl UsageRepo {
         .fetch_all(pool)
         .await?;
 
-        Ok(rows.into_iter().map(|(d, a, t, ag, s, at, tt)| {
-            (d, UsageRow {
-                api_requests: a, tokens: t, active_agents: ag,
-                storage_bytes: s, api_requests_total: at, tokens_total: tt,
+        Ok(rows
+            .into_iter()
+            .map(|(d, a, t, ag, s, at, tt)| {
+                (
+                    d,
+                    UsageRow {
+                        api_requests: a,
+                        tokens: t,
+                        active_agents: ag,
+                        storage_bytes: s,
+                        api_requests_total: at,
+                        tokens_total: tt,
+                    },
+                )
             })
-        }).collect())
+            .collect())
     }
 
     /// Top accounts by API requests today (admin)
@@ -93,7 +108,7 @@ impl UsageRepo {
 
         let rows = sqlx::query_as::<_, (String, i64)>(
             "SELECT account_id, api_requests FROM usage_daily
-             WHERE date = $1 ORDER BY api_requests DESC LIMIT $2"
+             WHERE date = $1 ORDER BY api_requests DESC LIMIT $2",
         )
         .bind(today)
         .bind(limit)
@@ -104,11 +119,9 @@ impl UsageRepo {
 
     /// Reset daily counters (call at midnight)
     pub async fn reset_daily(pool: &PgPool) -> Result<u64> {
-        let result = sqlx::query(
-            "UPDATE usage_daily SET api_requests = 0, tokens = 0"
-        )
-        .execute(pool)
-        .await?;
+        let result = sqlx::query("UPDATE usage_daily SET api_requests = 0, tokens = 0")
+            .execute(pool)
+            .await?;
         Ok(result.rows_affected())
     }
 }
@@ -186,7 +199,11 @@ mod tests {
             "UPDATE usage_daily SET api_requests = 0, tokens = 0",
         ];
         for q in &queries {
-            assert!(q.contains("usage_daily"), "Query missing 'usage_daily' table: {}", q);
+            assert!(
+                q.contains("usage_daily"),
+                "Query missing 'usage_daily' table: {}",
+                q
+            );
         }
     }
 

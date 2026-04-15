@@ -31,7 +31,7 @@ impl Default for DockerBackupConfig {
     fn default() -> Self {
         Self {
             export_containers: true,
-            export_images: false, // Images can be large, off by default
+            export_images: false,  // Images can be large, off by default
             export_volumes: false, // Volume data can be very large
             export_networks: true,
             export_compose: true,
@@ -139,9 +139,13 @@ impl DockerBackupEngine {
         result.total_size_bytes = self.dir_size(output_dir).await;
         result.duration_ms = start.elapsed().as_millis() as u64;
 
-        info!("Docker backup complete: {} containers, {} images, {} networks, {} volumes",
-            result.containers_exported, result.images_exported, 
-            result.networks_exported, result.volumes_exported);
+        info!(
+            "Docker backup complete: {} containers, {} images, {} networks, {} volumes",
+            result.containers_exported,
+            result.images_exported,
+            result.networks_exported,
+            result.volumes_exported
+        );
 
         Ok(result)
     }
@@ -157,8 +161,11 @@ impl DockerBackupEngine {
             .context("Failed to list containers")?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let names: Vec<&str> = stdout.lines().filter(|l| !l.is_empty())
-            .filter(|name| self.should_include(name)).collect();
+        let names: Vec<&str> = stdout
+            .lines()
+            .filter(|l| !l.is_empty())
+            .filter(|name| self.should_include(name))
+            .collect();
 
         let mut count = 0u32;
         for name in &names {
@@ -200,12 +207,14 @@ impl DockerBackupEngine {
             .context("Failed to list images")?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let images: Vec<&str> = stdout.lines().filter(|l| !l.is_empty() && !l.contains("<none>")).collect();
+        let images: Vec<&str> = stdout
+            .lines()
+            .filter(|l| !l.is_empty() && !l.contains("<none>"))
+            .collect();
 
         let mut count = 0u32;
         for image in &images {
-            let filename = format!("image_{}.tar", 
-                image.replace(['/', ':', ' '], "_"));
+            let filename = format!("image_{}.tar", image.replace(['/', ':', ' '], "_"));
             let dest = output_dir.join(&filename);
 
             debug!("Saving image: {}", image);
@@ -221,7 +230,11 @@ impl DockerBackupEngine {
                     count += 1;
                 }
                 Ok(o) => {
-                    warn!("docker save failed for {}: {}", image, String::from_utf8_lossy(&o.stderr));
+                    warn!(
+                        "docker save failed for {}: {}",
+                        image,
+                        String::from_utf8_lossy(&o.stderr)
+                    );
                 }
                 Err(e) => {
                     warn!("docker save error for {}: {}", image, e);
@@ -287,7 +300,10 @@ impl DockerBackupEngine {
     /// Check if a container name should be included
     fn should_include(&self, name: &str) -> bool {
         if !self.config.include_patterns.is_empty() {
-            let matches_include = self.config.include_patterns.iter()
+            let matches_include = self
+                .config
+                .include_patterns
+                .iter()
                 .any(|p| name.contains(p));
             if !matches_include {
                 return false;
@@ -295,7 +311,10 @@ impl DockerBackupEngine {
         }
 
         if !self.config.exclude_patterns.is_empty() {
-            let matches_exclude = self.config.exclude_patterns.iter()
+            let matches_exclude = self
+                .config
+                .exclude_patterns
+                .iter()
                 .any(|p| name.contains(p));
             if matches_exclude {
                 return false;

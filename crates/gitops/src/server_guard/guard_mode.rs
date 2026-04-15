@@ -222,7 +222,12 @@ mod tests {
         ks.pause("test reason");
         assert!(ks.is_paused());
         assert!(!ks.is_emergency());
-        assert_eq!(ks.mode(), GuardMode::Paused { reason: "test reason".into() });
+        assert_eq!(
+            ks.mode(),
+            GuardMode::Paused {
+                reason: "test reason".into()
+            }
+        );
 
         ks.resume();
         assert!(!ks.is_paused());
@@ -235,7 +240,12 @@ mod tests {
         ks.emergency("critical alert");
         assert!(ks.is_paused());
         assert!(ks.is_emergency());
-        assert_eq!(ks.mode(), GuardMode::Emergency { reason: "critical alert".into() });
+        assert_eq!(
+            ks.mode(),
+            GuardMode::Emergency {
+                reason: "critical alert".into()
+            }
+        );
 
         ks.resume();
         assert!(!ks.is_emergency());

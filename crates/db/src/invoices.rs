@@ -5,7 +5,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-
 #[derive(Debug, Clone, sqlx::FromRow, Serialize, Deserialize)]
 pub struct InvoiceRow {
     pub id: String,
@@ -49,7 +48,7 @@ impl InvoiceRepo {
         sqlx::query(
             "INSERT INTO invoices (id, account_id, number, status, subtotal_kopecks,
              tax_kopecks, total_kopecks, currency, payment_method, due_at, notes)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(&invoice.id)
         .bind(&invoice.account_id)
@@ -69,7 +68,7 @@ impl InvoiceRepo {
             sqlx::query(
                 "INSERT INTO invoice_items (invoice_id, description, quantity,
                  unit_price_kopecks, total_kopecks, sort_order)
-                 VALUES ($1, $2, $3, $4, $5, $6)"
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(&item.invoice_id)
             .bind(&item.description)
@@ -87,19 +86,17 @@ impl InvoiceRepo {
 
     /// Get invoice by ID
     pub async fn get(pool: &PgPool, id: &str) -> Result<Option<InvoiceRow>> {
-        let row = sqlx::query_as::<_, InvoiceRow>(
-            "SELECT * FROM invoices WHERE id = $1"
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+        let row = sqlx::query_as::<_, InvoiceRow>("SELECT * FROM invoices WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
         Ok(row)
     }
 
     /// List invoices for an account
     pub async fn list_for_account(pool: &PgPool, account_id: &str) -> Result<Vec<InvoiceRow>> {
         let rows = sqlx::query_as::<_, InvoiceRow>(
-            "SELECT * FROM invoices WHERE account_id = $1 ORDER BY created_at DESC"
+            "SELECT * FROM invoices WHERE account_id = $1 ORDER BY created_at DESC",
         )
         .bind(account_id)
         .fetch_all(pool)
@@ -110,7 +107,7 @@ impl InvoiceRepo {
     /// Get invoice items
     pub async fn get_items(pool: &PgPool, invoice_id: &str) -> Result<Vec<InvoiceItemRow>> {
         let rows = sqlx::query_as::<_, InvoiceItemRow>(
-            "SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY sort_order"
+            "SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY sort_order",
         )
         .bind(invoice_id)
         .fetch_all(pool)
@@ -120,7 +117,11 @@ impl InvoiceRepo {
 
     /// Update invoice status
     pub async fn update_status(pool: &PgPool, id: &str, status: &str) -> Result<()> {
-        let paid_at = if status == "paid" { "paid_at = NOW()," } else { "" };
+        let paid_at = if status == "paid" {
+            "paid_at = NOW(),"
+        } else {
+            ""
+        };
 
         sqlx::query(&format!(
             "UPDATE invoices SET status = $1, {paid_at} payment_method = COALESCE(payment_method, $2)
@@ -149,7 +150,7 @@ impl InvoiceRepo {
     /// List pending invoices
     pub async fn list_pending(pool: &PgPool) -> Result<Vec<InvoiceRow>> {
         let rows = sqlx::query_as::<_, InvoiceRow>(
-            "SELECT * FROM invoices WHERE status = 'pending' ORDER BY due_at"
+            "SELECT * FROM invoices WHERE status = 'pending' ORDER BY due_at",
         )
         .fetch_all(pool)
         .await?;
@@ -159,7 +160,7 @@ impl InvoiceRepo {
     /// List overdue invoices
     pub async fn list_overdue(pool: &PgPool) -> Result<Vec<InvoiceRow>> {
         let rows = sqlx::query_as::<_, InvoiceRow>(
-            "SELECT * FROM invoices WHERE status = 'pending' AND due_at < NOW()"
+            "SELECT * FROM invoices WHERE status = 'pending' AND due_at < NOW()",
         )
         .fetch_all(pool)
         .await?;
@@ -169,7 +170,7 @@ impl InvoiceRepo {
     /// Total revenue (sum of paid invoices)
     pub async fn total_revenue(pool: &PgPool) -> Result<i64> {
         let total: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(total_kopecks), 0) FROM invoices WHERE status = 'paid'"
+            "SELECT COALESCE(SUM(total_kopecks), 0) FROM invoices WHERE status = 'paid'",
         )
         .fetch_one(pool)
         .await?;
@@ -180,7 +181,7 @@ impl InvoiceRepo {
     pub async fn account_revenue(pool: &PgPool, account_id: &str) -> Result<i64> {
         let total: i64 = sqlx::query_scalar(
             "SELECT COALESCE(SUM(total_kopecks), 0) FROM invoices
-             WHERE account_id = $1 AND status = 'paid'"
+             WHERE account_id = $1 AND status = 'paid'",
         )
         .bind(account_id)
         .fetch_one(pool)
@@ -190,11 +191,9 @@ impl InvoiceRepo {
 
     /// Generate next invoice number
     pub async fn next_number(pool: &PgPool) -> Result<String> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM invoices"
-        )
-        .fetch_one(pool)
-        .await?;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM invoices")
+            .fetch_one(pool)
+            .await?;
         Ok(format!("INV-{:04}", count + 1))
     }
 }
@@ -351,7 +350,11 @@ mod tests {
             "SELECT COUNT(*) FROM invoices",
         ];
         for q in &queries {
-            assert!(q.contains("invoices"), "Query missing 'invoices' table: {}", q);
+            assert!(
+                q.contains("invoices"),
+                "Query missing 'invoices' table: {}",
+                q
+            );
         }
     }
 
@@ -362,7 +365,11 @@ mod tests {
             "SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY sort_order",
         ];
         for q in &queries {
-            assert!(q.contains("invoice_items"), "Query missing 'invoice_items' table: {}", q);
+            assert!(
+                q.contains("invoice_items"),
+                "Query missing 'invoice_items' table: {}",
+                q
+            );
         }
     }
 
@@ -388,7 +395,11 @@ mod tests {
     fn update_status_paid_sets_paid_at_clause() {
         // The update_status method conditionally adds paid_at = NOW()
         let status = "paid";
-        let paid_at = if status == "paid" { "paid_at = NOW()," } else { "" };
+        let paid_at = if status == "paid" {
+            "paid_at = NOW(),"
+        } else {
+            ""
+        };
         let sql = format!(
             "UPDATE invoices SET status = $1, {paid_at} payment_method = COALESCE(payment_method, $2)
              WHERE id = $3"
@@ -399,7 +410,11 @@ mod tests {
     #[test]
     fn update_status_non_paid_no_paid_at_clause() {
         let status = "cancelled";
-        let paid_at = if status == "paid" { "paid_at = NOW()," } else { "" };
+        let paid_at = if status == "paid" {
+            "paid_at = NOW(),"
+        } else {
+            ""
+        };
         let sql = format!(
             "UPDATE invoices SET status = $1, {paid_at} payment_method = COALESCE(payment_method, $2)
              WHERE id = $3"

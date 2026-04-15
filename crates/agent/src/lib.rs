@@ -1,20 +1,20 @@
 // FlowLink Agent — connects to relay, executes commands, manages lifecycle
 // Port of internal/agent/*.go
 
-pub mod executor;
-pub mod session_recorder;
-pub mod policy;
-pub mod connection;
 pub mod approval;
-pub mod dispatch;
-pub mod fileops;
-pub mod backup;
-pub mod skills;
-pub mod sandbox;
-pub mod killswitch;
-pub mod autonomous;
-pub mod remote_llm;
 pub mod audit_log;
+pub mod autonomous;
+pub mod backup;
+pub mod connection;
+pub mod dispatch;
+pub mod executor;
+pub mod fileops;
+pub mod killswitch;
+pub mod policy;
+pub mod remote_llm;
+pub mod sandbox;
+pub mod session_recorder;
+pub mod skills;
 pub mod tls;
 
 use flowlink_core::config::AgentConfig;
@@ -83,9 +83,7 @@ impl Agent {
             self.config.backup.max_snapshots,
             self.config.backup.retention_days,
         );
-        let skill_mgr = skills::SkillManager::new(
-            &self.config.work_dir,
-        )?;
+        let skill_mgr = skills::SkillManager::new(&self.config.work_dir)?;
         let sandbox = sandbox::Sandbox::new(
             self.config.sandbox.allowed_dirs.clone(),
             self.config.sandbox.blocked_patterns.clone(),

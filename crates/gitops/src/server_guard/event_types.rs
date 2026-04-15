@@ -136,44 +136,94 @@ impl GuardEvent {
     }
 
     /// Convenience: create a process-caught event from kernel
-    pub fn process_caught(pid: u32, uid: u32, comm: String, args: String, already_frozen: bool) -> Self {
+    pub fn process_caught(
+        pid: u32,
+        uid: u32,
+        comm: String,
+        args: String,
+        already_frozen: bool,
+    ) -> Self {
         Self::new(
             EventSource::Kernel,
             EventDetail::ProcessCaught {
-                pid, uid, comm, args, already_frozen,
+                pid,
+                uid,
+                comm,
+                args,
+                already_frozen,
             },
         )
     }
 
     /// Convenience: create a file-change event
-    pub fn file_change(path: PathBuf, kind: String, current_hash: Option<String>, baseline_hash: Option<String>) -> Self {
+    pub fn file_change(
+        path: PathBuf,
+        kind: String,
+        current_hash: Option<String>,
+        baseline_hash: Option<String>,
+    ) -> Self {
         Self::new(
             EventSource::FileSystem,
-            EventDetail::FileChange { path, kind, current_hash, baseline_hash },
+            EventDetail::FileChange {
+                path,
+                kind,
+                current_hash,
+                baseline_hash,
+            },
         )
     }
 
     /// Convenience: create a docker event
-    pub fn docker_event(action: String, container_id: Option<String>, container_name: Option<String>, image: Option<String>) -> Self {
+    pub fn docker_event(
+        action: String,
+        container_id: Option<String>,
+        container_name: Option<String>,
+        image: Option<String>,
+    ) -> Self {
         Self::new(
             EventSource::Docker,
-            EventDetail::DockerEvent { action, container_id, container_name, image },
+            EventDetail::DockerEvent {
+                action,
+                container_id,
+                container_name,
+                image,
+            },
         )
     }
 
     /// Convenience: create a canary trigger event
-    pub fn canary_triggered(token_path: String, accessor: String, accessor_uid: u32, access_type: String, risk: String) -> Self {
+    pub fn canary_triggered(
+        token_path: String,
+        accessor: String,
+        accessor_uid: u32,
+        access_type: String,
+        risk: String,
+    ) -> Self {
         Self::new(
             EventSource::Canary,
-            EventDetail::CanaryTriggered { token_path, accessor, accessor_uid, access_type, risk },
+            EventDetail::CanaryTriggered {
+                token_path,
+                accessor,
+                accessor_uid,
+                access_type,
+                risk,
+            },
         )
     }
 
     /// Convenience: create a state drift event
-    pub fn state_drift(component: String, description: String, diff: HashMap<String, String>) -> Self {
+    pub fn state_drift(
+        component: String,
+        description: String,
+        diff: HashMap<String, String>,
+    ) -> Self {
         Self::new(
             EventSource::StateCollector,
-            EventDetail::StateDrift { component, description, diff },
+            EventDetail::StateDrift {
+                component,
+                description,
+                diff,
+            },
         )
     }
 
@@ -193,19 +243,37 @@ impl GuardEvent {
     /// Get a short human-readable description
     pub fn summary(&self) -> String {
         match &self.detail {
-            EventDetail::ProcessCaught { pid, comm, args, .. } => {
+            EventDetail::ProcessCaught {
+                pid, comm, args, ..
+            } => {
                 format!("ProcessCaught pid={} {} {}", pid, comm, args)
             }
             EventDetail::FileChange { path, kind, .. } => {
                 format!("FileChange {} {}", kind, path.display())
             }
-            EventDetail::DockerEvent { action, container_name, .. } => {
-                format!("DockerEvent {} {}", action, container_name.as_deref().unwrap_or("?"))
+            EventDetail::DockerEvent {
+                action,
+                container_name,
+                ..
+            } => {
+                format!(
+                    "DockerEvent {} {}",
+                    action,
+                    container_name.as_deref().unwrap_or("?")
+                )
             }
-            EventDetail::CanaryTriggered { token_path, accessor, .. } => {
+            EventDetail::CanaryTriggered {
+                token_path,
+                accessor,
+                ..
+            } => {
                 format!("CanaryTriggered {} by {}", token_path, accessor)
             }
-            EventDetail::StateDrift { component, description, .. } => {
+            EventDetail::StateDrift {
+                component,
+                description,
+                ..
+            } => {
                 format!("StateDrift[{}] {}", component, description)
             }
         }
@@ -239,8 +307,8 @@ impl GuardAlert {
             (event.timestamp_nanos / 1_000_000_000) as i64,
             (event.timestamp_nanos % 1_000_000_000) as u32,
         )
-            .map(|dt| dt.to_rfc3339())
-            .unwrap_or_default();
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_default();
 
         Self {
             id: event.id.clone(),
@@ -298,7 +366,11 @@ mod tests {
     #[test]
     fn test_guard_event_canary() {
         let event = GuardEvent::canary_triggered(
-            "/etc/shadow.bak".into(), "hacker".into(), 1001, "read".into(), "high".into(),
+            "/etc/shadow.bak".into(),
+            "hacker".into(),
+            1001,
+            "read".into(),
+            "high".into(),
         );
         assert_eq!(event.source, EventSource::Canary);
         assert!(event.summary().contains("hacker"));

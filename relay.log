@@ -1,0 +1,6 @@
+time=2026-04-15T13:21:08.348+03:00 level=INFO msg="запуск flowlink relay" version=4f549cf-dirty wss=127.0.0.1:8444 api="" tls_mode="" tls_domain="" llm_backends=0
+time=2026-04-15T13:21:08.352+03:00 level=INFO msg="реестр загружен" clients=1159 agents=269
+time=2026-04-15T13:21:08.353+03:00 level=WARN msg="LLM backends не настроены — автономные задачи (L2) не будут работать"
+time=2026-04-15T13:21:08.353+03:00 level=INFO msg="запуск реле-сервера" wss=127.0.0.1:8444 api="" tls_mode=""
+time=2026-04-15T13:21:08.353+03:00 level=INFO msg="HTTP API запущен" addr=""
+time=2026-04-15T13:21:08.353+03:00 level=INFO msg="WSS сервер запущен (без TLS)" addr=127.0.0.1:8444

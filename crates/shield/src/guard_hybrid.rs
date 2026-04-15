@@ -1,11 +1,11 @@
 // FlowLink Shield — Hybrid Guard
 // Combines kernel-level eBPF L1 interception with userspace L2/L3 analysis.
 
-use std::sync::Arc;
 use anyhow::Result;
 use log::{info, warn};
+use std::sync::Arc;
 
-use crate::ebpf_kernel::{KernelEvent, DangerousPattern, default_patterns};
+use crate::ebpf_kernel::{default_patterns, DangerousPattern, KernelEvent};
 #[cfg(target_os = "macos")]
 use crate::es_monitor::EsConfig;
 use crate::guard::ShieldGuard;
@@ -61,7 +61,11 @@ impl HybridGuard {
     pub fn new(guard: ShieldGuard, config: HybridConfig) -> Self {
         let backend = Self::detect_backend();
         info!("🛡 HybridGuard: detected backend: {:?}", backend);
-        Self { inner: guard, config, backend }
+        Self {
+            inner: guard,
+            config,
+            backend,
+        }
     }
 
     /// Detect the best available kernel-level backend
@@ -88,23 +92,19 @@ impl HybridGuard {
     /// 1. Loads the eBPF program and receives kernel events
     /// 2. Runs L2/L3 analysis on caught events
     /// 3. Releases false positives or forwards to the approval flow
-    pub async fn start(
-        self: Arc<Self>,
-    ) -> Result<HybridHandle> {
+    pub async fn start(self: Arc<Self>) -> Result<HybridHandle> {
         if !self.config.kernel_l1 {
             info!("🔄 HybridGuard: kernel L1 disabled, running in userspace-only mode");
             return Ok(HybridHandle { _task: None });
         }
 
         match self.backend {
-            KernelBackend::Es => {
-                self.start_es().await
-            }
-            KernelBackend::Ebpf => {
-                self.start_ebpf().await
-            }
+            KernelBackend::Es => self.start_es().await,
+            KernelBackend::Ebpf => self.start_ebpf().await,
             KernelBackend::Simulated => {
-                info!("🔄 HybridGuard: no kernel backend available, running in userspace-only mode");
+                info!(
+                    "🔄 HybridGuard: no kernel backend available, running in userspace-only mode"
+                );
                 Ok(HybridHandle { _task: None })
             }
         }
@@ -116,14 +116,18 @@ impl HybridGuard {
         let (monitor, mut rx) = EbpfKernelMonitor::load(
             self.config.patterns.clone(),
             self.inner.allowed_uids().to_vec(),
-        ).await?;
+        )
+        .await?;
 
         info!("🛡 HybridGuard: eBPF kernel monitor loaded, consuming events");
 
         let task = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let Err(e) = handle_kernel_event(&guard, &event).await {
-                    error!("HybridGuard: error handling kernel event pid={}: {}", event.pid, e);
+                    error!(
+                        "HybridGuard: error handling kernel event pid={}: {}",
+                        event.pid, e
+                    );
                 }
             }
             warn!("HybridGuard: kernel event stream ended");
@@ -210,7 +214,10 @@ async fn handle_kernel_event(guard: &HybridGuard, event: &KernelEvent) -> Result
         }
         crate::guard::InterceptResult::Intercepted { pid, threat, .. } => {
             // Left in pending state — approval will come via resolve_approval
-            info!("⚠️ HybridGuard: pid={} intercepted, pending approval: {}", pid, threat);
+            info!(
+                "⚠️ HybridGuard: pid={} intercepted, pending approval: {}",
+                pid, threat
+            );
         }
     }
 
@@ -236,8 +243,8 @@ mod tests {
     use crate::audit::AuditLog;
     use crate::notifier::Notifier;
     use crate::snapshot::SnapshotBackend;
-    use tempfile::NamedTempFile;
     use std::sync::Arc;
+    use tempfile::NamedTempFile;
     use tokio::sync::RwLock;
 
     fn make_shield_guard() -> ShieldGuard {
@@ -245,7 +252,10 @@ mod tests {
         let audit = Arc::new(RwLock::new(AuditLog::open(tmp.path()).unwrap()));
         let notifier = Notifier::new(None);
         ShieldGuard::new(
-            crate::engine::AnalysisEngine { enable_ast: false, enable_interpreter: false },
+            crate::engine::AnalysisEngine {
+                enable_ast: false,
+                enable_interpreter: false,
+            },
             SnapshotBackend::None,
             audit,
             notifier,
@@ -451,7 +461,9 @@ mod tests {
     #[test]
     fn kernel_event_debug() {
         let event = KernelEvent {
-            pid: 1, ppid: 0, uid: 0,
+            pid: 1,
+            ppid: 0,
+            uid: 0,
             comm: "bash".into(),
             args: "-c 'rm -rf /'".into(),
             signal_sent: false,

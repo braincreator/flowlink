@@ -6,20 +6,19 @@
 /// 4. Sends a connect message, verifies server response
 /// 5. Receives a connected acknowledgement
 /// 6. Clean disconnect
-
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
 use flowlink_relay::approval::ApprovalQueue;
 use flowlink_relay::auth::{AuthManager, Client};
+use flowlink_relay::control_plane::ControlPlaneState;
 use flowlink_relay::devices::DeviceManager;
 use flowlink_relay::eventbus::EventBus;
 use flowlink_relay::handler::RelayHandler;
 use flowlink_relay::pool::AgentPool;
 use flowlink_relay::registry::Registry;
 use flowlink_relay::server::{build_router, AppState, ShieldAlertManager};
-use flowlink_relay::control_plane::ControlPlaneState;
 use futures_util::{SinkExt, StreamExt};
 use tokio_rustls::TlsAcceptor;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
@@ -44,8 +43,15 @@ fn make_state(tmp: &std::path::Path) -> AppState {
     let auth = Arc::new(AuthManager::new());
     let approvals = Arc::new(ApprovalQueue::new());
     let registry = Arc::new(Registry::new(tmp).unwrap());
-    let handler = Arc::new(RelayHandler::new(pool.clone(), auth.clone(), eventbus.clone(), approvals.clone()));
-    let device_manager = Arc::new(DeviceManager::new(flowlink_relay::devices::PushConfig::default()));
+    let handler = Arc::new(RelayHandler::new(
+        pool.clone(),
+        auth.clone(),
+        eventbus.clone(),
+        approvals.clone(),
+    ));
+    let device_manager = Arc::new(DeviceManager::new(
+        flowlink_relay::devices::PushConfig::default(),
+    ));
 
     auth.register_client(Client {
         client_id: "test-client".into(),
@@ -144,9 +150,11 @@ async fn spawn_wss_relay(state: AppState) -> (String, tokio::task::JoinHandle<()
                     async move { app.oneshot(req).await }
                 });
 
-                if let Err(e) = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
-                    .serve_connection_with_upgrades(io, svc)
-                    .await
+                if let Err(e) = hyper_util::server::conn::auto::Builder::new(
+                    hyper_util::rt::TokioExecutor::new(),
+                )
+                .serve_connection_with_upgrades(io, svc)
+                .await
                 {
                     eprintln!("WSS serve error from {peer_addr}: {e}");
                 }

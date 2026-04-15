@@ -16,25 +16,86 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use tracing::{debug, info};
 
-use crate::config::{GlobalRateLimit, RateLimitConfig};
 #[cfg(test)]
 use crate::config::CircuitBreakerConfig;
-use crate::types::{ActionTier, BreakerState, DenialFeedback, ExceedAction, RateBudget, RiskLevel, ToolRateLimit};
+use crate::config::{GlobalRateLimit, RateLimitConfig};
+use crate::types::{
+    ActionTier, BreakerState, DenialFeedback, ExceedAction, RateBudget, RiskLevel, ToolRateLimit,
+};
 
-use types::{CircuitBreakerInternal, ExponentialBackoffState, GlobalTracker, TierRateTracker, TempoState, ToolRateTracker};
+use types::{
+    CircuitBreakerInternal, ExponentialBackoffState, GlobalTracker, TempoState, TierRateTracker,
+    ToolRateTracker,
+};
 
 const DEFAULT_TOOL_LIMITS: &[(&str, ToolRateLimit)] = &[
-    ("rm", ToolRateLimit { max_calls: 10, window_seconds: 60, on_exceed: ExceedAction::Deny }),
-    ("docker", ToolRateLimit { max_calls: 20, window_seconds: 60, on_exceed: ExceedAction::Escalate }),
-    ("apt", ToolRateLimit { max_calls: 5, window_seconds: 300, on_exceed: ExceedAction::Escalate }),
-    ("systemctl", ToolRateLimit { max_calls: 15, window_seconds: 60, on_exceed: ExceedAction::Escalate }),
-    ("cat", ToolRateLimit { max_calls: 200, window_seconds: 60, on_exceed: ExceedAction::ReadOnly }),
+    (
+        "rm",
+        ToolRateLimit {
+            max_calls: 10,
+            window_seconds: 60,
+            on_exceed: ExceedAction::Deny,
+        },
+    ),
+    (
+        "docker",
+        ToolRateLimit {
+            max_calls: 20,
+            window_seconds: 60,
+            on_exceed: ExceedAction::Escalate,
+        },
+    ),
+    (
+        "apt",
+        ToolRateLimit {
+            max_calls: 5,
+            window_seconds: 300,
+            on_exceed: ExceedAction::Escalate,
+        },
+    ),
+    (
+        "systemctl",
+        ToolRateLimit {
+            max_calls: 15,
+            window_seconds: 60,
+            on_exceed: ExceedAction::Escalate,
+        },
+    ),
+    (
+        "cat",
+        ToolRateLimit {
+            max_calls: 200,
+            window_seconds: 60,
+            on_exceed: ExceedAction::ReadOnly,
+        },
+    ),
 ];
 
 const DEFAULT_TIER_LIMITS: &[(&str, ToolRateLimit)] = &[
-    ("ReadOnly", ToolRateLimit { max_calls: 200, window_seconds: 60, on_exceed: ExceedAction::ReadOnly }),
-    ("Destructive", ToolRateLimit { max_calls: 30, window_seconds: 60, on_exceed: ExceedAction::Deny }),
-    ("Network", ToolRateLimit { max_calls: 10, window_seconds: 60, on_exceed: ExceedAction::Escalate }),
+    (
+        "ReadOnly",
+        ToolRateLimit {
+            max_calls: 200,
+            window_seconds: 60,
+            on_exceed: ExceedAction::ReadOnly,
+        },
+    ),
+    (
+        "Destructive",
+        ToolRateLimit {
+            max_calls: 30,
+            window_seconds: 60,
+            on_exceed: ExceedAction::Deny,
+        },
+    ),
+    (
+        "Network",
+        ToolRateLimit {
+            max_calls: 10,
+            window_seconds: 60,
+            on_exceed: ExceedAction::Escalate,
+        },
+    ),
 ];
 
 #[allow(dead_code)]
@@ -59,7 +120,9 @@ impl TempoController {
             global_tracker: GlobalTracker::new(config.global_limit),
             backoff_state: ExponentialBackoffState::default(),
         };
-        Self { inner: Arc::new(Mutex::new(inner)) }
+        Self {
+            inner: Arc::new(Mutex::new(inner)),
+        }
     }
 
     pub fn with_defaults() -> Self {
@@ -86,7 +149,10 @@ impl TempoController {
             let elapsed: Duration = (Utc::now() - since).to_std().unwrap_or_default();
             if elapsed < Duration::from_secs(state.config.circuit_breaker.open_duration_seconds) {
                 return Err(DenialFeedback {
-                    reason: format!("Circuit breaker is open. Time since last failure: {:?}", elapsed),
+                    reason: format!(
+                        "Circuit breaker is open. Time since last failure: {:?}",
+                        elapsed
+                    ),
                     risk_level: RiskLevel::Critical,
                     what_would_be_needed: "Wait for circuit breaker to recover".to_string(),
                     remaining_budget: None,
@@ -101,8 +167,13 @@ impl TempoController {
                 let elapsed = now.duration_since(last_failure);
                 if elapsed < state.backoff_state.current_backoff_delay {
                     return Err(DenialFeedback {
-                        reason: format!("Backoff active for {:?} more.",
-                            state.backoff_state.current_backoff_delay.saturating_sub(elapsed)),
+                        reason: format!(
+                            "Backoff active for {:?} more.",
+                            state
+                                .backoff_state
+                                .current_backoff_delay
+                                .saturating_sub(elapsed)
+                        ),
                         risk_level: RiskLevel::High,
                         what_would_be_needed: "Wait for backoff to expire".to_string(),
                         remaining_budget: None,
@@ -121,10 +192,15 @@ impl TempoController {
         if global_result.is_err() {
             let global_count = state.global_tracker.count_in_window();
             return Err(DenialFeedback {
-                reason: format!("Global rate limit exceeded: {} calls in last {}s (max: {})",
-                    global_count, global_limit.window_seconds, global_limit.max_calls),
+                reason: format!(
+                    "Global rate limit exceeded: {} calls in last {}s (max: {})",
+                    global_count, global_limit.window_seconds, global_limit.max_calls
+                ),
                 risk_level: RiskLevel::Medium,
-                what_would_be_needed: format!("Wait {} seconds for reset.", global_limit.window_seconds),
+                what_would_be_needed: format!(
+                    "Wait {} seconds for reset.",
+                    global_limit.window_seconds
+                ),
                 remaining_budget: Some(RateBudget {
                     tool_remaining: 0,
                     tool_reset_in_seconds: global_limit.window_seconds as u64,
@@ -136,20 +212,36 @@ impl TempoController {
         }
 
         // Check tool rate
-        let tool_limit_config = DEFAULT_TOOL_LIMITS.iter()
+        let tool_limit_config = DEFAULT_TOOL_LIMITS
+            .iter()
             .find(|(name, _)| *name == tool)
             .map(|(_, limit)| limit.clone())
-            .unwrap_or_else(|| ToolRateLimit { max_calls: 100, window_seconds: 60, on_exceed: ExceedAction::Escalate });
-        let tool_tracker = state.tool_trackers.entry(tool.to_string()).or_insert_with(|| ToolRateTracker::new(tool_limit_config.clone()));
+            .unwrap_or_else(|| ToolRateLimit {
+                max_calls: 100,
+                window_seconds: 60,
+                on_exceed: ExceedAction::Escalate,
+            });
+        let tool_tracker = state
+            .tool_trackers
+            .entry(tool.to_string())
+            .or_insert_with(|| ToolRateTracker::new(tool_limit_config.clone()));
         let tool_result = tool_tracker.check(now);
         if tool_result.is_err() {
             let tool_count = tool_tracker.count_in_window();
             let tool_remaining = tool_tracker.limit.max_calls.saturating_sub(tool_count);
             return Err(DenialFeedback {
-                reason: format!("Rate limit exceeded for '{}': {} calls in last {}s (max: {})",
-                    tool, tool_count, tool_tracker.limit.window_seconds, tool_tracker.limit.max_calls),
+                reason: format!(
+                    "Rate limit exceeded for '{}': {} calls in last {}s (max: {})",
+                    tool,
+                    tool_count,
+                    tool_tracker.limit.window_seconds,
+                    tool_tracker.limit.max_calls
+                ),
                 risk_level: RiskLevel::Medium,
-                what_would_be_needed: format!("Wait {} seconds for reset", tool_tracker.limit.window_seconds),
+                what_would_be_needed: format!(
+                    "Wait {} seconds for reset",
+                    tool_tracker.limit.window_seconds
+                ),
                 remaining_budget: Some(RateBudget {
                     tool_remaining,
                     tool_reset_in_seconds: tool_remaining as u64,
@@ -163,18 +255,30 @@ impl TempoController {
         // Check tier rate
         let tier_tracker = state.tier_trackers.entry(tier.clone()).or_insert_with(|| {
             let tier_name = format!("{:?}", tier);
-            DEFAULT_TIER_LIMITS.iter()
+            DEFAULT_TIER_LIMITS
+                .iter()
                 .find(|(name, _)| *name == tier_name.as_str())
                 .map(|(_, limit)| TierRateTracker::new(limit.clone()))
-                .unwrap_or_else(|| TierRateTracker::new(ToolRateLimit { max_calls: 100, window_seconds: 60, on_exceed: ExceedAction::Escalate }))
+                .unwrap_or_else(|| {
+                    TierRateTracker::new(ToolRateLimit {
+                        max_calls: 100,
+                        window_seconds: 60,
+                        on_exceed: ExceedAction::Escalate,
+                    })
+                })
         });
         let tier_result = tier_tracker.check(now);
         if tier_result.is_err() {
             let tier_count = tier_tracker.count_in_window();
             let tier_remaining = tier_tracker.limit.max_calls.saturating_sub(tier_count);
             return Err(DenialFeedback {
-                reason: format!("Tier rate limit exceeded for {:?}: {} calls in last {}s (max: {})",
-                    tier, tier_count, tier_tracker.limit.window_seconds, tier_tracker.limit.max_calls),
+                reason: format!(
+                    "Tier rate limit exceeded for {:?}: {} calls in last {}s (max: {})",
+                    tier,
+                    tier_count,
+                    tier_tracker.limit.window_seconds,
+                    tier_tracker.limit.max_calls
+                ),
                 risk_level: RiskLevel::Medium,
                 what_would_be_needed: format!("Wait {} seconds", tier_remaining),
                 remaining_budget: Some(RateBudget {
@@ -216,27 +320,31 @@ impl TempoController {
 
     pub fn record_failure(&self) {
         let mut state = match self.inner.lock() {
-                Ok(s) => s,
-                Err(_) => {
-                    debug!("Failed to acquire lock for failure recording");
-                    return;
-                }
-            };
-
-        if !state.config.enabled {
+            Ok(s) => s,
+            Err(_) => {
+                debug!("Failed to acquire lock for failure recording");
                 return;
             }
+        };
+
+        if !state.config.enabled {
+            return;
+        }
 
         let now = Instant::now();
         state.breaker.record_failure(now);
 
         if state.config.exponential_backoff.enabled {
-            state.backoff_state.consecutive_violations = state.backoff_state.consecutive_violations.saturating_add(1);
+            state.backoff_state.consecutive_violations =
+                state.backoff_state.consecutive_violations.saturating_add(1);
             let base_delay = state.config.exponential_backoff.initial_delay_seconds;
             let multiplier = state.config.exponential_backoff.multiplier;
             let max_delay = state.config.exponential_backoff.max_delay_seconds;
 
-            let delay = (base_delay as f64 * multiplier.powi(state.backoff_state.consecutive_violations.saturating_sub(1) as i32)).min(max_delay as f64);
+            let delay = (base_delay as f64
+                * multiplier
+                    .powi(state.backoff_state.consecutive_violations.saturating_sub(1) as i32))
+            .min(max_delay as f64);
             state.backoff_state.current_backoff_delay = Duration::from_secs(delay as u64);
         }
 
@@ -264,10 +372,16 @@ impl TempoController {
         };
 
         let tool_remaining = if let Some(tracker) = state.tool_trackers.get(tool) {
-            tracker.limit.max_calls.saturating_sub(tracker.count_in_window())
+            tracker
+                .limit
+                .max_calls
+                .saturating_sub(tracker.count_in_window())
         } else {
             // Return configured limit or default
-            state.config.per_tool_limits.get(tool)
+            state
+                .config
+                .per_tool_limits
+                .get(tool)
                 .map(|l| l.max_calls)
                 .unwrap_or(100)
         };
@@ -286,7 +400,11 @@ impl TempoController {
         RateBudget {
             tool_remaining,
             tool_reset_in_seconds,
-            global_remaining: state.global_tracker.limit.max_calls.saturating_sub(state.global_tracker.count_in_window()),
+            global_remaining: state
+                .global_tracker
+                .limit
+                .max_calls
+                .saturating_sub(state.global_tracker.count_in_window()),
             breaker_state: state.breaker.get_state(),
         }
     }
@@ -312,18 +430,24 @@ mod tests {
 
     fn create_test_config() -> RateLimitConfig {
         let mut per_tool_limits = HashMap::new();
-        per_tool_limits.insert("rm".to_string(), ToolRateLimit {
-            max_calls: 10,
-            window_seconds: 60,
-            on_exceed: ExceedAction::Deny,
-        });
+        per_tool_limits.insert(
+            "rm".to_string(),
+            ToolRateLimit {
+                max_calls: 10,
+                window_seconds: 60,
+                on_exceed: ExceedAction::Deny,
+            },
+        );
 
         let mut per_tier_defaults = HashMap::new();
-        per_tier_defaults.insert(ActionTier::Destructive, ToolRateLimit {
-            max_calls: 30,
-            window_seconds: 60,
-            on_exceed: ExceedAction::Deny,
-        });
+        per_tier_defaults.insert(
+            ActionTier::Destructive,
+            ToolRateLimit {
+                max_calls: 30,
+                window_seconds: 60,
+                on_exceed: ExceedAction::Deny,
+            },
+        );
 
         RateLimitConfig {
             enabled: true,
@@ -350,7 +474,11 @@ mod tests {
         }
 
         let state = controller.get_breaker_state();
-        assert!(matches!(state, BreakerState::Open { .. }), "Expected Open after 10 failures, got {:?}", state);
+        assert!(
+            matches!(state, BreakerState::Open { .. }),
+            "Expected Open after 10 failures, got {:?}",
+            state
+        );
 
         let result = controller.check_rate("test_tool", ActionTier::Destructive);
         assert!(result.is_err());
@@ -362,7 +490,9 @@ mod tests {
         let controller = TempoController::new(config);
 
         for _ in 0..10 {
-            controller.check_rate("rm", ActionTier::Destructive).unwrap();
+            controller
+                .check_rate("rm", ActionTier::Destructive)
+                .unwrap();
         }
 
         let result = controller.check_rate("rm", ActionTier::Destructive);
@@ -394,7 +524,11 @@ mod tests {
         }
 
         let state = controller.get_breaker_state();
-        assert!(matches!(state, BreakerState::Closed | BreakerState::HalfOpen { .. }), "Expected Closed or HalfOpen, got {:?}", state);
+        assert!(
+            matches!(state, BreakerState::Closed | BreakerState::HalfOpen { .. }),
+            "Expected Closed or HalfOpen, got {:?}",
+            state
+        );
     }
 
     #[test]
@@ -407,7 +541,9 @@ mod tests {
         assert_eq!(budget.global_remaining, 300);
 
         for _ in 0..5 {
-            controller.check_rate("rm", ActionTier::Destructive).unwrap();
+            controller
+                .check_rate("rm", ActionTier::Destructive)
+                .unwrap();
         }
 
         let budget = controller.get_rate_budget("rm");
@@ -420,7 +556,9 @@ mod tests {
         let controller = TempoController::new(config);
 
         for _ in 0..30 {
-            controller.check_rate("test_tool", ActionTier::Destructive).unwrap();
+            controller
+                .check_rate("test_tool", ActionTier::Destructive)
+                .unwrap();
         }
 
         let result = controller.check_rate("test_tool", ActionTier::Destructive);
@@ -469,11 +607,17 @@ mod tests {
             controller.record_failure();
         }
 
-        assert!(matches!(controller.get_breaker_state(), BreakerState::Open { .. }));
+        assert!(matches!(
+            controller.get_breaker_state(),
+            BreakerState::Open { .. }
+        ));
 
         controller.reset();
 
-        assert!(matches!(controller.get_breaker_state(), BreakerState::Closed));
+        assert!(matches!(
+            controller.get_breaker_state(),
+            BreakerState::Closed
+        ));
     }
 
     #[test]
@@ -486,7 +630,10 @@ mod tests {
             controller.record_failure();
         }
 
-        assert!(matches!(controller.get_breaker_state(), BreakerState::Closed));
+        assert!(matches!(
+            controller.get_breaker_state(),
+            BreakerState::Closed
+        ));
 
         let result = controller.check_rate("rm", ActionTier::Destructive);
         assert!(result.is_ok());

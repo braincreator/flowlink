@@ -1,8 +1,8 @@
-use std::collections::HashSet;
-use std::path::Path;
 use anyhow::{Context, Result};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::Path;
 use tokio::fs;
 use tokio::process::Command;
 
@@ -55,11 +55,10 @@ impl CompressionType {
             "gzip" | "gz" => Some(CompressionType::Gzip),
             "zstd" | "zst" => Some(CompressionType::Zstd(3)),
             "none" => None,
-            s if s.starts_with("zstd:") => {
-                s.strip_prefix("zstd:")
-                    .and_then(|l| l.parse::<u8>().ok())
-                    .map(CompressionType::Zstd)
-            }
+            s if s.starts_with("zstd:") => s
+                .strip_prefix("zstd:")
+                .and_then(|l| l.parse::<u8>().ok())
+                .map(CompressionType::Zstd),
             _ => Some(CompressionType::Gzip), // default fallback
         }
     }
@@ -143,21 +142,23 @@ impl ContentStore {
 
     /// Initialize store directory
     pub async fn init(&self) -> Result<()> {
-        fs::create_dir_all(&self.store_dir).await
+        fs::create_dir_all(&self.store_dir)
+            .await
             .with_context(|| format!("Failed to create content store: {}", self.store_dir))?;
         Ok(())
     }
 
     /// Store a blob. Returns SHA256 hash. Skips if already exists.
     pub async fn store(&self, data: &[u8]) -> Result<String> {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(data);
         let hash = format!("{:x}", hasher.finalize());
 
         let path = self.blob_path(&hash);
         if !Path::new(&path).exists() {
-            fs::write(&path, data).await
+            fs::write(&path, data)
+                .await
                 .with_context(|| format!("Failed to write blob {}", &hash[..12]))?;
         }
 
@@ -170,7 +171,8 @@ impl ContentStore {
         if !Path::new(&path).exists() {
             anyhow::bail!("Blob not found: {}", &hash[..12]);
         }
-        fs::read(&path).await
+        fs::read(&path)
+            .await
             .with_context(|| format!("Failed to read blob {}", &hash[..12]))
     }
 
@@ -239,11 +241,7 @@ pub struct BackupManager {
 
 impl BackupManager {
     /// Create with full config
-    pub fn new(
-        backup_dir: String,
-        max_snapshots: u32,
-        retention_days: u32,
-    ) -> Self {
+    pub fn new(backup_dir: String, max_snapshots: u32, retention_days: u32) -> Self {
         let _content_dir = format!("{}/_blobs", backup_dir.trim_end_matches('/'));
         Self {
             backup_dir,
@@ -275,7 +273,11 @@ impl BackupManager {
             backup_dir,
             max_snapshots,
             retention_days,
-            max_storage_bytes: if max_storage_mb > 0 { max_storage_mb * 1024 * 1024 } else { 0 },
+            max_storage_bytes: if max_storage_mb > 0 {
+                max_storage_mb * 1024 * 1024
+            } else {
+                0
+            },
             deduplication,
             compression,
             content_store,
@@ -284,7 +286,8 @@ impl BackupManager {
 
     /// Ensure backup directory exists.
     async fn ensure_dir(&self) -> Result<()> {
-        fs::create_dir_all(&self.backup_dir).await
+        fs::create_dir_all(&self.backup_dir)
+            .await
             .with_context(|| format!("Failed to create backup dir: {}", self.backup_dir))?;
         if let Some(store) = &self.content_store {
             store.init().await?;
@@ -302,7 +305,14 @@ impl BackupManager {
 
     /// Create a tar backup of the given paths (full backup).
     pub async fn create(&self, label: &str, paths: Vec<String>) -> Result<SnapshotMeta> {
-        self.create_with_options(label, paths, BackupTrigger::Manual, BackupStrategy::Full, None).await
+        self.create_with_options(
+            label,
+            paths,
+            BackupTrigger::Manual,
+            BackupStrategy::Full,
+            None,
+        )
+        .await
     }
 
     /// Create backup with full options (trigger, strategy, parent).
@@ -356,8 +366,7 @@ impl BackupManager {
         for p in &actual_paths {
             cmd.arg(p);
         }
-        let output = cmd.output().await
-            .with_context(|| "Failed to run tar")?;
+        let output = cmd.output().await.with_context(|| "Failed to run tar")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("tar failed: {stderr}");
@@ -367,7 +376,8 @@ impl BackupManager {
         let checksum = self.sha256_file(&tar_path).await?;
 
         // File size
-        let metadata = fs::metadata(&tar_path).await
+        let metadata = fs::metadata(&tar_path)
+            .await
             .with_context(|| "Failed to stat backup file")?;
         let size_bytes = metadata.len();
 
@@ -397,18 +407,28 @@ impl BackupManager {
     }
 
     /// Create a diff backup against a parent snapshot
-    pub async fn create_diff(&self, parent_id: &str, label: &str, paths: Vec<String>) -> Result<SnapshotMeta> {
+    pub async fn create_diff(
+        &self,
+        parent_id: &str,
+        label: &str,
+        paths: Vec<String>,
+    ) -> Result<SnapshotMeta> {
         self.create_with_options(
             label,
             paths,
             BackupTrigger::Manual,
             BackupStrategy::Diff,
             Some(parent_id),
-        ).await
+        )
+        .await
     }
 
     /// Resolve which paths have changed since parent snapshot
-    async fn resolve_diff_paths(&self, parent_id: Option<&str>, paths: &[String]) -> Result<Vec<String>> {
+    async fn resolve_diff_paths(
+        &self,
+        parent_id: Option<&str>,
+        paths: &[String],
+    ) -> Result<Vec<String>> {
         let parent = match parent_id {
             Some(id) => self.load_meta(id).await.ok(),
             None => None,
@@ -495,10 +515,16 @@ impl BackupManager {
 
         let mut cmd = Command::new("tar");
         match meta.compression {
-            CompressionType::Gzip => { cmd.arg("xzf").arg(&tar_path); }
-            CompressionType::Zstd(_) => { cmd.args(["-I", "zstd", "-xf"]).arg(&tar_path); }
+            CompressionType::Gzip => {
+                cmd.arg("xzf").arg(&tar_path);
+            }
+            CompressionType::Zstd(_) => {
+                cmd.args(["-I", "zstd", "-xf"]).arg(&tar_path);
+            }
         }
-        let output = cmd.output().await
+        let output = cmd
+            .output()
+            .await
             .with_context(|| "Failed to run tar for restore")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -561,7 +587,11 @@ impl BackupManager {
             0
         };
 
-        let max_snapshots = if self.max_snapshots > 0 { self.max_snapshots } else { 0 };
+        let max_snapshots = if self.max_snapshots > 0 {
+            self.max_snapshots
+        } else {
+            0
+        };
         let max_bytes = self.max_storage_bytes;
 
         StorageUsage {
@@ -637,8 +667,12 @@ impl BackupManager {
         let mut removed_ids = HashSet::new();
         for meta in &to_remove {
             if removed_ids.insert(meta.id.clone()) {
-                info!("Evicting snapshot {} ({} bytes, age: {}s)",
-                    meta.id, meta.size_bytes, now - meta.created_at);
+                info!(
+                    "Evicting snapshot {} ({} bytes, age: {}s)",
+                    meta.id,
+                    meta.size_bytes,
+                    now - meta.created_at
+                );
                 if let Err(e) = self.delete(&meta.id).await {
                     warn!("Failed to evict snapshot {}: {}", meta.id, e);
                 }
@@ -653,7 +687,8 @@ impl BackupManager {
         if let Some(store) = &self.content_store {
             // Collect all referenced hashes from snapshots
             let snapshots = self.list().await.unwrap_or_default();
-            let referenced = snapshots.iter()
+            let referenced = snapshots
+                .iter()
                 .map(|s| s.checksum.clone())
                 .collect::<HashSet<String>>();
             return store.gc(&referenced).await;
@@ -667,8 +702,7 @@ impl BackupManager {
             anyhow::bail!("Snapshot not found: {id}");
         }
         let content = fs::read_to_string(&meta_path).await?;
-        serde_json::from_str(&content)
-            .with_context(|| "Failed to parse snapshot metadata")
+        serde_json::from_str(&content).with_context(|| "Failed to parse snapshot metadata")
     }
 
     async fn sha256_file(&self, path: &str) -> Result<String> {
@@ -693,17 +727,22 @@ impl BackupManager {
 
 fn uuid_v4_string() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
     let pid = std::process::id();
     let thread = std::thread::current().id();
     let raw = format!("{:016x}{:08x}{:?}", nanos, pid, thread);
     let hash = simple_hash(&raw);
-    format!("{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
+    format!(
+        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
         hash & 0xFFFFFFFF,
         (hash >> 32) & 0xFFFF,
         (hash >> 48) & 0xFFF,
         ((hash >> 60) & 0x0FFF) | 0x8000,
-        hash >> 72 & 0xFFFFFFFFFFFF)
+        hash >> 72 & 0xFFFFFFFFFFFF
+    )
 }
 
 fn simple_hash(s: &str) -> u128 {
@@ -725,7 +764,10 @@ mod tests {
         std::fs::write(src.path().join("test.txt"), "hello").unwrap();
 
         let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
-        let meta = mgr.create("test-backup", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        let meta = mgr
+            .create("test-backup", vec![src.path().to_str().unwrap().into()])
+            .await
+            .unwrap();
         assert!(!meta.id.is_empty());
         assert!(!meta.checksum.is_empty());
         assert!(meta.size_bytes > 0);
@@ -744,7 +786,10 @@ mod tests {
         std::fs::write(src.path().join("f.txt"), "data").unwrap();
 
         let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
-        let meta = mgr.create("del-test", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        let meta = mgr
+            .create("del-test", vec![src.path().to_str().unwrap().into()])
+            .await
+            .unwrap();
 
         mgr.delete(&meta.id).await.unwrap();
         let list = mgr.list().await.unwrap();
@@ -767,7 +812,10 @@ mod tests {
         std::fs::write(src.path().join("restore_test.txt"), "content").unwrap();
 
         let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
-        let meta = mgr.create("restore-test", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        let meta = mgr
+            .create("restore-test", vec![src.path().to_str().unwrap().into()])
+            .await
+            .unwrap();
 
         let orig = std::env::current_dir().unwrap();
         std::env::set_current_dir(restore_dir.path()).unwrap();
@@ -792,7 +840,12 @@ mod tests {
 
         let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 2, 30);
         for i in 0..4 {
-            mgr.create(&format!("snap-{i}"), vec![src.path().to_str().unwrap().into()]).await.unwrap();
+            mgr.create(
+                &format!("snap-{i}"),
+                vec![src.path().to_str().unwrap().into()],
+            )
+            .await
+            .unwrap();
         }
         let list = mgr.list().await.unwrap();
         assert!(list.len() <= 2);
@@ -805,7 +858,10 @@ mod tests {
         std::fs::write(src.path().join("ck.txt"), "checksum test").unwrap();
 
         let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
-        let meta = mgr.create("checksum-test", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        let meta = mgr
+            .create("checksum-test", vec![src.path().to_str().unwrap().into()])
+            .await
+            .unwrap();
 
         let loaded = mgr.load_meta(&meta.id).await.unwrap();
         assert_eq!(loaded.checksum, meta.checksum);
@@ -819,7 +875,9 @@ mod tests {
         std::fs::write(src.path().join("su.txt"), "storage test data").unwrap();
 
         let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
-        mgr.create("su-test", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        mgr.create("su-test", vec![src.path().to_str().unwrap().into()])
+            .await
+            .unwrap();
 
         let usage = mgr.storage_usage().await;
         assert!(usage.total_bytes > 0);
@@ -836,12 +894,15 @@ mod tests {
 
         let mgr = BackupManager::with_config(
             dir.path().to_str().unwrap().into(),
-            10, 30,
+            10,
+            30,
             100, // 100MB max
             false,
             CompressionType::Gzip,
         );
-        mgr.create("limit-test", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        mgr.create("limit-test", vec![src.path().to_str().unwrap().into()])
+            .await
+            .unwrap();
 
         let usage = mgr.storage_usage().await;
         assert!(usage.total_bytes > 0);
@@ -860,8 +921,9 @@ mod tests {
         // max 2 snapshots, 1MB limit — should evict oldest
         let mgr = BackupManager::with_config(
             dir.path().to_str().unwrap().into(),
-            2, 365,  // 2 max snapshots, long retention
-            1,       // 1MB storage limit — will trigger eviction after a few snapshots
+            2,
+            365, // 2 max snapshots, long retention
+            1,   // 1MB storage limit — will trigger eviction after a few snapshots
             false,
             CompressionType::Gzip,
         );
@@ -870,7 +932,12 @@ mod tests {
         for i in 0..5 {
             // Small sleep to ensure different timestamps
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            let _ = mgr.create(&format!("evict-{i}"), vec![src.path().to_str().unwrap().into()]).await;
+            let _ = mgr
+                .create(
+                    &format!("evict-{i}"),
+                    vec![src.path().to_str().unwrap().into()],
+                )
+                .await;
         }
 
         let list = mgr.list().await.unwrap();
@@ -888,14 +955,24 @@ mod tests {
 
         // Create initial full backup
         std::fs::write(&file_path, "initial content").unwrap();
-        let parent = mgr.create("parent", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        let parent = mgr
+            .create("parent", vec![src.path().to_str().unwrap().into()])
+            .await
+            .unwrap();
 
         // Wait then modify file (need >1s gap on APFS which has 1s mtime granularity)
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         std::fs::write(&file_path, "modified content - new data").unwrap();
 
         // Create diff backup
-        let diff = mgr.create_diff(&parent.id, "child", vec![src.path().to_str().unwrap().into()]).await.unwrap();
+        let diff = mgr
+            .create_diff(
+                &parent.id,
+                "child",
+                vec![src.path().to_str().unwrap().into()],
+            )
+            .await
+            .unwrap();
 
         assert_eq!(diff.parent_id, Some(parent.id));
         assert!(matches!(diff.strategy, BackupStrategy::Diff));
@@ -909,16 +986,19 @@ mod tests {
         std::fs::write(src.path().join("trig.txt"), "trigger test").unwrap();
 
         let mgr = BackupManager::new(dir.path().to_str().unwrap().into(), 10, 30);
-        let meta = mgr.create_with_options(
-            "pre-command",
-            vec![src.path().to_str().unwrap().into()],
-            BackupTrigger::PreCommand {
-                command: "rm -rf /data".to_string(),
-                risk_score: 9,
-            },
-            BackupStrategy::Smart,
-            None,
-        ).await.unwrap();
+        let meta = mgr
+            .create_with_options(
+                "pre-command",
+                vec![src.path().to_str().unwrap().into()],
+                BackupTrigger::PreCommand {
+                    command: "rm -rf /data".to_string(),
+                    risk_score: 9,
+                },
+                BackupStrategy::Smart,
+                None,
+            )
+            .await
+            .unwrap();
 
         assert!(matches!(meta.trigger, BackupTrigger::PreCommand { .. }));
         assert!(matches!(meta.strategy, BackupStrategy::Smart));
@@ -960,10 +1040,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_compression_type() {
-        assert_eq!(CompressionType::from_str_opt("gzip"), Some(CompressionType::Gzip));
-        assert_eq!(CompressionType::from_str_opt("gz"), Some(CompressionType::Gzip));
-        assert_eq!(CompressionType::from_str_opt("zstd"), Some(CompressionType::Zstd(3)));
-        assert_eq!(CompressionType::from_str_opt("zstd:8"), Some(CompressionType::Zstd(8)));
+        assert_eq!(
+            CompressionType::from_str_opt("gzip"),
+            Some(CompressionType::Gzip)
+        );
+        assert_eq!(
+            CompressionType::from_str_opt("gz"),
+            Some(CompressionType::Gzip)
+        );
+        assert_eq!(
+            CompressionType::from_str_opt("zstd"),
+            Some(CompressionType::Zstd(3))
+        );
+        assert_eq!(
+            CompressionType::from_str_opt("zstd:8"),
+            Some(CompressionType::Zstd(8))
+        );
         assert_eq!(CompressionType::Gzip.extension(), "tar.gz");
         assert_eq!(CompressionType::Zstd(5).extension(), "tar.zst");
     }

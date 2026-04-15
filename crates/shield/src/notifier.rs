@@ -2,9 +2,9 @@
 // Sends alerts via webhook (relay → Telegram bot)
 #![allow(dead_code)]
 
-use serde::Serialize;
-use log::{info, warn};
 use crate::forensic::ForensicContext;
+use log::{info, warn};
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 struct AlertPayload {
@@ -102,9 +102,13 @@ impl Notifier {
                      │ Дерево: {}\n\
                      │ Контейнер: {}\n\
                      │ Время: {}",
-                    f.threat_level, risk,
-                    f.username, f.uid,
-                    origin, tree, container,
+                    f.threat_level,
+                    risk,
+                    f.username,
+                    f.uid,
+                    origin,
+                    tree,
+                    container,
                     f.timestamp_iso
                 )
             }
@@ -131,7 +135,11 @@ mod tests {
     #[test]
     fn format_telegram_alert_with_snapshot() {
         let msg = Notifier::format_telegram_alert(
-            "alice", "rm -rf /", "rm_rf", Some("tank/data@shield-rm_rf-20260406"), None,
+            "alice",
+            "rm -rf /",
+            "rm_rf",
+            Some("tank/data@shield-rm_rf-20260406"),
+            None,
         );
         assert!(msg.contains("alice"));
         assert!(msg.contains("rm -rf /"));
@@ -143,7 +151,8 @@ mod tests {
 
     #[test]
     fn format_telegram_alert_no_snapshot() {
-        let msg = Notifier::format_telegram_alert("root", "mkfs /dev/sda", "format_disk", None, None);
+        let msg =
+            Notifier::format_telegram_alert("root", "mkfs /dev/sda", "format_disk", None, None);
         assert!(msg.contains("недоступен"));
         assert!(msg.contains("root"));
     }
@@ -170,14 +179,16 @@ mod tests {
     #[tokio::test]
     async fn alert_no_url_does_not_panic() {
         let n = Notifier::new(None);
-        n.alert(1234, 1000, "root", "ls", "safe", "allowed", None, None).await;
+        n.alert(1234, 1000, "root", "ls", "safe", "allowed", None, None)
+            .await;
     }
 
     #[test]
     fn alert_payload_serialization() {
         let payload = AlertPayload {
             event: "shield_alert".into(),
-            pid: 1234, uid: 1000,
+            pid: 1234,
+            uid: 1000,
             username: "alice".into(),
             command: "rm -rf /".into(),
             rule_name: "rm_rf".into(),
@@ -196,7 +207,8 @@ mod tests {
     fn alert_payload_without_snapshot() {
         let payload = AlertPayload {
             event: "shield_alert".into(),
-            pid: 1, uid: 0,
+            pid: 1,
+            uid: 0,
             username: "root".into(),
             command: "shutdown".into(),
             rule_name: "shutdown".into(),

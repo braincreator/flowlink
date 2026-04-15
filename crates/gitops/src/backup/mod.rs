@@ -3,12 +3,12 @@
 //! Provides backup, restore, and impact analysis capabilities for protecting
 //! system state before destructive operations.
 
+pub mod db_backup;
+pub mod docker_backup;
 pub mod file_backup;
 pub mod impact;
 pub mod restore;
 pub mod vault;
-pub mod db_backup;
-pub mod docker_backup;
 
 use crate::config::{BackupConfig, VaultConfig};
 use crate::types::*;
@@ -100,18 +100,17 @@ impl BackupEngine {
 
         info!(
             "Creating pre-exec backup for {} command (risk: {:?})",
-            command,
-            assessment.risk_level
+            command, assessment.risk_level
         );
 
         // Create backup based on type
         let manifest = match &assessment.backup_type {
             BackupType::FileSnapshot { paths, .. } => {
-                let paths: Vec<std::path::PathBuf> = paths
-                    .iter()
-                    .map(std::path::PathBuf::from)
-                    .collect();
-                self.file_backup.create_snapshot(&paths, &self.vault).await?
+                let paths: Vec<std::path::PathBuf> =
+                    paths.iter().map(std::path::PathBuf::from).collect();
+                self.file_backup
+                    .create_snapshot(&paths, &self.vault)
+                    .await?
             }
             BackupType::DatabaseDump { .. } => {
                 // Database backups would be handled by a separate engine
@@ -177,16 +176,14 @@ impl BackupEngine {
 
         // Get the most recent backup
         let backups = self.vault.list_backups().await?;
-        
+
         if backups.is_empty() {
             warn!("No backups available for auto-restore");
             return Ok(None);
         }
 
         // Find most recent backup
-        let most_recent = backups
-            .into_iter()
-            .max_by_key(|b| b.timestamp);
+        let most_recent = backups.into_iter().max_by_key(|b| b.timestamp);
 
         if let Some(backup) = most_recent {
             let result = self.restore.restore(&backup.id, None).await?;
@@ -252,7 +249,7 @@ mod tests {
     #[tokio::test]
     async fn test_backup_engine_init() {
         let temp_dir = tempdir().unwrap();
-        
+
         let backup_config = BackupConfig::default();
         let vault_config = VaultConfig {
             path: temp_dir.path().to_string_lossy().to_string(),
@@ -270,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn test_pre_execution_backup_safe_command() {
         let temp_dir = tempdir().unwrap();
-        
+
         let backup_config = BackupConfig::default();
         let vault_config = VaultConfig {
             path: temp_dir.path().to_string_lossy().to_string(),
@@ -293,12 +290,10 @@ mod tests {
     #[tokio::test]
     async fn test_pre_execution_backup_destructive_command() {
         let temp_dir = tempdir().unwrap();
-        
+
         // Create a test file to backup
         let test_file = temp_dir.path().join("test.txt");
-        tokio::fs::write(&test_file, b"test content")
-            .await
-            .unwrap();
+        tokio::fs::write(&test_file, b"test content").await.unwrap();
 
         let backup_config = BackupConfig::default();
         let vault_config = VaultConfig {
@@ -313,10 +308,7 @@ mod tests {
 
         // Destructive command should trigger backup
         let result = engine
-            .pre_execution_backup(
-                "rm",
-                &[test_file.to_string_lossy().to_string()],
-            )
+            .pre_execution_backup("rm", &[test_file.to_string_lossy().to_string()])
             .await
             .unwrap();
 
@@ -328,7 +320,7 @@ mod tests {
     #[tokio::test]
     async fn test_auto_restore_check_healthy() {
         let temp_dir = tempdir().unwrap();
-        
+
         let backup_config = BackupConfig::default();
         let vault_config = VaultConfig {
             path: temp_dir.path().to_string_lossy().to_string(),
@@ -353,7 +345,7 @@ mod tests {
     #[tokio::test]
     async fn test_auto_restore_rate_limit() {
         let temp_dir = tempdir().unwrap();
-        
+
         let backup_config = BackupConfig::default();
         let vault_config = VaultConfig {
             path: temp_dir.path().to_string_lossy().to_string(),

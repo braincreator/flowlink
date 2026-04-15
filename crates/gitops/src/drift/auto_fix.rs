@@ -64,8 +64,15 @@ mod tests {
     #[test]
     fn test_default_rules_returns_non_empty() {
         let rules = default_rules();
-        assert!(!rules.is_empty(), "default_rules should return at least one rule");
-        assert!(rules.len() >= 4, "expected at least 4 default rules, got {}", rules.len());
+        assert!(
+            !rules.is_empty(),
+            "default_rules should return at least one rule"
+        );
+        assert!(
+            rules.len() >= 4,
+            "expected at least 4 default rules, got {}",
+            rules.len()
+        );
     }
 
     #[test]
@@ -95,13 +102,25 @@ mod tests {
     fn test_security_rules_have_no_auto_fix() {
         let rules = default_rules();
 
-        let users_rule = rules.iter().find(|r| r.component == "users").expect("users rule");
-        assert!(!users_rule.auto_fix, "users (security) rule should have auto_fix=false");
+        let users_rule = rules
+            .iter()
+            .find(|r| r.component == "users")
+            .expect("users rule");
+        assert!(
+            !users_rule.auto_fix,
+            "users (security) rule should have auto_fix=false"
+        );
         assert!(users_rule.notify, "users rule should notify");
         assert_eq!(users_rule.severity, DriftSeverity::Critical);
 
-        let firewall_rule = rules.iter().find(|r| r.component == "firewall").expect("firewall rule");
-        assert!(!firewall_rule.auto_fix, "firewall (security) rule should have auto_fix=false");
+        let firewall_rule = rules
+            .iter()
+            .find(|r| r.component == "firewall")
+            .expect("firewall rule");
+        assert!(
+            !firewall_rule.auto_fix,
+            "firewall (security) rule should have auto_fix=false"
+        );
         assert!(firewall_rule.notify);
         assert_eq!(firewall_rule.severity, DriftSeverity::Critical);
     }
@@ -111,7 +130,10 @@ mod tests {
         let rules = default_rules();
         for rule in &rules {
             assert!(!rule.name.is_empty(), "rule name should not be empty");
-            assert!(!rule.component.is_empty(), "rule component should not be empty");
+            assert!(
+                !rule.component.is_empty(),
+                "rule component should not be empty"
+            );
             assert!(!rule.action.is_empty(), "rule action should not be empty");
         }
     }
@@ -121,7 +143,11 @@ mod tests {
         let rules = default_rules();
         for rule in &rules {
             if rule.auto_fix {
-                assert!(rule.notify, "rule '{}' has auto_fix=true but notify=false", rule.name);
+                assert!(
+                    rule.notify,
+                    "rule '{}' has auto_fix=true but notify=false",
+                    rule.name
+                );
             }
         }
     }

@@ -16,7 +16,7 @@ pub mod tempo;
 pub use classifier::ActionClassifier;
 pub use feedback::DenialFeedbackBuilder;
 pub use literal_checker::LiteralChecker;
+pub use orchestrator::PipelineAction;
 pub use orchestrator::PipelineOrchestrator;
 pub use orchestrator::PipelineResult;
-pub use orchestrator::PipelineAction;
 pub use tempo::TempoController;

@@ -45,7 +45,9 @@ pub struct PolicyRule {
     pub enabled: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolicySet {
@@ -109,17 +111,23 @@ impl PolicyEngine {
     }
 
     pub fn evaluate(&self, command: &str, ctx: &EvalContext) -> PolicyDecision {
-        let mut rules: Vec<&PolicyRule> = self.policies.rules.iter()
-            .filter(|r| r.enabled)
-            .collect();
+        let mut rules: Vec<&PolicyRule> =
+            self.policies.rules.iter().filter(|r| r.enabled).collect();
         rules.sort_by(|a, b| b.priority.cmp(&a.priority));
 
         for rule in rules {
-            if rule.conditions.iter().all(|c| self.matches(c, command, ctx)) {
+            if rule
+                .conditions
+                .iter()
+                .all(|c| self.matches(c, command, ctx))
+            {
                 return PolicyDecision {
                     action: rule.action.clone(),
                     matched_rule: Some(rule.name.clone()),
-                    reason: rule.description.clone().unwrap_or_else(|| format!("matched rule: {}", rule.name)),
+                    reason: rule
+                        .description
+                        .clone()
+                        .unwrap_or_else(|| format!("matched rule: {}", rule.name)),
                 };
             }
         }
@@ -137,12 +145,16 @@ impl PolicyEngine {
                 let pat = glob_pattern_to_regex(pattern);
                 if let Ok(re) = regex::Regex::new(&pat) {
                     re.is_match(command)
-                } else { false }
+                } else {
+                    false
+                }
             }
             Condition::CommandRegex { regex } => {
                 if let Ok(re) = regex::Regex::new(regex) {
                     re.is_match(command)
-                } else { false }
+                } else {
+                    false
+                }
             }
             Condition::UserIn { users } => users.iter().any(|u| u == &ctx.user),
             Condition::UserNotIn { users } => !users.iter().any(|u| u == &ctx.user),
@@ -165,7 +177,8 @@ impl PolicyEngine {
                 let now = ctx.now.time();
                 let s = parse_time(start);
                 let e = parse_time(end);
-                s.map(|s| e.map(|e| now >= s && now <= e).unwrap_or(false)).unwrap_or(false)
+                s.map(|s| e.map(|e| now >= s && now <= e).unwrap_or(false))
+                    .unwrap_or(false)
             }
             Condition::DayOfWeek { days } => {
                 let dow = ctx.now.format("%a").to_string().to_lowercase();
@@ -195,7 +208,9 @@ fn glob_pattern_to_regex(pattern: &str) -> String {
 
 fn parse_time(s: &str) -> Option<chrono::NaiveTime> {
     let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() != 2 { return None; }
+    if parts.len() != 2 {
+        return None;
+    }
     let h = parts[0].parse::<u32>().ok()?;
     let m = parts[1].parse::<u32>().ok()?;
     chrono::NaiveTime::from_hms_opt(h, m, 0)
@@ -321,7 +336,10 @@ rules:
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
         let mut ctx = EvalContext::default();
         ctx.user = "admin".into();
-        assert_eq!(engine.evaluate("anything", &ctx).action, PolicyAction::Allow);
+        assert_eq!(
+            engine.evaluate("anything", &ctx).action,
+            PolicyAction::Allow
+        );
 
         ctx.user = "guest".into();
         assert_eq!(engine.evaluate("anything", &ctx).action, PolicyAction::Deny);
@@ -446,11 +464,15 @@ rules:
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
         let mut ctx = EvalContext::default();
         // Monday 2026-04-06
-        ctx.now = chrono::DateTime::parse_from_rfc3339("2026-04-06T12:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        ctx.now = chrono::DateTime::parse_from_rfc3339("2026-04-06T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         assert_eq!(engine.evaluate("cmd", &ctx).action, PolicyAction::Allow);
 
         // Sunday 2026-04-12
-        ctx.now = chrono::DateTime::parse_from_rfc3339("2026-04-12T12:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        ctx.now = chrono::DateTime::parse_from_rfc3339("2026-04-12T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         assert_eq!(engine.evaluate("cmd", &ctx).action, PolicyAction::Deny);
     }
 
@@ -471,10 +493,14 @@ rules:
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
         let mut ctx = EvalContext::default();
-        ctx.now = chrono::DateTime::parse_from_rfc3339("2026-04-06T10:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        ctx.now = chrono::DateTime::parse_from_rfc3339("2026-04-06T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         assert_eq!(engine.evaluate("cmd", &ctx).action, PolicyAction::Allow);
 
-        ctx.now = chrono::DateTime::parse_from_rfc3339("2026-04-06T20:00:00Z").unwrap().with_timezone(&chrono::Utc);
+        ctx.now = chrono::DateTime::parse_from_rfc3339("2026-04-06T20:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
         assert_eq!(engine.evaluate("cmd", &ctx).action, PolicyAction::Deny);
     }
 
@@ -602,8 +628,16 @@ rules:
           pattern: "cat *"
 "#;
         let engine = PolicyEngine::load_from_yaml(yaml).unwrap();
-        assert_eq!(engine.evaluate("cat /etc/passwd", &EvalContext::default()).action, PolicyAction::Allow);
-        assert_eq!(engine.evaluate("cat", &EvalContext::default()).action, PolicyAction::Deny);
+        assert_eq!(
+            engine
+                .evaluate("cat /etc/passwd", &EvalContext::default())
+                .action,
+            PolicyAction::Allow
+        );
+        assert_eq!(
+            engine.evaluate("cat", &EvalContext::default()).action,
+            PolicyAction::Deny
+        );
     }
 
     #[test]

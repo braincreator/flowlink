@@ -16,6 +16,7 @@ pub struct OrderRow {
     pub payment_method: String,
     pub tochka_payment_id: Option<String>,
     pub payment_url: Option<String>,
+    pub plan_id: Option<String>,
     pub paid_at: Option<DateTime<Utc>>,
     pub failed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -38,7 +39,7 @@ impl OrderRepo {
                VALUES ($1, $2, $3, $4, $5)
                RETURNING id, account_id, invoice_id, amount_kopecks, description,
                          status, payment_method, tochka_payment_id, payment_url,
-                         paid_at, failed_at, created_at"#,
+                         plan_id, paid_at, failed_at, created_at"#,
         )
         .bind(id)
         .bind(account_id)
@@ -64,12 +65,10 @@ impl OrderRepo {
 
     /// Отметить заказ как failed
     pub async fn update_failed(pool: &PgPool, id: &str) -> Result<()> {
-        sqlx::query(
-            "UPDATE orders SET status = 'failed', failed_at = NOW() WHERE id = $1",
-        )
-        .bind(id)
-        .execute(pool)
-        .await?;
+        sqlx::query("UPDATE orders SET status = 'failed', failed_at = NOW() WHERE id = $1")
+            .bind(id)
+            .execute(pool)
+            .await?;
         Ok(())
     }
 
@@ -78,7 +77,7 @@ impl OrderRepo {
         let row = sqlx::query_as::<_, OrderRow>(
             r#"SELECT id, account_id, invoice_id, amount_kopecks, description,
                       status, payment_method, tochka_payment_id, payment_url,
-                      paid_at, failed_at, created_at
+                      plan_id, paid_at, failed_at, created_at
                FROM orders WHERE id = $1"#,
         )
         .bind(id)
@@ -92,7 +91,7 @@ impl OrderRepo {
         let rows = sqlx::query_as::<_, OrderRow>(
             r#"SELECT id, account_id, invoice_id, amount_kopecks, description,
                       status, payment_method, tochka_payment_id, payment_url,
-                      paid_at, failed_at, created_at
+                      plan_id, paid_at, failed_at, created_at
                FROM orders
                WHERE account_id = $1
                ORDER BY created_at DESC"#,

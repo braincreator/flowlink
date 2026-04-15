@@ -3,8 +3,13 @@ use std::{sync::Arc, time::Duration};
 use anyhow::Result;
 use base64::Engine;
 use futures::StreamExt;
-use kube::{Client, ResourceExt, api::{Api, Patch, PatchParams}, runtime::{controller, watcher, Controller}, runtime::watcher::Event as KubeWatchEvent};
 use kube::api::PostParams;
+use kube::{
+    api::{Api, Patch, PatchParams},
+    runtime::watcher::Event as KubeWatchEvent,
+    runtime::{controller, watcher, Controller},
+    Client, ResourceExt,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -42,7 +47,7 @@ pub struct DriftEvent {
 /// Events yielded by the policy watch stream.
 #[derive(Debug, Clone)]
 pub enum WatchEvent {
-    Added(String, String),      // (name, namespace)
+    Added(String, String), // (name, namespace)
     Modified(String, String),
     Deleted(String, String),
     Error(String),
@@ -116,8 +121,8 @@ impl ShieldOperator {
         cert_pem: &str,
         key_pem: &str,
     ) -> Result<()> {
-        use kube::api::{Patch, PatchParams};
         use k8s_openapi::api::core::v1::Secret;
+        use kube::api::{Patch, PatchParams};
 
         let secrets: Api<Secret> = Api::namespaced(self.client.clone(), namespace);
         let name = "flowlink-webhook-certs";
@@ -198,7 +203,9 @@ impl ShieldOperator {
             }
             Err(kube::Error::Api(e)) if e.code == 409 => {
                 // Already exists — update it
-                webhooks.patch(webhook_name, &pp, &Patch::Apply(&webhook)).await?;
+                webhooks
+                    .patch(webhook_name, &pp, &Patch::Apply(&webhook))
+                    .await?;
                 log::info!("Updated MutatingWebhookConfiguration {}", webhook_name);
             }
             Err(e) => return Err(e.into()),
@@ -255,7 +262,9 @@ impl ShieldOperator {
         match webhooks.create(&PostParams::default(), &webhook).await {
             Ok(_) => log::info!("Created ValidatingWebhookConfiguration {}", webhook_name),
             Err(kube::Error::Api(e)) if e.code == 409 => {
-                webhooks.patch(webhook_name, &pp, &Patch::Apply(&webhook)).await?;
+                webhooks
+                    .patch(webhook_name, &pp, &Patch::Apply(&webhook))
+                    .await?;
                 log::info!("Updated ValidatingWebhookConfiguration {}", webhook_name);
             }
             Err(e) => return Err(e.into()),
@@ -387,11 +396,10 @@ impl ShieldOperator {
 
         // Generate and store certs if admission webhook is enabled
         if spec.admission_webhook {
-            let (cert_pem, key_pem) = self.generate_webhook_cert(
-                "flowlink-shield-webhook",
-                namespace,
-            )?;
-            self.store_cert_secret(namespace, &cert_pem, &key_pem).await?;
+            let (cert_pem, key_pem) =
+                self.generate_webhook_cert("flowlink-shield-webhook", namespace)?;
+            self.store_cert_secret(namespace, &cert_pem, &key_pem)
+                .await?;
             self.ensure_webhook_config(namespace, &cert_pem).await?;
             if spec.mode == ShieldMode::Enforce {
                 self.ensure_validating_webhook(namespace, &cert_pem).await?;
@@ -481,14 +489,20 @@ impl ShieldOperator {
         let mutating: Api<MutatingWebhookConfiguration> = Api::all(self.client.clone());
         let validating: Api<ValidatingWebhookConfiguration> = Api::all(self.client.clone());
 
-        if let Err(e) = mutating.delete("flowlink-shield-webhook", &DeleteParams::default()).await {
+        if let Err(e) = mutating
+            .delete("flowlink-shield-webhook", &DeleteParams::default())
+            .await
+        {
             let is_404 = matches!(&e, kube::Error::Api(ae) if ae.code == 404);
             if !is_404 {
                 log::warn!("Failed to delete mutating webhook: {}", e);
             }
         }
 
-        if let Err(e) = validating.delete("flowlink-shield-validator", &DeleteParams::default()).await {
+        if let Err(e) = validating
+            .delete("flowlink-shield-validator", &DeleteParams::default())
+            .await
+        {
             let is_404 = matches!(&e, kube::Error::Api(ae) if ae.code == 404);
             if !is_404 {
                 log::warn!("Failed to delete validating webhook: {}", e);
@@ -532,7 +546,9 @@ async fn reconcile(
 
     log::info!(
         "Reconciling FlowLinkShieldPolicy {} in namespace {} (gen={})",
-        name, ns, generation
+        name,
+        ns,
+        generation
     );
 
     let crds: Api<FlowLinkShieldPolicy> = Api::namespaced(client.clone(), &ns);
@@ -567,31 +583,38 @@ async fn reconcile(
     let mut errors = Vec::new();
 
     // 1. Generate or load certs
-    let (cert_pem, key_pem) = match operator.generate_webhook_cert(
-        "flowlink-shield-webhook",
-        &config.namespace,
-    ) {
-        Ok((cert, key)) => (cert, key),
-        Err(e) => {
-            log::error!("Failed to generate webhook cert: {}", e);
-            errors.push(format!("cert generation: {}", e));
-            (String::new(), String::new())
-        }
-    };
+    let (cert_pem, key_pem) =
+        match operator.generate_webhook_cert("flowlink-shield-webhook", &config.namespace) {
+            Ok((cert, key)) => (cert, key),
+            Err(e) => {
+                log::error!("Failed to generate webhook cert: {}", e);
+                errors.push(format!("cert generation: {}", e));
+                (String::new(), String::new())
+            }
+        };
 
     // 2. Store cert as K8s secret
     if !errors.is_empty() {
-        if let Err(e) = operator.store_cert_secret(&config.namespace, &cert_pem, &key_pem).await {
+        if let Err(e) = operator
+            .store_cert_secret(&config.namespace, &cert_pem, &key_pem)
+            .await
+        {
             log::warn!("Failed to store cert secret: {}", e);
         }
-    } else if let Err(e) = operator.store_cert_secret(&config.namespace, &cert_pem, &key_pem).await {
+    } else if let Err(e) = operator
+        .store_cert_secret(&config.namespace, &cert_pem, &key_pem)
+        .await
+    {
         log::warn!("Failed to store cert secret: {}", e);
         errors.push(format!("cert storage: {}", e));
     }
 
     // 3. Ensure MutatingWebhookConfiguration (for sidecar injection)
     if policy.spec.admission_webhook {
-        if let Err(e) = operator.ensure_webhook_config(&config.namespace, &cert_pem).await {
+        if let Err(e) = operator
+            .ensure_webhook_config(&config.namespace, &cert_pem)
+            .await
+        {
             log::error!("Failed to configure mutating webhook: {}", e);
             errors.push(format!("mutating webhook: {}", e));
         }
@@ -599,7 +622,10 @@ async fn reconcile(
 
     // 4. Ensure ValidatingWebhookConfiguration (for policy enforcement)
     if policy.spec.mode == ShieldMode::Enforce {
-        if let Err(e) = operator.ensure_validating_webhook(&config.namespace, &cert_pem).await {
+        if let Err(e) = operator
+            .ensure_validating_webhook(&config.namespace, &cert_pem)
+            .await
+        {
             log::error!("Failed to configure validating webhook: {}", e);
             errors.push(format!("validating webhook: {}", e));
         }
@@ -607,7 +633,10 @@ async fn reconcile(
         // In monitor mode, remove the validating webhook if it exists
         use k8s_openapi::api::admissionregistration::v1::ValidatingWebhookConfiguration;
         let validating: Api<ValidatingWebhookConfiguration> = Api::all(client.clone());
-        if let Err(e) = validating.delete("flowlink-shield-validator", &DeleteParams::default()).await {
+        if let Err(e) = validating
+            .delete("flowlink-shield-validator", &DeleteParams::default())
+            .await
+        {
             let is_404 = matches!(&e, kube::Error::Api(ae) if ae.code == 404);
             if !is_404 {
                 log::warn!("Failed to remove validating webhook: {}", e);
@@ -619,23 +648,21 @@ async fn reconcile(
     if errors.is_empty() {
         status.sidecar_injections = Some(status.sidecar_injections.unwrap_or(0));
         status.violations_blocked = Some(status.violations_blocked.unwrap_or(0));
-        status.conditions = vec![
-            PolicyCondition {
-                type_: "Ready".into(),
-                status: "True".into(),
-                reason: Some("WebhooksConfigured".into()),
-                message: Some(format!(
-                    "Shield active in {} mode ({} rules, sidecar: {})",
-                    match policy.spec.mode {
-                        ShieldMode::Monitor => "monitor",
-                        ShieldMode::Enforce => "enforce",
-                    },
-                    policy.spec.rules.len(),
-                    policy.spec.admission_webhook,
-                )),
-                last_transition_time: Some(now),
-            },
-        ];
+        status.conditions = vec![PolicyCondition {
+            type_: "Ready".into(),
+            status: "True".into(),
+            reason: Some("WebhooksConfigured".into()),
+            message: Some(format!(
+                "Shield active in {} mode ({} rules, sidecar: {})",
+                match policy.spec.mode {
+                    ShieldMode::Monitor => "monitor",
+                    ShieldMode::Enforce => "enforce",
+                },
+                policy.spec.rules.len(),
+                policy.spec.admission_webhook,
+            )),
+            last_transition_time: Some(now),
+        }];
     } else {
         status.conditions = vec![PolicyCondition {
             type_: "Ready".into(),
@@ -719,7 +746,10 @@ mod tests {
         let service_name = "flowlink-shield-webhook";
         let namespace = "flowlink-system";
         let expected = format!("{}.{}.svc.cluster.local", service_name, namespace);
-        assert_eq!(expected, "flowlink-shield-webhook.flowlink-system.svc.cluster.local");
+        assert_eq!(
+            expected,
+            "flowlink-shield-webhook.flowlink-system.svc.cluster.local"
+        );
     }
 
     #[test]

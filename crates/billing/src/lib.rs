@@ -11,15 +11,15 @@
 //! - Starter: 3 hosts, AST analysis
 //! - Pro: 20 hosts, eBPF
 
-pub mod plans;
-pub mod usage;
 pub mod invoice;
 pub mod payment;
-pub mod tochka;
 pub mod persist;
+pub mod plans;
+pub mod tochka;
+pub mod usage;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -208,7 +208,8 @@ impl BillingEngine {
 
     /// Update account billing state in memory + persist
     pub fn update_account(&self, billing: &AccountBilling) {
-        self.accounts.insert(billing.account_id.clone(), billing.clone());
+        self.accounts
+            .insert(billing.account_id.clone(), billing.clone());
         self.persist_account(billing);
     }
 
@@ -271,10 +272,7 @@ impl BillingEngine {
                 if limit > 0 && current_value > limit {
                     return BillingCheck {
                         allowed: false,
-                        reason: Some(format!(
-                            "Host limit exceeded: {}/{}",
-                            current_value, limit
-                        )),
+                        reason: Some(format!("Host limit exceeded: {}/{}", current_value, limit)),
                         usage_after: None,
                     };
                 }
@@ -307,16 +305,23 @@ impl BillingEngine {
         billing: &mut AccountBilling,
         new_plan_id: &str,
     ) -> Result<Option<invoice::Invoice>> {
-        let plan = self.plans.get(new_plan_id)
+        let plan = self
+            .plans
+            .get(new_plan_id)
             .ok_or_else(|| anyhow::anyhow!("Unknown plan: {}", new_plan_id))?;
 
         // Don't allow downgrade
-        let current_tier = self.plans.get(&billing.plan_id)
+        let current_tier = self
+            .plans
+            .get(&billing.plan_id)
             .map(|p| p.tier)
             .unwrap_or(0);
         if plan.tier < current_tier {
-            anyhow::bail!("Cannot downgrade from {} to {} (use change_plan for downgrades)",
-                billing.plan_id, new_plan_id);
+            anyhow::bail!(
+                "Cannot downgrade from {} to {} (use change_plan for downgrades)",
+                billing.plan_id,
+                new_plan_id
+            );
         }
 
         let now = Utc::now();
@@ -325,7 +330,11 @@ impl BillingEngine {
         billing.cycle_start = now;
 
         // Use billing_period from plan config to determine expiry
-        let days = if plan.billing_period == "year" { 365 } else { 30 };
+        let days = if plan.billing_period == "year" {
+            365
+        } else {
+            30
+        };
         billing.expires_at = if plan.tier == 0 {
             None // Free plan never expires
         } else {
@@ -343,7 +352,9 @@ impl BillingEngine {
 
         // Generate invoice for paid plans
         let created_invoice = if plan.price_kopecks > 0 {
-            let inv = self.invoices.create(invoice::Invoice::for_plan(&billing.account_id, &plan));
+            let inv = self
+                .invoices
+                .create(invoice::Invoice::for_plan(&billing.account_id, &plan));
             Some(inv)
         } else {
             None
@@ -358,7 +369,9 @@ impl BillingEngine {
         billing: &mut AccountBilling,
         new_plan_id: &str,
     ) -> Result<Option<invoice::Invoice>> {
-        let plan = self.plans.get(new_plan_id)
+        let plan = self
+            .plans
+            .get(new_plan_id)
             .ok_or_else(|| anyhow::anyhow!("Unknown plan: {}", new_plan_id))?;
 
         let now = Utc::now();
@@ -367,7 +380,11 @@ impl BillingEngine {
         billing.cycle_start = now;
 
         // Use billing_period from plan config to determine expiry
-        let days = if plan.billing_period == "year" { 365 } else { 30 };
+        let days = if plan.billing_period == "year" {
+            365
+        } else {
+            30
+        };
         billing.expires_at = if plan.tier == 0 {
             None
         } else {
@@ -385,7 +402,9 @@ impl BillingEngine {
 
         // Generate invoice for paid plans
         let created_invoice = if plan.price_kopecks > 0 {
-            let inv = self.invoices.create(invoice::Invoice::for_plan(&billing.account_id, &plan));
+            let inv = self
+                .invoices
+                .create(invoice::Invoice::for_plan(&billing.account_id, &plan));
             Some(inv)
         } else {
             None
@@ -395,12 +414,10 @@ impl BillingEngine {
     }
 
     /// Record a payment against an invoice
-    pub fn record_payment(
-        &self,
-        invoice_id: &str,
-        method: payment::PaymentMethod,
-    ) -> Result<()> {
-        let mut invoice = self.invoices.get(invoice_id)
+    pub fn record_payment(&self, invoice_id: &str, method: payment::PaymentMethod) -> Result<()> {
+        let mut invoice = self
+            .invoices
+            .get(invoice_id)
             .ok_or_else(|| anyhow::anyhow!("Invoice not found: {}", invoice_id))?;
 
         invoice.mark_paid(method);

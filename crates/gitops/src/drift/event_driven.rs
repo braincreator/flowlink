@@ -136,10 +136,7 @@ impl FileWatcher {
 
         // Wrap the blocking handle so it looks like a regular JoinHandle.
         self.task = Some(bridge);
-        tracing::info!(
-            paths = self.watched_paths.len(),
-            "FileWatcher started"
-        );
+        tracing::info!(paths = self.watched_paths.len(), "FileWatcher started");
         Ok(())
     }
 
@@ -250,14 +247,18 @@ impl DockerEventWatcher {
                     Ok(event) => {
                         let container_id = event.actor.as_ref().and_then(|a| a.id.clone());
                         let container_name = event.actor.as_ref().and_then(|a| {
-                            a.attributes
-                                .as_ref()
-                                .and_then(|attrs: &std::collections::HashMap<String, String>| attrs.get("name").cloned())
+                            a.attributes.as_ref().and_then(
+                                |attrs: &std::collections::HashMap<String, String>| {
+                                    attrs.get("name").cloned()
+                                },
+                            )
                         });
                         let image = event.actor.as_ref().and_then(|a| {
-                            a.attributes
-                                .as_ref()
-                                .and_then(|attrs: &std::collections::HashMap<String, String>| attrs.get("image").cloned())
+                            a.attributes.as_ref().and_then(
+                                |attrs: &std::collections::HashMap<String, String>| {
+                                    attrs.get("image").cloned()
+                                },
+                            )
                         });
 
                         let docker_event = DockerWatchEvent {
@@ -380,10 +381,26 @@ mod tests {
 
     #[test]
     fn test_classify_event_kind() {
-        assert_eq!(classify_event_kind(&EventKind::Create(notify::event::CreateKind::File)), "create");
-        assert_eq!(classify_event_kind(&EventKind::Modify(notify::event::ModifyKind::Data(notify::event::DataChange::Any))), "modify");
-        assert_eq!(classify_event_kind(&EventKind::Remove(notify::event::RemoveKind::File)), "remove");
-        assert_eq!(classify_event_kind(&EventKind::Access(notify::event::AccessKind::Close(notify::event::AccessMode::Any))), "access");
+        assert_eq!(
+            classify_event_kind(&EventKind::Create(notify::event::CreateKind::File)),
+            "create"
+        );
+        assert_eq!(
+            classify_event_kind(&EventKind::Modify(notify::event::ModifyKind::Data(
+                notify::event::DataChange::Any
+            ))),
+            "modify"
+        );
+        assert_eq!(
+            classify_event_kind(&EventKind::Remove(notify::event::RemoveKind::File)),
+            "remove"
+        );
+        assert_eq!(
+            classify_event_kind(&EventKind::Access(notify::event::AccessKind::Close(
+                notify::event::AccessMode::Any
+            ))),
+            "access"
+        );
     }
 
     #[test]

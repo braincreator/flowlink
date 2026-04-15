@@ -5,7 +5,7 @@
 mod types;
 pub use types::*;
 
-use crate::types::{ActionTier, RiskLevel, ShieldVerdict, DenialFeedback};
+use crate::types::{ActionTier, DenialFeedback, RiskLevel, ShieldVerdict};
 use anyhow::Result;
 
 /// Action Classifier - maps commands to action tiers
@@ -454,7 +454,7 @@ impl ActionClassifier {
             command = %command,
             "No classification rule matched"
         );
-        
+
         Ok(ClassificationResult {
             tier: ActionTier::Unclassified,
             verdict: None,
@@ -555,22 +555,24 @@ impl ActionClassifier {
     }
 
     /// Build shield verdict based on rule action
-    fn build_verdict(&self, rule: &ClassificationRule, args: &[String]) -> Result<Option<ShieldVerdict>> {
+    fn build_verdict(
+        &self,
+        rule: &ClassificationRule,
+        args: &[String],
+    ) -> Result<Option<ShieldVerdict>> {
         match &rule.action {
             RuleAction::Allow => Ok(Some(ShieldVerdict::Allow { audit: false })),
-            RuleAction::Block { reason } => {
-                Ok(Some(ShieldVerdict::Deny(DenialFeedback {
-                    reason: reason.clone(),
-                    risk_level: RiskLevel::Critical,
-                    what_would_be_needed: "Administrator approval required".to_string(),
-                    remaining_budget: None,
-                    alternative: None,
-                })))
-            }
+            RuleAction::Block { reason } => Ok(Some(ShieldVerdict::Deny(DenialFeedback {
+                reason: reason.clone(),
+                risk_level: RiskLevel::Critical,
+                what_would_be_needed: "Administrator approval required".to_string(),
+                remaining_budget: None,
+                alternative: None,
+            }))),
             RuleAction::Modify { rewrite } => {
                 let rewritten = self.apply_rewrites(args, &rewrite.replacements)?;
                 let original = self.build_command_string(args);
-                
+
                 Ok(Some(ShieldVerdict::Modify {
                     original,
                     rewritten,
@@ -583,13 +585,13 @@ impl ActionClassifier {
     /// Apply rewrites to arguments
     fn apply_rewrites(&self, args: &[String], replacements: &[Replacement]) -> Result<String> {
         let mut modified_args = args.to_vec();
-        
+
         for replacement in replacements {
             for arg in &mut modified_args {
                 *arg = arg.replace(&replacement.match_pattern, &replacement.replace_with);
             }
         }
-        
+
         Ok(self.build_command_string(&modified_args))
     }
 
@@ -625,45 +627,62 @@ mod tests {
     #[test]
     fn test_classify_readonly() {
         let classifier = ActionClassifier::new();
-        
+
         // Test basic read-only commands
-        let result = classifier.classify("cat", &["file.txt".to_string()]).unwrap();
+        let result = classifier
+            .classify("cat", &["file.txt".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::ReadOnly);
-        
+
         let result = classifier.classify("ls", &["-la".to_string()]).unwrap();
         assert_eq!(result.tier, ActionTier::ReadOnly);
-        
-        let result = classifier.classify("grep", &["pattern".to_string(), "file.txt".to_string()]).unwrap();
+
+        let result = classifier
+            .classify("grep", &["pattern".to_string(), "file.txt".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::ReadOnly);
     }
 
     #[test]
     fn test_classify_destructive() {
         let classifier = ActionClassifier::new();
-        
+
         // Test rm
-        let result = classifier.classify("rm", &["file.txt".to_string()]).unwrap();
+        let result = classifier
+            .classify("rm", &["file.txt".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Destructive);
-        
+
         // Test docker rm
-        let result = classifier.classify("docker", &["rm".to_string(), "container".to_string()]).unwrap();
+        let result = classifier
+            .classify("docker", &["rm".to_string(), "container".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Destructive);
-        
+
         // Test systemctl stop
-        let result = classifier.classify("systemctl", &["stop".to_string(), "nginx".to_string()]).unwrap();
+        let result = classifier
+            .classify("systemctl", &["stop".to_string(), "nginx".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Destructive);
     }
 
     #[test]
     fn test_classify_modify_chmod() {
         let classifier = ActionClassifier::new();
-        
+
         // Test chmod 777 - should be Modify tier with rewrite
-        let result = classifier.classify("chmod", &["777".to_string(), "/path/file".to_string()]).unwrap();
+        let result = classifier
+            .classify("chmod", &["777".to_string(), "/path/file".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Modify);
-        
+
         // Check that verdict is Modify with rewrite
-        if let Some(ShieldVerdict::Modify { original, rewritten, reason }) = result.verdict {
+        if let Some(ShieldVerdict::Modify {
+            original,
+            rewritten,
+            reason,
+        }) = result.verdict
+        {
             assert!(original.contains("777"));
             assert!(rewritten.contains("755"));
             assert!(reason.contains("auto-corrected"));
@@ -675,11 +694,13 @@ mod tests {
     #[test]
     fn test_classify_blocked_rm_rf_root() {
         let classifier = ActionClassifier::new();
-        
+
         // Test rm -rf / - should be blocked
-        let result = classifier.classify("rm", &["-rf".to_string(), "/".to_string()]).unwrap();
+        let result = classifier
+            .classify("rm", &["-rf".to_string(), "/".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
-        
+
         // Check that verdict is Deny
         if let Some(ShieldVerdict::Deny(feedback)) = result.verdict {
             assert!(feedback.reason.contains("Root filesystem"));
@@ -691,52 +712,71 @@ mod tests {
     #[test]
     fn test_classify_blocked_no_preserve_root() {
         let classifier = ActionClassifier::new();
-        
+
         // Test rm --no-preserve-root - should be blocked
-        let result = classifier.classify("rm", &["--no-preserve-root".to_string(), "-rf".to_string(), "/".to_string()]).unwrap();
+        let result = classifier
+            .classify(
+                "rm",
+                &[
+                    "--no-preserve-root".to_string(),
+                    "-rf".to_string(),
+                    "/".to_string(),
+                ],
+            )
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
     }
 
     #[test]
     fn test_classify_network() {
         let classifier = ActionClassifier::new();
-        
+
         // Test network commands
-        let result = classifier.classify("curl", &["http://example.com".to_string()]).unwrap();
+        let result = classifier
+            .classify("curl", &["http://example.com".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Network);
-        
-        let result = classifier.classify("ssh", &["user@host".to_string()]).unwrap();
+
+        let result = classifier
+            .classify("ssh", &["user@host".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Network);
     }
 
     #[test]
     fn test_classify_docker_readonly() {
         let classifier = ActionClassifier::new();
-        
+
         // Test docker ps - should be ReadOnly
         let result = classifier.classify("docker", &["ps".to_string()]).unwrap();
         assert_eq!(result.tier, ActionTier::ReadOnly);
-        
+
         // Test docker logs - should be ReadOnly
-        let result = classifier.classify("docker", &["logs".to_string(), "container".to_string()]).unwrap();
+        let result = classifier
+            .classify("docker", &["logs".to_string(), "container".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::ReadOnly);
     }
 
     #[test]
     fn test_classify_systemctl_readonly() {
         let classifier = ActionClassifier::new();
-        
+
         // Test systemctl status - should be ReadOnly
-        let result = classifier.classify("systemctl", &["status".to_string(), "nginx".to_string()]).unwrap();
+        let result = classifier
+            .classify("systemctl", &["status".to_string(), "nginx".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::ReadOnly);
     }
 
     #[test]
     fn test_classify_unclassified() {
         let classifier = ActionClassifier::new();
-        
+
         // Test unknown command - should be Unclassified
-        let result = classifier.classify("unknowncmd", &["arg1".to_string()]).unwrap();
+        let result = classifier
+            .classify("unknowncmd", &["arg1".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Unclassified);
         assert!(result.verdict.is_none());
     }
@@ -744,16 +784,21 @@ mod tests {
     #[test]
     fn test_classify_blocked_dd_disk() {
         let classifier = ActionClassifier::new();
-        
+
         // Test dd of=/dev/sda - should be blocked
-        let result = classifier.classify("dd", &["if=/dev/zero".to_string(), "of=/dev/sda".to_string()]).unwrap();
+        let result = classifier
+            .classify(
+                "dd",
+                &["if=/dev/zero".to_string(), "of=/dev/sda".to_string()],
+            )
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
     }
 
     #[test]
     fn test_custom_rule() {
         let mut classifier = ActionClassifier::new();
-        
+
         // Add custom rule
         classifier.add_rule(ClassificationRule {
             name: "custom-block".to_string(),
@@ -765,7 +810,7 @@ mod tests {
             },
             message: "Custom block rule".to_string(),
         });
-        
+
         let result = classifier.classify("dangerous-cmd", &[]).unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
     }
@@ -773,10 +818,12 @@ mod tests {
     #[test]
     fn test_rule_priority() {
         let classifier = ActionClassifier::new();
-        
+
         // More specific rules should match first
         // rm -rf / should be Blocked, not Destructive
-        let result = classifier.classify("rm", &["-rf".to_string(), "/".to_string()]).unwrap();
+        let result = classifier
+            .classify("rm", &["-rf".to_string(), "/".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
     }
 
@@ -795,7 +842,10 @@ mod tests {
             ("diff", vec!["diff".to_string(), "HEAD~1".to_string()]),
             ("show", vec!["show".to_string(), "abc123".to_string()]),
             ("branch_list", vec!["branch".to_string()]),
-            ("branch_list_verbose", vec!["branch".to_string(), "-v".to_string()]),
+            (
+                "branch_list_verbose",
+                vec!["branch".to_string(), "-v".to_string()],
+            ),
             ("tag_list", vec!["tag".to_string()]),
             ("remote_list", vec!["remote".to_string(), "-v".to_string()]),
             ("stash_list", vec!["stash".to_string(), "list".to_string()]),
@@ -805,7 +855,12 @@ mod tests {
 
         for (name, args) in readonly_cmds {
             let result = classifier.classify("git", &args).unwrap();
-            assert_eq!(result.tier, ActionTier::ReadOnly, "git {} should be ReadOnly", name);
+            assert_eq!(
+                result.tier,
+                ActionTier::ReadOnly,
+                "git {} should be ReadOnly",
+                name
+            );
         }
     }
 
@@ -816,28 +871,101 @@ mod tests {
         // Git operations that are Modify tier (safe but state-changing)
         let safe_cmds = vec![
             ("add", vec!["add".to_string(), ".".to_string()]),
-            ("commit", vec!["commit".to_string(), "-m".to_string(), "fix".to_string()]),
-            ("checkout", vec!["checkout".to_string(), "-b".to_string(), "feature".to_string()]),
+            (
+                "commit",
+                vec!["commit".to_string(), "-m".to_string(), "fix".to_string()],
+            ),
+            (
+                "checkout",
+                vec![
+                    "checkout".to_string(),
+                    "-b".to_string(),
+                    "feature".to_string(),
+                ],
+            ),
             ("merge", vec!["merge".to_string(), "feature-x".to_string()]),
             ("rebase", vec!["rebase".to_string(), "main".to_string()]),
-            ("pull", vec!["pull".to_string(), "origin".to_string(), "main".to_string()]),
-            ("push", vec!["push".to_string(), "origin".to_string(), "main".to_string()]),
-            ("clone", vec!["clone".to_string(), "https://github.com/repo.git".to_string()]),
+            (
+                "pull",
+                vec!["pull".to_string(), "origin".to_string(), "main".to_string()],
+            ),
+            (
+                "push",
+                vec!["push".to_string(), "origin".to_string(), "main".to_string()],
+            ),
+            (
+                "clone",
+                vec![
+                    "clone".to_string(),
+                    "https://github.com/repo.git".to_string(),
+                ],
+            ),
             ("fetch", vec!["fetch".to_string(), "--all".to_string()]),
-            ("cherry-pick", vec!["cherry-pick".to_string(), "abc123".to_string()]),
-            ("reset_soft", vec!["reset".to_string(), "--soft".to_string(), "HEAD~1".to_string()]),
-            ("reset_mixed", vec!["reset".to_string(), "--mixed".to_string(), "HEAD~1".to_string()]),
-            ("stash_push", vec!["stash".to_string(), "push".to_string(), "-m".to_string(), "wip".to_string()]),
+            (
+                "cherry-pick",
+                vec!["cherry-pick".to_string(), "abc123".to_string()],
+            ),
+            (
+                "reset_soft",
+                vec![
+                    "reset".to_string(),
+                    "--soft".to_string(),
+                    "HEAD~1".to_string(),
+                ],
+            ),
+            (
+                "reset_mixed",
+                vec![
+                    "reset".to_string(),
+                    "--mixed".to_string(),
+                    "HEAD~1".to_string(),
+                ],
+            ),
+            (
+                "stash_push",
+                vec![
+                    "stash".to_string(),
+                    "push".to_string(),
+                    "-m".to_string(),
+                    "wip".to_string(),
+                ],
+            ),
             ("revert", vec!["revert".to_string(), "abc123".to_string()]),
-            ("worktree_add", vec!["worktree".to_string(), "add".to_string(), "../wt".to_string(), "branch".to_string()]),
-            ("branch_create", vec!["branch".to_string(), "feature-x".to_string()]),
-            ("branch_d_safe", vec!["branch".to_string(), "-d".to_string(), "merged".to_string()]),
-            ("submodule_add", vec!["submodule".to_string(), "add".to_string(), "url".to_string()]),
+            (
+                "worktree_add",
+                vec![
+                    "worktree".to_string(),
+                    "add".to_string(),
+                    "../wt".to_string(),
+                    "branch".to_string(),
+                ],
+            ),
+            (
+                "branch_create",
+                vec!["branch".to_string(), "feature-x".to_string()],
+            ),
+            (
+                "branch_d_safe",
+                vec!["branch".to_string(), "-d".to_string(), "merged".to_string()],
+            ),
+            (
+                "submodule_add",
+                vec![
+                    "submodule".to_string(),
+                    "add".to_string(),
+                    "url".to_string(),
+                ],
+            ),
         ];
 
         for (name, args) in safe_cmds {
             let result = classifier.classify("git", &args).unwrap();
-            assert_ne!(result.tier, ActionTier::Blocked, "git {} should NOT be blocked", name);
+            assert_ne!(
+                result.tier,
+                ActionTier::Blocked,
+                "git {} should NOT be blocked",
+                name
+            );
         }
     }
 
@@ -847,23 +975,87 @@ mod tests {
 
         // Git destructive commands should be Destructive tier
         let destructive_cmds = vec![
-            ("push_force", vec!["push".to_string(), "--force".to_string(), "origin".to_string()]),
-            ("push_force_lease", vec!["push".to_string(), "--force-with-lease".to_string(), "origin".to_string()]),
-            ("reset_hard", vec!["reset".to_string(), "--hard".to_string(), "HEAD~3".to_string()]),
+            (
+                "push_force",
+                vec![
+                    "push".to_string(),
+                    "--force".to_string(),
+                    "origin".to_string(),
+                ],
+            ),
+            (
+                "push_force_lease",
+                vec![
+                    "push".to_string(),
+                    "--force-with-lease".to_string(),
+                    "origin".to_string(),
+                ],
+            ),
+            (
+                "reset_hard",
+                vec![
+                    "reset".to_string(),
+                    "--hard".to_string(),
+                    "HEAD~3".to_string(),
+                ],
+            ),
             ("clean_fd", vec!["clean".to_string(), "-fd".to_string()]),
-            ("branch_D", vec!["branch".to_string(), "-D".to_string(), "old-feature".to_string()]),
-            ("tag_delete", vec!["tag".to_string(), "-d".to_string(), "v1.0".to_string()]),
+            (
+                "branch_D",
+                vec![
+                    "branch".to_string(),
+                    "-D".to_string(),
+                    "old-feature".to_string(),
+                ],
+            ),
+            (
+                "tag_delete",
+                vec!["tag".to_string(), "-d".to_string(), "v1.0".to_string()],
+            ),
             ("stash_drop", vec!["stash".to_string(), "drop".to_string()]),
-            ("stash_clear", vec!["stash".to_string(), "clear".to_string()]),
-            ("reflog_expire", vec!["reflog".to_string(), "expire".to_string(), "--expire=now".to_string()]),
-            ("gc_prune", vec!["gc".to_string(), "--prune=now".to_string()]),
-            ("worktree_remove", vec!["worktree".to_string(), "remove".to_string(), "../wt".to_string()]),
-            ("submodule_deinit", vec!["submodule".to_string(), "deinit".to_string(), "libs/core".to_string()]),
+            (
+                "stash_clear",
+                vec!["stash".to_string(), "clear".to_string()],
+            ),
+            (
+                "reflog_expire",
+                vec![
+                    "reflog".to_string(),
+                    "expire".to_string(),
+                    "--expire=now".to_string(),
+                ],
+            ),
+            (
+                "gc_prune",
+                vec!["gc".to_string(), "--prune=now".to_string()],
+            ),
+            (
+                "worktree_remove",
+                vec![
+                    "worktree".to_string(),
+                    "remove".to_string(),
+                    "../wt".to_string(),
+                ],
+            ),
+            (
+                "submodule_deinit",
+                vec![
+                    "submodule".to_string(),
+                    "deinit".to_string(),
+                    "libs/core".to_string(),
+                ],
+            ),
         ];
 
         for (name, args) in destructive_cmds {
             let result = classifier.classify("git", &args).unwrap();
-            assert_eq!(result.tier, ActionTier::Destructive, "git {} should be Destructive, got {:?}", name, result.tier);
+            assert_eq!(
+                result.tier,
+                ActionTier::Destructive,
+                "git {} should be Destructive, got {:?}",
+                name,
+                result.tier
+            );
         }
     }
 
@@ -872,10 +1064,24 @@ mod tests {
         let classifier = ActionClassifier::new();
 
         // Git filter-branch / filter-repo should be Blocked
-        let result = classifier.classify("git", &["filter-branch".to_string(), "--tree-filter".to_string(), "...".to_string()]).unwrap();
+        let result = classifier
+            .classify(
+                "git",
+                &[
+                    "filter-branch".to_string(),
+                    "--tree-filter".to_string(),
+                    "...".to_string(),
+                ],
+            )
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
 
-        let result = classifier.classify("git", &["filter-repo".to_string(), "--invert-paths".to_string()]).unwrap();
+        let result = classifier
+            .classify(
+                "git",
+                &["filter-repo".to_string(), "--invert-paths".to_string()],
+            )
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
 
         // Check denial reason
@@ -891,8 +1097,17 @@ mod tests {
         let classifier = ActionClassifier::new();
 
         // Normal git push should NOT be Destructive
-        let result = classifier.classify("git", &["push".to_string(), "origin".to_string(), "main".to_string()]).unwrap();
-        assert_ne!(result.tier, ActionTier::Destructive, "normal git push should not be Destructive");
+        let result = classifier
+            .classify(
+                "git",
+                &["push".to_string(), "origin".to_string(), "main".to_string()],
+            )
+            .unwrap();
+        assert_ne!(
+            result.tier,
+            ActionTier::Destructive,
+            "normal git push should not be Destructive"
+        );
     }
 
     #[test]
@@ -900,7 +1115,9 @@ mod tests {
         let classifier = ActionClassifier::new();
 
         // git clean -f without -d should not be Destructive
-        let result = classifier.classify("git", &["clean".to_string(), "-f".to_string()]).unwrap();
+        let result = classifier
+            .classify("git", &["clean".to_string(), "-f".to_string()])
+            .unwrap();
         assert_ne!(result.tier, ActionTier::Destructive);
     }
 
@@ -909,7 +1126,9 @@ mod tests {
         let classifier = ActionClassifier::new();
 
         // filter-branch should be Blocked (first match), not Destructive
-        let result = classifier.classify("git", &["filter-branch".to_string(), "--all".to_string()]).unwrap();
+        let result = classifier
+            .classify("git", &["filter-branch".to_string(), "--all".to_string()])
+            .unwrap();
         assert_eq!(result.tier, ActionTier::Blocked);
     }
 }

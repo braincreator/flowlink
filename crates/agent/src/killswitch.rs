@@ -1,10 +1,10 @@
 // Kill Switch & Circuit Breaker for FlowLink agent.
 // Port of internal/agent/killswitch.go
 
+use log::{info, warn};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use log::{info, warn};
 
 /// Kill switch mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,7 +181,11 @@ impl KillSwitch {
 
         // CPU monitoring — use loadavg normalized by CPU count
         let cpu_count = num_cpus() as f64;
-        let cpu_pct = if cpu_count > 0.0 { (cpu_usage / cpu_count) * 100.0 } else { 0.0 };
+        let cpu_pct = if cpu_count > 0.0 {
+            (cpu_usage / cpu_count) * 100.0
+        } else {
+            0.0
+        };
 
         if cpu_pct > self.cpu_threshold {
             if s.cpu_high_since.is_none() {
@@ -304,15 +308,26 @@ impl KillSwitch {
 /// Determine if a command is a write/destructive command.
 pub fn is_write_command(cmd: &str) -> bool {
     const WRITE_PATTERNS: &[&str] = &[
-        "rm ", "rmdir", "mv ", "cp ",
-        "chmod ", "chown ",
-        "apt install", "apt remove", "apt upgrade",
-        "yum install", "yum remove",
-        "docker rm", "docker rmi", "docker run",
-        "systemctl stop", "systemctl restart",
+        "rm ",
+        "rmdir",
+        "mv ",
+        "cp ",
+        "chmod ",
+        "chown ",
+        "apt install",
+        "apt remove",
+        "apt upgrade",
+        "yum install",
+        "yum remove",
+        "docker rm",
+        "docker rmi",
+        "docker run",
+        "systemctl stop",
+        "systemctl restart",
         "iptables ",
         "crontab ",
-        "echo >", "cat >",
+        "echo >",
+        "cat >",
     ];
 
     let cmd_lower = cmd.to_lowercase();

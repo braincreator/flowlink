@@ -60,12 +60,20 @@ impl ServiceCollector {
     pub fn new() -> Self {
         let systemctl_available = std::path::Path::new("/usr/bin/systemctl").exists()
             || std::path::Path::new("/bin/systemctl").exists();
-        Self { systemctl_available }
+        Self {
+            systemctl_available,
+        }
     }
 
     async fn collect_systemd(&self) -> Result<Vec<ServiceInfo>> {
         let output = Command::new("systemctl")
-            .args(["list-units", "--type=service", "--all", "--no-pager", "--plain"])
+            .args([
+                "list-units",
+                "--type=service",
+                "--all",
+                "--no-pager",
+                "--plain",
+            ])
             .stdout(Stdio::piped())
             .output()
             .await
@@ -87,7 +95,7 @@ impl ServiceCollector {
                 let name = parts[0].to_string();
                 if name.ends_with(".service") {
                     let state = ServiceState::from(parts[3]);
-                    
+
                     let is_enabled = self.check_service_enabled(&name).await.unwrap_or(false);
 
                     services.push(ServiceInfo {
@@ -223,7 +231,7 @@ impl StateCollector for ServiceCollector {
             let empty_state = ServicesState {
                 services: Vec::new(),
             };
-            
+
             return Ok(ComponentState {
                 component: "services".to_string(),
                 version: 1,
@@ -235,9 +243,9 @@ impl StateCollector for ServiceCollector {
 
         let services = self.collect_systemd().await?;
         let checksum = Self::compute_checksum(&services);
-        
+
         let state = ServicesState { services };
-        
+
         Ok(ComponentState {
             component: "services".to_string(),
             version: 1,
@@ -297,10 +305,29 @@ impl StateCollector for ServiceCollector {
 
                     match result {
                         Ok(()) => {
-                            applied.push(format!("{}:{}", desired_service.name, if desired_service.enabled { "enabled" } else { "disabled" }));
+                            applied.push(format!(
+                                "{}:{}",
+                                desired_service.name,
+                                if desired_service.enabled {
+                                    "enabled"
+                                } else {
+                                    "disabled"
+                                }
+                            ));
                         }
                         Err(e) => {
-                            failed.push((format!("{}:{}", desired_service.name, if desired_service.enabled { "enable" } else { "disable" }), e.to_string()));
+                            failed.push((
+                                format!(
+                                    "{}:{}",
+                                    desired_service.name,
+                                    if desired_service.enabled {
+                                        "enable"
+                                    } else {
+                                        "disable"
+                                    }
+                                ),
+                                e.to_string(),
+                            ));
                         }
                     }
                 }
@@ -313,7 +340,11 @@ impl StateCollector for ServiceCollector {
             Ok(ApplyResult::Success)
         } else if applied.is_empty() {
             Ok(ApplyResult::Failed {
-                reason: failed.iter().map(|(n, e)| format!("{}: {}", n, e)).collect::<Vec<_>>().join(", "),
+                reason: failed
+                    .iter()
+                    .map(|(n, e)| format!("{}: {}", n, e))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             })
         } else {
             Ok(ApplyResult::PartialSuccess { applied, failed })
@@ -344,7 +375,9 @@ impl StateCollector for ServiceCollector {
 
         for (name, service) in &desired_map {
             if let Some(current_service) = current_map.get(name) {
-                if current_service.state != service.state || current_service.enabled != service.enabled {
+                if current_service.state != service.state
+                    || current_service.enabled != service.enabled
+                {
                     drifts.push(SemanticDrift {
                         path: format!("services/{}", name),
                         expected: serde_json::to_value(service)?,

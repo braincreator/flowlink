@@ -110,7 +110,10 @@ mod tests {
         let current = make_state(vec![("docker", "abc123", data.clone())]);
         let desired = make_state(vec![("docker", "abc123", data)]);
         let drifts = diff_states(&current, &desired);
-        assert!(drifts.is_empty(), "identical checksums should produce no drifts");
+        assert!(
+            drifts.is_empty(),
+            "identical checksums should produce no drifts"
+        );
     }
 
     #[test]

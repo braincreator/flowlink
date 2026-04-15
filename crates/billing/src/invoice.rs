@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use uuid::Uuid;
 
-use crate::plans::Plan;
 use crate::payment::PaymentMethod;
+use crate::plans::Plan;
 
 /// Invoice status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,13 +114,11 @@ impl Invoice {
 
     /// Create a plan subscription invoice
     pub fn for_plan(account_id: &str, plan: &Plan) -> Self {
-        let items = vec![
-            InvoiceLineItem::new(
-                &format!("Подписка FlowLink {} (1 месяц)", plan.name),
-                1,
-                plan.price_kopecks,
-            ),
-        ];
+        let items = vec![InvoiceLineItem::new(
+            &format!("Подписка FlowLink {} (1 месяц)", plan.name),
+            1,
+            plan.price_kopecks,
+        )];
         Self::new(account_id, items)
     }
 
@@ -218,9 +216,13 @@ impl InvoiceStore {
         let id = invoice.id.clone();
         let account_id = invoice.account_id.clone();
 
-        self.by_id.write().unwrap().insert(id.clone(), invoice.clone());
+        self.by_id
+            .write()
+            .unwrap()
+            .insert(id.clone(), invoice.clone());
         self.by_account
-            .write().unwrap()
+            .write()
+            .unwrap()
             .entry(account_id)
             .or_default()
             .push(id);
@@ -240,17 +242,15 @@ impl InvoiceStore {
 
         by_account
             .get(account_id)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| by_id.get(id).cloned())
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| by_id.get(id).cloned()).collect())
             .unwrap_or_default()
     }
 
     /// List all pending invoices
     pub fn list_pending(&self) -> Vec<Invoice> {
-        self.by_id.read().unwrap()
+        self.by_id
+            .read()
+            .unwrap()
             .values()
             .filter(|i| i.status == InvoiceStatus::Pending)
             .cloned()
@@ -259,7 +259,9 @@ impl InvoiceStore {
 
     /// List all overdue invoices
     pub fn list_overdue(&self) -> Vec<Invoice> {
-        self.by_id.read().unwrap()
+        self.by_id
+            .read()
+            .unwrap()
             .values()
             .filter(|i| i.is_overdue())
             .cloned()
@@ -268,12 +270,17 @@ impl InvoiceStore {
 
     /// Update an existing invoice
     pub fn update(&self, invoice: Invoice) {
-        self.by_id.write().unwrap().insert(invoice.id.clone(), invoice);
+        self.by_id
+            .write()
+            .unwrap()
+            .insert(invoice.id.clone(), invoice);
     }
 
     /// Total revenue (sum of paid invoices) in kopecks
     pub fn total_revenue(&self) -> u64 {
-        self.by_id.read().unwrap()
+        self.by_id
+            .read()
+            .unwrap()
             .values()
             .filter(|i| i.status == InvoiceStatus::Paid)
             .map(|i| i.total_kopecks)
@@ -282,7 +289,9 @@ impl InvoiceStore {
 
     /// Revenue for an account in kopecks
     pub fn account_revenue(&self, account_id: &str) -> u64 {
-        self.by_id.read().unwrap()
+        self.by_id
+            .read()
+            .unwrap()
             .values()
             .filter(|i| i.account_id == account_id && i.status == InvoiceStatus::Paid)
             .map(|i| i.total_kopecks)
@@ -356,9 +365,7 @@ mod tests {
     #[test]
     fn test_overage_invoice() {
         let store = make_store();
-        let invoice = store.create(Invoice::for_overage(
-            "acc-1", 500, 1_500_000, 10, 50,
-        ));
+        let invoice = store.create(Invoice::for_overage("acc-1", 500, 1_500_000, 10, 50));
 
         assert_eq!(invoice.items.len(), 2);
         assert!(invoice.notes.unwrap().contains("перерасход"));

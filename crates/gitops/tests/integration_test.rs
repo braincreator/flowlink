@@ -1,8 +1,8 @@
-use flowlink_gitops::pipeline::orchestrator::{PipelineOrchestrator, PipelineAction};
+use flowlink_gitops::config::*;
 use flowlink_gitops::pipeline::classifier::ActionClassifier;
 use flowlink_gitops::pipeline::literal_checker::LiteralChecker;
+use flowlink_gitops::pipeline::orchestrator::{PipelineAction, PipelineOrchestrator};
 use flowlink_gitops::pipeline::tempo::TempoController;
-use flowlink_gitops::config::*;
 use flowlink_gitops::types::*;
 
 /// Integration test: Full pipeline flow — literal check → classify → rate limit
@@ -11,7 +11,9 @@ async fn test_full_pipeline_readonly_command() {
     let config = GitOpsConfig::default();
     let orchestrator = PipelineOrchestrator::new(config);
 
-    let result = orchestrator.process("cat", &["/etc/hosts".to_string()]).await;
+    let result = orchestrator
+        .process("cat", &["/etc/hosts".to_string()])
+        .await;
     assert!(matches!(result.tier, ActionTier::ReadOnly));
     assert!(matches!(result.action, PipelineAction::AllowedReadOnly));
 }
@@ -22,9 +24,14 @@ async fn test_full_pipeline_blocked_command() {
     let orchestrator = PipelineOrchestrator::new(config);
 
     // rm -rf / should be blocked
-    let result = orchestrator.process("rm", &["-rf".to_string(), "/".to_string()]).await;
+    let result = orchestrator
+        .process("rm", &["-rf".to_string(), "/".to_string()])
+        .await;
     // Depending on classifier rules, it might be Destructive or Blocked
-    assert!(matches!(result.tier, ActionTier::Blocked | ActionTier::Destructive));
+    assert!(matches!(
+        result.tier,
+        ActionTier::Blocked | ActionTier::Destructive
+    ));
 }
 
 #[tokio::test]
@@ -32,7 +39,9 @@ async fn test_literal_checker_rejects_shell_vars() {
     let checker = LiteralChecker::with_enabled(true);
 
     // Should reject $VAR expansion in destructive commands
-    assert!(checker.check("rm", &["$HOME/file.txt".to_string()]).is_some());
+    assert!(checker
+        .check("rm", &["$HOME/file.txt".to_string()])
+        .is_some());
     assert!(checker.check("rm", &["`whoami`".to_string()]).is_some());
     assert!(checker.check("rm", &["$(whoami)".to_string()]).is_some());
 
@@ -45,7 +54,9 @@ async fn test_classifier_default_rules() {
     let classifier = ActionClassifier::with_default_rules();
 
     // Read-only commands
-    let result = classifier.classify("cat", &["/etc/hosts".to_string()]).unwrap();
+    let result = classifier
+        .classify("cat", &["/etc/hosts".to_string()])
+        .unwrap();
     assert!(matches!(result.tier, ActionTier::ReadOnly));
 
     let result = classifier.classify("ls", &["-la".to_string()]).unwrap();
@@ -54,7 +65,9 @@ async fn test_classifier_default_rules() {
     let result = classifier.classify("docker", &["ps".to_string()]).unwrap();
     assert!(matches!(result.tier, ActionTier::ReadOnly));
 
-    let result = classifier.classify("systemctl", &["status".to_string(), "nginx".to_string()]).unwrap();
+    let result = classifier
+        .classify("systemctl", &["status".to_string(), "nginx".to_string()])
+        .unwrap();
     assert!(matches!(result.tier, ActionTier::ReadOnly));
 }
 
@@ -135,23 +148,29 @@ async fn test_drift_detection_detects_change() {
 
     // Add a component to desired that's different in current
     let mut current_comps = HashMap::new();
-    current_comps.insert("nginx".to_string(), ComponentState {
-        component: "nginx".to_string(),
-        version: 0,
-        collected_at: chrono::Utc::now(),
-        checksum: "abc123".to_string(),
-        data: serde_json::json!({"status": "running"}),
-    });
+    current_comps.insert(
+        "nginx".to_string(),
+        ComponentState {
+            component: "nginx".to_string(),
+            version: 0,
+            collected_at: chrono::Utc::now(),
+            checksum: "abc123".to_string(),
+            data: serde_json::json!({"status": "running"}),
+        },
+    );
     current.components = current_comps;
 
     let mut desired_comps = HashMap::new();
-    desired_comps.insert("nginx".to_string(), ComponentState {
-        component: "nginx".to_string(),
-        version: 0,
-        collected_at: chrono::Utc::now(),
-        checksum: "def456".to_string(),
-        data: serde_json::json!({"status": "stopped"}),
-    });
+    desired_comps.insert(
+        "nginx".to_string(),
+        ComponentState {
+            component: "nginx".to_string(),
+            version: 0,
+            collected_at: chrono::Utc::now(),
+            checksum: "def456".to_string(),
+            data: serde_json::json!({"status": "stopped"}),
+        },
+    );
     desired.components = desired_comps;
 
     let drifts = semantic_diff::diff_states(&current, &desired);
@@ -166,12 +185,14 @@ async fn test_approval_lifecycle() {
     let manager = ApprovalManager::new(60);
 
     // Create request
-    let id = manager.create_request(
-        "rm",
-        &["-rf".to_string(), "/tmp/test".to_string()],
-        ActionTier::Destructive,
-        RiskLevel::Medium,
-    ).await;
+    let id = manager
+        .create_request(
+            "rm",
+            &["-rf".to_string(), "/tmp/test".to_string()],
+            ActionTier::Destructive,
+            RiskLevel::Medium,
+        )
+        .await;
 
     assert!(!id.is_empty());
 
@@ -198,19 +219,24 @@ async fn test_approval_reject() {
     use flowlink_gitops::approval::ApprovalManager;
 
     let manager = ApprovalManager::new(60);
-    let id = manager.create_request(
-        "dd",
-        &["if=/dev/zero".to_string(), "of=/dev/sda".to_string()],
-        ActionTier::Blocked,
-        RiskLevel::Critical,
-    ).await;
+    let id = manager
+        .create_request(
+            "dd",
+            &["if=/dev/zero".to_string(), "of=/dev/sda".to_string()],
+            ActionTier::Blocked,
+            RiskLevel::Critical,
+        )
+        .await;
 
     let identity = ApprovalIdentity {
         user_id: "admin".to_string(),
         channel: ApprovalChannel::Telegram,
         timestamp: chrono::Utc::now(),
     };
-    manager.reject(&id, identity, "Too dangerous".to_string()).await.unwrap();
+    manager
+        .reject(&id, identity, "Too dangerous".to_string())
+        .await
+        .unwrap();
 
     let pending = manager.get_pending().await;
     assert!(pending.is_empty());
@@ -222,7 +248,10 @@ async fn test_health_checker() {
 
     let checker = HealthChecker::new(vec![
         HealthCheck::TcpPort { port: 5432 },
-        HealthCheck::DiskUsage { path: "/".to_string(), max_percent: 95 },
+        HealthCheck::DiskUsage {
+            path: "/".to_string(),
+            max_percent: 95,
+        },
         HealthCheck::MemoryUsage { max_percent: 95 },
     ]);
 
@@ -264,8 +293,8 @@ async fn test_vault_operations() {
 async fn test_db_backup_engine() {
     use flowlink_gitops::backup::db_backup::{DatabaseBackupEngine, DatabaseConfig, DatabaseType};
 
-    let engine = DatabaseBackupEngine::new(vec![
-        DatabaseConfig {
+    let engine = DatabaseBackupEngine::new(
+        vec![DatabaseConfig {
             db_type: DatabaseType::Postgres,
             host: "localhost".to_string(),
             port: 5432,
@@ -273,8 +302,9 @@ async fn test_db_backup_engine() {
             password: None,
             database: "test".to_string(),
             extra_opts: vec![],
-        },
-    ], 100);
+        }],
+        100,
+    );
 
     let dbs = engine.list_databases();
     assert_eq!(dbs.len(), 1);
@@ -283,7 +313,7 @@ async fn test_db_backup_engine() {
 
 #[tokio::test]
 async fn test_docker_backup_config() {
-    use flowlink_gitops::backup::docker_backup::{DockerBackupEngine, DockerBackupConfig};
+    use flowlink_gitops::backup::docker_backup::{DockerBackupConfig, DockerBackupEngine};
 
     // Verify config has expected defaults
     let _engine = DockerBackupEngine::new(DockerBackupConfig::default());
@@ -320,7 +350,9 @@ async fn test_pipeline_rate_limit_integration() {
 
     // Read-only shouldn't be rate limited
     for _ in 0..100 {
-        let result = orchestrator.process("cat", &["/etc/hosts".to_string()]).await;
+        let result = orchestrator
+            .process("cat", &["/etc/hosts".to_string()])
+            .await;
         assert!(matches!(result.action, PipelineAction::AllowedReadOnly));
     }
 }

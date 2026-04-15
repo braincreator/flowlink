@@ -68,7 +68,8 @@ impl RelayClient {
             timestamp: chrono::Utc::now().timestamp(),
         };
 
-        match self.client
+        match self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_token))
             .json(&body)
@@ -76,7 +77,10 @@ impl RelayClient {
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                info!("Reported interception to relay: alert={}, pid={}", alert_id, pid);
+                info!(
+                    "Reported interception to relay: alert={}, pid={}",
+                    alert_id, pid
+                );
                 Ok(())
             }
             Ok(resp) => {
@@ -96,7 +100,8 @@ impl RelayClient {
         let url = format!("{}/api/shield/resolve", self.relay_url);
         let body = ResolveRequest { pid, approved };
 
-        match self.client
+        match self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_token))
             .json(&body)
@@ -104,7 +109,10 @@ impl RelayClient {
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                info!("Reported resolution to relay: pid={}, approved={}", pid, approved);
+                info!(
+                    "Reported resolution to relay: pid={}, approved={}",
+                    pid, approved
+                );
                 Ok(())
             }
             Ok(resp) => {
@@ -205,14 +213,19 @@ mod tests {
             stream.write_all(response).await.unwrap();
         });
 
-        let client = RelayClient::new(
-            format!("http://127.0.0.1:{}", port),
-            "mytoken".into(),
-        );
-        let result = client.report_interception(
-            "alert-123", 1234, 1000, "testuser",
-            "rm -rf /", "rm_rf", "intercepted", Some("snap-1"),
-        ).await;
+        let client = RelayClient::new(format!("http://127.0.0.1:{}", port), "mytoken".into());
+        let result = client
+            .report_interception(
+                "alert-123",
+                1234,
+                1000,
+                "testuser",
+                "rm -rf /",
+                "rm_rf",
+                "intercepted",
+                Some("snap-1"),
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -230,28 +243,31 @@ mod tests {
             stream.write_all(response).await.unwrap();
         });
 
-        let client = RelayClient::new(
-            format!("http://127.0.0.1:{}", port),
-            "tok".into(),
-        );
+        let client = RelayClient::new(format!("http://127.0.0.1:{}", port), "tok".into());
         // Non-fatal — should still return Ok(())
-        let result = client.report_interception(
-            "alert-456", 9999, 0, "root", "rm /", "rm", "intercepted", None,
-        ).await;
+        let result = client
+            .report_interception(
+                "alert-456",
+                9999,
+                0,
+                "root",
+                "rm /",
+                "rm",
+                "intercepted",
+                None,
+            )
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn report_interception_connection_refused() {
         // Use a port that nothing is listening on
-        let client = RelayClient::new(
-            "http://127.0.0.1:1".into(),
-            "tok".into(),
-        );
+        let client = RelayClient::new("http://127.0.0.1:1".into(), "tok".into());
         // Non-fatal — should return Ok(())
-        let result = client.report_interception(
-            "alert-789", 1, 0, "root", "ls", "ls", "intercepted", None,
-        ).await;
+        let result = client
+            .report_interception("alert-789", 1, 0, "root", "ls", "ls", "intercepted", None)
+            .await;
         assert!(result.is_ok());
     }
 
@@ -259,9 +275,18 @@ mod tests {
     async fn report_interception_invalid_url() {
         let client = RelayClient::new("not-a-valid-url".into(), "tok".into());
         // Should not panic — returns Ok(()) since errors are non-fatal
-        let result = client.report_interception(
-            "alert-invalid", 1, 0, "root", "ls", "ls", "intercepted", None,
-        ).await;
+        let result = client
+            .report_interception(
+                "alert-invalid",
+                1,
+                0,
+                "root",
+                "ls",
+                "ls",
+                "intercepted",
+                None,
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -288,10 +313,7 @@ mod tests {
             stream.write_all(response).await.unwrap();
         });
 
-        let client = RelayClient::new(
-            format!("http://127.0.0.1:{}", port),
-            "mytoken".into(),
-        );
+        let client = RelayClient::new(format!("http://127.0.0.1:{}", port), "mytoken".into());
         let result = client.report_resolution(1234, true).await;
         assert!(result.is_ok());
     }
@@ -350,14 +372,20 @@ mod tests {
 
     #[test]
     fn resolve_request_approved() {
-        let req = ResolveRequest { pid: 1234, approved: true };
+        let req = ResolveRequest {
+            pid: 1234,
+            approved: true,
+        };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"approved\":true"));
     }
 
     #[test]
     fn resolve_request_denied() {
-        let req = ResolveRequest { pid: 5678, approved: false };
+        let req = ResolveRequest {
+            pid: 5678,
+            approved: false,
+        };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"approved\":false"));
     }

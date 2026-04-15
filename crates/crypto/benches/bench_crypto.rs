@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use flowlink_crypto::{KeyPair, encrypt, decrypt};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use flowlink_crypto::{decrypt, encrypt, KeyPair};
 use hkdf::Hkdf;
 use sha2::Sha256;
 
@@ -50,5 +50,11 @@ fn bench_hkdf(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_keypair_generate, bench_encrypt, bench_decrypt, bench_hkdf);
+criterion_group!(
+    benches,
+    bench_keypair_generate,
+    bench_encrypt,
+    bench_decrypt,
+    bench_hkdf
+);
 criterion_main!(benches);

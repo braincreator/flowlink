@@ -6,7 +6,7 @@ use anyhow::Result;
 use log::{info, warn};
 
 use crate::ebpf::ProcessMonitor;
-use crate::ebpf_kernel::{DangerousPattern, default_patterns};
+use crate::ebpf_kernel::{default_patterns, DangerousPattern};
 use crate::es_framework::EsClient;
 
 /// Configuration for the ES monitor
@@ -91,7 +91,10 @@ impl ProcessMonitor for EsMonitor {
                                     warn!("🛡 ES monitor: NOTIFY_EXEC mode (observe-only, no blocking)");
                                 }
                                 Err(e2) => {
-                                    anyhow::bail!("ES monitor: both AUTH and NOTIFY failed: {}", e2);
+                                    anyhow::bail!(
+                                        "ES monitor: both AUTH and NOTIFY failed: {}",
+                                        e2
+                                    );
                                 }
                             }
                         }
@@ -105,7 +108,10 @@ impl ProcessMonitor for EsMonitor {
             }
             Err(e) => {
                 // Fallback: ES not available (no entitlement, sandboxed, etc.)
-                warn!("🛡 ES monitor unavailable: {}. Race-free protection is NOT active.", e);
+                warn!(
+                    "🛡 ES monitor unavailable: {}. Race-free protection is NOT active.",
+                    e
+                );
                 // The caller (HybridGuard/lib.rs) should fall back to SimulatedMonitor
                 anyhow::bail!("ES framework not available: {}", e);
             }
@@ -171,19 +177,31 @@ mod tests {
     #[test]
     fn matches_shred() {
         let patterns = default_patterns();
-        assert!(EsMonitor::matches_l1_pattern("/usr/bin/shred", "/etc/passwd", &patterns));
+        assert!(EsMonitor::matches_l1_pattern(
+            "/usr/bin/shred",
+            "/etc/passwd",
+            &patterns
+        ));
     }
 
     #[test]
     fn matches_mkfs() {
         let patterns = default_patterns();
-        assert!(EsMonitor::matches_l1_pattern("mkfs.ext4", "/dev/sda1", &patterns));
+        assert!(EsMonitor::matches_l1_pattern(
+            "mkfs.ext4",
+            "/dev/sda1",
+            &patterns
+        ));
     }
 
     #[test]
     fn matches_dd() {
         let patterns = default_patterns();
-        assert!(EsMonitor::matches_l1_pattern("dd", "of=/dev/sda", &patterns));
+        assert!(EsMonitor::matches_l1_pattern(
+            "dd",
+            "of=/dev/sda",
+            &patterns
+        ));
     }
 
     #[test]
@@ -195,13 +213,21 @@ mod tests {
     #[test]
     fn matches_docker() {
         let patterns = default_patterns();
-        assert!(EsMonitor::matches_l1_pattern("docker", "rm -f container", &patterns));
+        assert!(EsMonitor::matches_l1_pattern(
+            "docker",
+            "rm -f container",
+            &patterns
+        ));
     }
 
     #[test]
     fn matches_systemctl() {
         let patterns = default_patterns();
-        assert!(EsMonitor::matches_l1_pattern("systemctl", "stop sshd", &patterns));
+        assert!(EsMonitor::matches_l1_pattern(
+            "systemctl",
+            "stop sshd",
+            &patterns
+        ));
     }
 
     #[test]
@@ -219,7 +245,11 @@ mod tests {
     #[test]
     fn no_match_safe_command() {
         let patterns = default_patterns();
-        assert!(!EsMonitor::matches_l1_pattern("cat", "/etc/hosts", &patterns));
+        assert!(!EsMonitor::matches_l1_pattern(
+            "cat",
+            "/etc/hosts",
+            &patterns
+        ));
     }
 
     #[test]
@@ -233,7 +263,9 @@ mod tests {
         let patterns = default_patterns();
         // Even with an unknown binary, --no-preserve-root is caught
         assert!(EsMonitor::matches_l1_pattern(
-            "somecmd", "--no-preserve-root /", &patterns
+            "somecmd",
+            "--no-preserve-root /",
+            &patterns
         ));
     }
 
@@ -241,7 +273,9 @@ mod tests {
     fn path_stripped_for_matching() {
         let patterns = default_patterns();
         assert!(EsMonitor::matches_l1_pattern(
-            "/usr/bin/rm", "-rf /var", &patterns
+            "/usr/bin/rm",
+            "-rf /var",
+            &patterns
         ));
     }
 

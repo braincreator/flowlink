@@ -1,0 +1,17 @@
+[package]
+name = "flowlink-api"
+version = "0.1.0"
+edition = "2021"
+description = "FlowLink REST API for policy management and security scanning"
+
+[dependencies]
+flowlink-shield = { path = "../shield" }
+flowlink-sentinel = { path = "../sentinel" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+axum = { version = "0.8", features = ["json"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+tracing = "0.1"

@@ -1,0 +1,161 @@
+# FlowLink Webhook Receiver Configuration
+
+# Server Configuration
+server:
+  port: 3002
+  public_url: "https://webhook.flow-masters.ru"
+  max_webhook_size: 10485760  # 10MB
+
+# Database Configuration
+database:
+  url: "postgresql://flowlink:password@localhost:5432/flowlink"
+  pool_size: 20
+  max_lifetime: "1h"
+  idle_timeout: "10m"
+  enable_migrations: true
+
+# Redis Configuration
+redis:
+  url: "redis://localhost:6379"
+  max_connections: 10
+  connection_timeout: "10s"
+  read_timeout: "5s"
+  write_timeout: "5s"
+
+# Metrics Configuration
+metrics:
+  enabled: true
+  retention_days: 30
+
+# Storage Configuration
+storage:
+  enabled: true
+  retention_days: 7
+
+# Webhook Verification
+verification:
+  enabled: true
+  hmac_secrets:
+    - service: "github"
+      secret: "your-github-webhook-secret"
+    - service: "gitlab"
+      secret: "your-gitlab-webhook-secret"
+    - service: "stripe"
+      secret: "your-stripe-webhook-secret"
+    - service: "discord"
+      secret: "your-discord-signature-secret"
+
+# Routing Configuration
+routing:
+  enabled: true
+  rules:
+    # GitHub webhooks
+    - service: "github"
+      enabled: true
+      target: "flowlink"
+      rate_limit:
+        requests_per_minute: 60
+        requests_per_hour: 500
+        requests_per_day: 2000
+        burst_size: 10
+
+    # GitLab webhooks
+    - service: "gitlab"
+      enabled: true
+      target: "flowlink"
+      rate_limit:
+        requests_per_minute: 60
+        requests_per_hour: 500
+        requests_per_day: 2000
+        burst_size: 10
+
+    # Jenkins webhooks
+    - service: "jenkins"
+      enabled: true
+      target: "local"
+      handler: "jenkins"
+      rate_limit:
+        requests_per_minute: 30
+        requests_per_hour: 200
+        requests_per_day: 500
+        burst_size: 5
+
+    # Docker webhooks
+    - service: "docker"
+      enabled: true
+      target: "webhook"
+      url: "https://your-monitoring-service.com/webhook"
+      rate_limit:
+        requests_per_minute: 20
+        requests_per_hour: 100
+        requests_per_day: 300
+        burst_size: 3
+
+    # Stripe webhooks
+    - service: "stripe"
+      enabled: true
+      target: "flowlink"
+      rate_limit:
+        requests_per_minute: 10
+        requests_per_hour: 50
+        requests_per_day: 200
+        burst_size: 5
+
+    # Discord webhooks
+    - service: "discord"
+      enabled: true
+      target: "discord"
+      rate_limit:
+        requests_per_minute: 60
+        requests_per_hour: 500
+        requests_per_day: 2000
+        burst_size: 10
+
+    # Slack webhooks
+    - service: "slack"
+      enabled: true
+      target: "slack"
+      rate_limit:
+        requests_per_minute: 60
+        requests_per_hour: 500
+        requests_per_day: 2000
+        burst_size: 10
+
+# CORS Configuration
+cors:
+  enabled: true
+  allowed_origins:
+    - "https://flowlink.flow-masters.ru"
+    - "https://webhook.flow-masters.ru"
+    - "http://localhost:3000"
+
+# Retry Policy
+retry:
+  max_retries: 3
+  delay_seconds: 1
+  backoff_multiplier: 2.0
+  max_delay_seconds: 60
+
+# External Services
+external_services:
+  flowlink:
+    enabled: true
+    endpoint: "http://localhost:8080"
+  discord:
+    enabled: true
+    api_url: "https://discord.com/api/v10"
+  slack:
+    enabled: true
+    api_url: "https://slack.com/api"
+
+# Logging
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+
+# Health Check
+health_check:
+  enabled: true
+  interval_seconds: 30
+  timeout_seconds: 5

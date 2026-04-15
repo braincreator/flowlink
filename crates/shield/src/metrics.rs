@@ -26,9 +26,13 @@ impl ShieldMetrics {
         let registry = Registry::new();
 
         let interceptions_total = CounterVec::new(
-            Opts::new("flowlink_shield_interceptions_total", "Total shield interceptions by level and action"),
+            Opts::new(
+                "flowlink_shield_interceptions_total",
+                "Total shield interceptions by level and action",
+            ),
             &["level", "action"],
-        ).unwrap();
+        )
+        .unwrap();
 
         let l1_analysis_duration = HistogramVec::new(
             prometheus::HistogramOpts::new(
@@ -37,7 +41,8 @@ impl ShieldMetrics {
             )
             .buckets(vec![0.0001, 0.0005, 0.001, 0.005, 0.01]),
             &[],
-        ).unwrap();
+        )
+        .unwrap();
 
         let l2_analysis_duration = HistogramVec::new(
             prometheus::HistogramOpts::new(
@@ -46,7 +51,8 @@ impl ShieldMetrics {
             )
             .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5]),
             &[],
-        ).unwrap();
+        )
+        .unwrap();
 
         let l3_analysis_duration = HistogramVec::new(
             prometheus::HistogramOpts::new(
@@ -55,17 +61,20 @@ impl ShieldMetrics {
             )
             .buckets(vec![0.01, 0.05, 0.1, 0.5, 1.0, 5.0]),
             &[],
-        ).unwrap();
+        )
+        .unwrap();
 
         let approval_queue_size = Gauge::new(
             "flowlink_shield_approval_queue_size",
             "Current number of pending approval requests",
-        ).unwrap();
+        )
+        .unwrap();
 
         let snapshots_created_total = Gauge::new(
             "flowlink_shield_snapshots_created_total",
             "Total snapshots created",
-        ).unwrap();
+        )
+        .unwrap();
 
         let snapshot_duration = HistogramVec::new(
             prometheus::HistogramOpts::new(
@@ -74,15 +83,30 @@ impl ShieldMetrics {
             )
             .buckets(vec![0.01, 0.05, 0.1, 0.5, 1.0, 5.0]),
             &[],
-        ).unwrap();
+        )
+        .unwrap();
 
-        registry.register(Box::new(interceptions_total.clone())).unwrap();
-        registry.register(Box::new(l1_analysis_duration.clone())).unwrap();
-        registry.register(Box::new(l2_analysis_duration.clone())).unwrap();
-        registry.register(Box::new(l3_analysis_duration.clone())).unwrap();
-        registry.register(Box::new(approval_queue_size.clone())).unwrap();
-        registry.register(Box::new(snapshots_created_total.clone())).unwrap();
-        registry.register(Box::new(snapshot_duration.clone())).unwrap();
+        registry
+            .register(Box::new(interceptions_total.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(l1_analysis_duration.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(l2_analysis_duration.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(l3_analysis_duration.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(approval_queue_size.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(snapshots_created_total.clone()))
+            .unwrap();
+        registry
+            .register(Box::new(snapshot_duration.clone()))
+            .unwrap();
 
         Self {
             registry,
@@ -126,18 +150,34 @@ mod tests {
         m.interceptions_total
             .with_label_values(&["l2", "block"])
             .inc_by(2.0);
-        assert_eq!(m.interceptions_total.with_label_values(&["l1", "allow"]).get(), 1.0);
-        assert_eq!(m.interceptions_total.with_label_values(&["l2", "block"]).get(), 2.0);
+        assert_eq!(
+            m.interceptions_total
+                .with_label_values(&["l1", "allow"])
+                .get(),
+            1.0
+        );
+        assert_eq!(
+            m.interceptions_total
+                .with_label_values(&["l2", "block"])
+                .get(),
+            2.0
+        );
     }
 
     #[test]
     fn test_level_durations() {
         let m = ShieldMetrics::new();
-        m.l1_analysis_duration.with_label_values(&[]).observe(0.0005);
+        m.l1_analysis_duration
+            .with_label_values(&[])
+            .observe(0.0005);
         m.l2_analysis_duration.with_label_values(&[]).observe(0.05);
         m.l3_analysis_duration.with_label_values(&[]).observe(0.5);
 
-        for hist in [&m.l1_analysis_duration, &m.l2_analysis_duration, &m.l3_analysis_duration] {
+        for hist in [
+            &m.l1_analysis_duration,
+            &m.l2_analysis_duration,
+            &m.l3_analysis_duration,
+        ] {
             let mf = hist.collect();
             let hist = mf[0].get_metric()[0].get_histogram();
             assert_eq!(hist.get_sample_count(), 1);

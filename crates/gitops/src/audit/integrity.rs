@@ -44,7 +44,10 @@ impl IntegrityVerifier {
                 Ok(h) => h,
                 Err(e) => {
                     warn!("Failed to compute HMAC for entry {}: {}", i, e);
-                    issues.push(format!("Failed to compute HMAC for entry {}: {}", entry.id, e));
+                    issues.push(format!(
+                        "Failed to compute HMAC for entry {}: {}",
+                        entry.id, e
+                    ));
                     continue;
                 }
             };
@@ -58,7 +61,10 @@ impl IntegrityVerifier {
         }
 
         if issues.is_empty() {
-            debug!("HMAC chain verification passed for {} entries", entries.len());
+            debug!(
+                "HMAC chain verification passed for {} entries",
+                entries.len()
+            );
             IntegrityStatus {
                 is_healthy: true,
                 issues: vec![],
@@ -66,7 +72,10 @@ impl IntegrityVerifier {
                 last_checked: now,
             }
         } else {
-            warn!("HMAC chain verification failed: {} issues found", issues.len());
+            warn!(
+                "HMAC chain verification failed: {} issues found",
+                issues.len()
+            );
             IntegrityStatus {
                 is_healthy: false,
                 issues,
@@ -82,16 +91,14 @@ impl IntegrityVerifier {
                 let machine_id = Self::get_machine_id()?;
                 Ok(sha256(machine_id.as_bytes()).to_vec())
             }
-            HmacKeySource::ConfigKey { key } => {
-                Ok(sha256(key.as_bytes()).to_vec())
-            }
+            HmacKeySource::ConfigKey { key } => Ok(sha256(key.as_bytes()).to_vec()),
         }
     }
 
     #[cfg(target_os = "linux")]
     fn get_machine_id() -> Result<String> {
-        let content = std::fs::read_to_string("/etc/machine-id")
-            .context("Failed to read /etc/machine-id")?;
+        let content =
+            std::fs::read_to_string("/etc/machine-id").context("Failed to read /etc/machine-id")?;
         Ok(content.trim().to_string())
     }
 
@@ -135,37 +142,118 @@ fn serialize_entry_fields(entry: &AuditEntry) -> Result<String> {
     let mut map = serde_json::Map::new();
 
     map.insert("id".to_string(), serde_json::to_value(&entry.id)?);
-    map.insert("timestamp".to_string(), serde_json::to_value(&entry.timestamp)?);
-    map.insert("agent_id".to_string(), serde_json::to_value(&entry.agent_id)?);
-    map.insert("session_id".to_string(), serde_json::to_value(&entry.session_id)?);
+    map.insert(
+        "timestamp".to_string(),
+        serde_json::to_value(&entry.timestamp)?,
+    );
+    map.insert(
+        "agent_id".to_string(),
+        serde_json::to_value(&entry.agent_id)?,
+    );
+    map.insert(
+        "session_id".to_string(),
+        serde_json::to_value(&entry.session_id)?,
+    );
     map.insert("command".to_string(), serde_json::to_value(&entry.command)?);
     map.insert("args".to_string(), serde_json::to_value(&entry.args)?);
     map.insert("cwd".to_string(), serde_json::to_value(&entry.cwd)?);
-    map.insert("env_var_names".to_string(), serde_json::to_value(&entry.env_var_names)?);
-    map.insert("risk_level".to_string(), serde_json::to_value(&entry.risk_level)?);
-    map.insert("shield_verdict".to_string(), serde_json::to_value(&entry.shield_verdict)?);
-    map.insert("shield_rules_matched".to_string(), serde_json::to_value(&entry.shield_rules_matched)?);
+    map.insert(
+        "env_var_names".to_string(),
+        serde_json::to_value(&entry.env_var_names)?,
+    );
+    map.insert(
+        "risk_level".to_string(),
+        serde_json::to_value(&entry.risk_level)?,
+    );
+    map.insert(
+        "shield_verdict".to_string(),
+        serde_json::to_value(&entry.shield_verdict)?,
+    );
+    map.insert(
+        "shield_rules_matched".to_string(),
+        serde_json::to_value(&entry.shield_rules_matched)?,
+    );
     map.insert("tier".to_string(), serde_json::to_value(&entry.tier)?);
-    map.insert("original_command".to_string(), serde_json::to_value(&entry.original_command)?);
-    map.insert("rewritten_command".to_string(), serde_json::to_value(&entry.rewritten_command)?);
-    map.insert("rate_remaining".to_string(), serde_json::to_value(&entry.rate_remaining)?);
-    map.insert("breaker_state".to_string(), serde_json::to_value(&entry.breaker_state)?);
-    map.insert("exit_code".to_string(), serde_json::to_value(&entry.exit_code)?);
-    map.insert("stdout_hash".to_string(), serde_json::to_value(&entry.stdout_hash)?);
-    map.insert("stderr_hash".to_string(), serde_json::to_value(&entry.stderr_hash)?);
-    map.insert("duration_ms".to_string(), serde_json::to_value(&entry.duration_ms)?);
-    map.insert("files_modified".to_string(), serde_json::to_value(&entry.files_modified)?);
-    map.insert("services_affected".to_string(), serde_json::to_value(&entry.services_affected)?);
-    map.insert("containers_affected".to_string(), serde_json::to_value(&entry.containers_affected)?);
-    map.insert("databases_affected".to_string(), serde_json::to_value(&entry.databases_affected)?);
-    map.insert("git_commit".to_string(), serde_json::to_value(&entry.git_commit)?);
-    map.insert("backup_id".to_string(), serde_json::to_value(&entry.backup_id)?);
-    map.insert("rollback_available".to_string(), serde_json::to_value(&entry.rollback_available)?);
-    map.insert("health_check".to_string(), serde_json::to_value(&entry.health_check)?);
-    map.insert("auto_restored".to_string(), serde_json::to_value(&entry.auto_restored)?);
-    map.insert("auto_restore_backup_id".to_string(), serde_json::to_value(&entry.auto_restore_backup_id)?);
-    map.insert("policy_hash".to_string(), serde_json::to_value(&entry.policy_hash)?);
-    map.insert("classification_rule".to_string(), serde_json::to_value(&entry.classification_rule)?);
+    map.insert(
+        "original_command".to_string(),
+        serde_json::to_value(&entry.original_command)?,
+    );
+    map.insert(
+        "rewritten_command".to_string(),
+        serde_json::to_value(&entry.rewritten_command)?,
+    );
+    map.insert(
+        "rate_remaining".to_string(),
+        serde_json::to_value(&entry.rate_remaining)?,
+    );
+    map.insert(
+        "breaker_state".to_string(),
+        serde_json::to_value(&entry.breaker_state)?,
+    );
+    map.insert(
+        "exit_code".to_string(),
+        serde_json::to_value(&entry.exit_code)?,
+    );
+    map.insert(
+        "stdout_hash".to_string(),
+        serde_json::to_value(&entry.stdout_hash)?,
+    );
+    map.insert(
+        "stderr_hash".to_string(),
+        serde_json::to_value(&entry.stderr_hash)?,
+    );
+    map.insert(
+        "duration_ms".to_string(),
+        serde_json::to_value(&entry.duration_ms)?,
+    );
+    map.insert(
+        "files_modified".to_string(),
+        serde_json::to_value(&entry.files_modified)?,
+    );
+    map.insert(
+        "services_affected".to_string(),
+        serde_json::to_value(&entry.services_affected)?,
+    );
+    map.insert(
+        "containers_affected".to_string(),
+        serde_json::to_value(&entry.containers_affected)?,
+    );
+    map.insert(
+        "databases_affected".to_string(),
+        serde_json::to_value(&entry.databases_affected)?,
+    );
+    map.insert(
+        "git_commit".to_string(),
+        serde_json::to_value(&entry.git_commit)?,
+    );
+    map.insert(
+        "backup_id".to_string(),
+        serde_json::to_value(&entry.backup_id)?,
+    );
+    map.insert(
+        "rollback_available".to_string(),
+        serde_json::to_value(&entry.rollback_available)?,
+    );
+    map.insert(
+        "health_check".to_string(),
+        serde_json::to_value(&entry.health_check)?,
+    );
+    map.insert(
+        "auto_restored".to_string(),
+        serde_json::to_value(&entry.auto_restored)?,
+    );
+    map.insert(
+        "auto_restore_backup_id".to_string(),
+        serde_json::to_value(&entry.auto_restore_backup_id)?,
+    );
+    map.insert(
+        "policy_hash".to_string(),
+        serde_json::to_value(&entry.policy_hash)?,
+    );
+    map.insert(
+        "classification_rule".to_string(),
+        serde_json::to_value(&entry.classification_rule)?,
+    );
 
     serde_json::to_string(&serde_json::Value::Object(map))
         .map_err(|e| anyhow::anyhow!("Failed to serialize entry: {}", e))

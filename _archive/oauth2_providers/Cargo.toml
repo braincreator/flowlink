@@ -1,0 +1,51 @@
+[package]
+name = "flowlink_oauth2_providers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "1.0"
+log = "0.4"
+reqwest = { version = "0.11", features = ["json"] }
+url = "2.3"
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+rand = "0.8"
+base64 = "0.21"
+hex = "0.4"
+ring = "0.17"
+openssl = "0.10"
+urlencoding = "2.1"
+jsonwebtoken = "9.0"
+bcrypt = "0.15"
+parking_lot = "0.12"
+reqwest-middleware = "0.2"
+reqwest-retry = "0.2"
+
+# OAuth2 client libraries
+oauth2 = { version = "4.4", features = ["reqwest", "pkce"] }
+
+# JWT
+jose = "0.10"
+
+# Session management
+serde_qs = "0.12"
+
+# UUID
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Configuration
+config = "0.13"
+
+# Database
+sqlx = { version = "0.6", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid"] }
+
+# Error handling
+thiserror = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"

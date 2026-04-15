@@ -62,7 +62,10 @@ pub struct DatabaseBackupEngine {
 
 impl DatabaseBackupEngine {
     pub fn new(configs: Vec<DatabaseConfig>, max_size_mb: u64) -> Self {
-        Self { configs, max_size_mb }
+        Self {
+            configs,
+            max_size_mb,
+        }
     }
 
     /// Backup all configured databases
@@ -71,7 +74,10 @@ impl DatabaseBackupEngine {
         for config in &self.configs {
             match self.backup_database(config, output_dir).await {
                 Ok(result) => {
-                    info!("Database backup successful: {} ({:?})", config.database, config.db_type);
+                    info!(
+                        "Database backup successful: {} ({:?})",
+                        config.database, config.db_type
+                    );
                     results.push(result);
                 }
                 Err(e) => {
@@ -90,14 +96,22 @@ impl DatabaseBackupEngine {
     ) -> Result<DbBackupResult> {
         let start = std::time::Instant::now();
         let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-        let filename = format!("{}_{}_{}.sql.gz", 
-            match config.db_type { DatabaseType::Postgres => "pg", DatabaseType::MySQL => "my", DatabaseType::SQLite => "sq" },
+        let filename = format!(
+            "{}_{}_{}.sql.gz",
+            match config.db_type {
+                DatabaseType::Postgres => "pg",
+                DatabaseType::MySQL => "my",
+                DatabaseType::SQLite => "sq",
+            },
             config.database,
             timestamp
         );
         let dump_path = output_dir.join(&filename);
 
-        debug!("Starting database backup: {} ({:?})", config.database, config.db_type);
+        debug!(
+            "Starting database backup: {} ({:?})",
+            config.database, config.db_type
+        );
 
         match config.db_type {
             DatabaseType::Postgres => self.dump_postgres(config, &dump_path).await?,
@@ -105,12 +119,16 @@ impl DatabaseBackupEngine {
             DatabaseType::SQLite => self.dump_sqlite(config, &dump_path).await?,
         }
 
-        let metadata = tokio::fs::metadata(&dump_path).await
+        let metadata = tokio::fs::metadata(&dump_path)
+            .await
             .context("Failed to read dump file metadata")?;
 
         let size_bytes = metadata.len();
         if size_bytes > self.max_size_mb * 1024 * 1024 {
-            warn!("Database dump exceeds max size: {} bytes (max: {} MB)", size_bytes, self.max_size_mb);
+            warn!(
+                "Database dump exceeds max size: {} bytes (max: {} MB)",
+                size_bytes, self.max_size_mb
+            );
         }
 
         let checksum = self.compute_checksum(&dump_path).await?;
@@ -130,11 +148,16 @@ impl DatabaseBackupEngine {
     async fn dump_postgres(&self, config: &DatabaseConfig, output: &Path) -> Result<()> {
         let mut cmd = Command::new("pg_dump");
         cmd.args([
-            "-h", &config.host,
-            "-p", &config.port.to_string(),
-            "-U", &config.username,
-            "-F", "c", // custom format (compressed)
-            "-f", output.to_string_lossy().as_ref(),
+            "-h",
+            &config.host,
+            "-p",
+            &config.port.to_string(),
+            "-U",
+            &config.username,
+            "-F",
+            "c", // custom format (compressed)
+            "-f",
+            output.to_string_lossy().as_ref(),
             &config.database,
         ]);
         cmd.args(&config.extra_opts);
@@ -143,11 +166,13 @@ impl DatabaseBackupEngine {
             cmd.env("PGPASSWORD", password);
         }
 
-        let result = cmd.output().await
-            .context("Failed to execute pg_dump")?;
+        let result = cmd.output().await.context("Failed to execute pg_dump")?;
 
         if !result.status.success() {
-            anyhow::bail!("pg_dump failed: {}", String::from_utf8_lossy(&result.stderr));
+            anyhow::bail!(
+                "pg_dump failed: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
         }
 
         Ok(())
@@ -157,9 +182,12 @@ impl DatabaseBackupEngine {
     async fn dump_mysql(&self, config: &DatabaseConfig, output: &Path) -> Result<()> {
         let mut cmd = Command::new("mysqldump");
         cmd.args([
-            "-h", &config.host,
-            "-P", &config.port.to_string(),
-            "-u", &config.username,
+            "-h",
+            &config.host,
+            "-P",
+            &config.port.to_string(),
+            "-u",
+            &config.username,
             "--single-transaction",
             "--routines",
             "--triggers",
@@ -173,11 +201,13 @@ impl DatabaseBackupEngine {
 
         // Pipe through gzip
         let output_path = output.to_path_buf();
-        let dump_result = cmd.output().await
-            .context("Failed to execute mysqldump")?;
+        let dump_result = cmd.output().await.context("Failed to execute mysqldump")?;
 
         if !dump_result.status.success() {
-            anyhow::bail!("mysqldump failed: {}", String::from_utf8_lossy(&dump_result.stderr));
+            anyhow::bail!(
+                "mysqldump failed: {}",
+                String::from_utf8_lossy(&dump_result.stderr)
+            );
         }
 
         // Write compressed output
@@ -195,7 +225,8 @@ impl DatabaseBackupEngine {
     /// Dump SQLite database (simple file copy)
     async fn dump_sqlite(&self, config: &DatabaseConfig, output: &Path) -> Result<()> {
         let db_path = &config.host; // For SQLite, host field stores the file path
-        tokio::fs::copy(db_path, output).await
+        tokio::fs::copy(db_path, output)
+            .await
             .context("Failed to copy SQLite database")?;
         Ok(())
     }
@@ -227,12 +258,13 @@ impl DatabaseBackupEngine {
                     cmd.arg(format!("-p{}", pw));
                 }
                 cmd.arg("-u").arg(&config.username);
-                let result = cmd.output().await.context("Failed to run mysqladmin ping")?;
+                let result = cmd
+                    .output()
+                    .await
+                    .context("Failed to run mysqladmin ping")?;
                 Ok(result.status.success())
             }
-            DatabaseType::SQLite => {
-                Ok(Path::new(&config.host).exists())
-            }
+            DatabaseType::SQLite => Ok(Path::new(&config.host).exists()),
         }
     }
 }
@@ -257,10 +289,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_databases() {
-        let engine = DatabaseBackupEngine::new(vec![
-            DatabaseConfig { database: "db1".to_string(), ..Default::default() },
-            DatabaseConfig { database: "db2".to_string(), db_type: DatabaseType::MySQL, port: 3306, ..Default::default() },
-        ], 100);
+        let engine = DatabaseBackupEngine::new(
+            vec![
+                DatabaseConfig {
+                    database: "db1".to_string(),
+                    ..Default::default()
+                },
+                DatabaseConfig {
+                    database: "db2".to_string(),
+                    db_type: DatabaseType::MySQL,
+                    port: 3306,
+                    ..Default::default()
+                },
+            ],
+            100,
+        );
         let dbs = engine.list_databases();
         assert_eq!(dbs.len(), 2);
     }

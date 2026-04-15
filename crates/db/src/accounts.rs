@@ -1,9 +1,8 @@
 //! Account persistence — CRUD for account billing state
 
 use anyhow::Result;
-use sqlx::PgPool;
 use chrono::{DateTime, Utc};
-
+use sqlx::PgPool;
 
 /// Account row from database
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -13,6 +12,9 @@ pub struct AccountRow {
     pub active: bool,
     pub balance_kopecks: i64,
     pub payment_method: Option<String>,
+    pub tg_id: Option<i64>,
+    pub email: Option<String>,
+    pub last_login: Option<DateTime<Utc>>,
     pub activated_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub cycle_start: DateTime<Utc>,
@@ -28,7 +30,7 @@ impl AccountRepo {
         let row = sqlx::query_as::<_, AccountRow>(
             "SELECT account_id, plan_id, active, balance_kopecks, payment_method,
                     activated_at, expires_at, cycle_start, created_at, updated_at
-             FROM accounts WHERE account_id = $1"
+             FROM accounts WHERE account_id = $1",
         )
         .bind(account_id)
         .fetch_optional(pool)
@@ -40,7 +42,7 @@ impl AccountRepo {
     /// Create a new account (skip if exists)
     pub async fn create(pool: &PgPool, account_id: &str, plan_id: &str) -> Result<()> {
         sqlx::query(
-            "INSERT INTO accounts (account_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+            "INSERT INTO accounts (account_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         )
         .bind(account_id)
         .bind(plan_id)
@@ -55,7 +57,7 @@ impl AccountRepo {
             "UPDATE accounts SET plan_id = $1, activated_at = NOW(), cycle_start = NOW(),
              expires_at = CASE WHEN $1 = 'free' THEN NULL ELSE NOW() + INTERVAL '30 days' END,
              updated_at = NOW()
-             WHERE account_id = $2"
+             WHERE account_id = $2",
         )
         .bind(plan_id)
         .bind(account_id)
@@ -69,10 +71,14 @@ impl AccountRepo {
     }
 
     /// Update balance (returns new balance)
-    pub async fn update_balance(pool: &PgPool, account_id: &str, delta_kopecks: i64) -> Result<i64> {
+    pub async fn update_balance(
+        pool: &PgPool,
+        account_id: &str,
+        delta_kopecks: i64,
+    ) -> Result<i64> {
         sqlx::query_scalar(
             "UPDATE accounts SET balance_kopecks = balance_kopecks + $1, updated_at = NOW()
-             WHERE account_id = $2 RETURNING balance_kopecks"
+             WHERE account_id = $2 RETURNING balance_kopecks",
         )
         .bind(delta_kopecks)
         .bind(account_id)
@@ -83,20 +89,22 @@ impl AccountRepo {
 
     /// Set active/inactive
     pub async fn set_active(pool: &PgPool, account_id: &str, active: bool) -> Result<()> {
-        sqlx::query(
-            "UPDATE accounts SET active = $1, updated_at = NOW() WHERE account_id = $2"
-        )
-        .bind(active)
-        .bind(account_id)
-        .execute(pool)
-        .await?;
+        sqlx::query("UPDATE accounts SET active = $1, updated_at = NOW() WHERE account_id = $2")
+            .bind(active)
+            .bind(account_id)
+            .execute(pool)
+            .await?;
         Ok(())
     }
 
     /// Set payment method
-    pub async fn set_payment_method(pool: &PgPool, account_id: &str, method: Option<&str>) -> Result<()> {
+    pub async fn set_payment_method(
+        pool: &PgPool,
+        account_id: &str,
+        method: Option<&str>,
+    ) -> Result<()> {
         sqlx::query(
-            "UPDATE accounts SET payment_method = $1, updated_at = NOW() WHERE account_id = $2"
+            "UPDATE accounts SET payment_method = $1, updated_at = NOW() WHERE account_id = $2",
         )
         .bind(method)
         .bind(account_id)
@@ -110,7 +118,7 @@ impl AccountRepo {
         let rows = sqlx::query_as::<_, AccountRow>(
             "SELECT account_id, plan_id, active, balance_kopecks, payment_method,
                     activated_at, expires_at, cycle_start, created_at, updated_at
-             FROM accounts ORDER BY created_at"
+             FROM accounts ORDER BY created_at",
         )
         .fetch_all(pool)
         .await?;
@@ -120,20 +128,88 @@ impl AccountRepo {
     /// Count accounts by plan
     pub async fn count_by_plan(pool: &PgPool) -> Result<Vec<(String, i64)>> {
         let rows = sqlx::query_as::<_, (String, i64)>(
-            "SELECT plan_id, COUNT(*) FROM accounts GROUP BY plan_id"
+            "SELECT plan_id, COUNT(*) FROM accounts GROUP BY plan_id",
         )
         .fetch_all(pool)
         .await?;
         Ok(rows)
     }
 
+    /// Update Telegram ID
+    pub async fn update_tg_id(pool: &PgPool, account_id: &str, tg_id: i64) -> Result<()> {
+        sqlx::query("UPDATE accounts SET tg_id = $1, updated_at = NOW() WHERE account_id = $2")
+            .bind(tg_id)
+            .bind(account_id)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Get account by email
+    pub async fn get_by_email(pool: &PgPool, email: &str) -> Result<Option<AccountRow>> {
+        let row = sqlx::query_as::<_, AccountRow>(
+            "SELECT account_id, plan_id, active, balance_kopecks, payment_method, tg_id,
+                    activated_at, expires_at, cycle_start, created_at, updated_at
+             FROM accounts WHERE email = $1",
+        )
+        .bind(email)
+        .fetch_optional(pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Create account with email
+    pub async fn create_with_email(
+        pool: &PgPool,
+        account_id: &str,
+        plan_id: &str,
+        email: &str,
+    ) -> Result<()> {
+        sqlx::query("INSERT INTO accounts (account_id, plan_id, email) VALUES ($1, $2, $3)")
+            .bind(account_id)
+            .bind(plan_id)
+            .bind(email)
+            .execute(pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Update last login timestamp
+    pub async fn update_last_login(pool: &PgPool, account_id: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE accounts SET last_login = NOW(), updated_at = NOW() WHERE account_id = $1",
+        )
+        .bind(account_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Get account by Telegram ID
+    pub async fn get_by_tg_id(pool: &PgPool, tg_id: i64) -> Result<Option<AccountRow>> {
+        let row = sqlx::query_as::<_, AccountRow>(
+            "SELECT account_id, plan_id, active, balance_kopecks, payment_method, tg_id,
+                    activated_at, expires_at, cycle_start, created_at, updated_at
+             FROM accounts WHERE tg_id = $1",
+        )
+        .bind(tg_id)
+        .fetch_optional(pool)
+        .await?;
+        Ok(row)
+    }
+
     /// Get or create account
-    pub async fn get_or_create(pool: &PgPool, account_id: &str, default_plan: &str) -> Result<AccountRow> {
+    pub async fn get_or_create(
+        pool: &PgPool,
+        account_id: &str,
+        default_plan: &str,
+    ) -> Result<AccountRow> {
         if let Some(acc) = Self::get(pool, account_id).await? {
             return Ok(acc);
         }
         Self::create(pool, account_id, default_plan).await?;
-        Self::get(pool, account_id).await?
+        Self::get(pool, account_id)
+            .await?
             .ok_or_else(|| anyhow::anyhow!("Account disappeared after create"))
     }
 }
@@ -222,7 +298,11 @@ mod tests {
             "SELECT plan_id, COUNT(*) FROM accounts GROUP BY plan_id",
         ];
         for q in &queries {
-            assert!(q.contains("accounts"), "Query missing 'accounts' table: {}", q);
+            assert!(
+                q.contains("accounts"),
+                "Query missing 'accounts' table: {}",
+                q
+            );
         }
     }
 

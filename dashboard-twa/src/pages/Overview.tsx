@@ -1,5 +1,5 @@
-import { useCallback } from 'react';
-import { AuditEvent, Agent } from '../types';
+import { useCallback, useEffect } from 'react';
+import { AuditEvent, Agent, AccountInfo } from '../types';
 import StatCard from '../components/StatCard';
 import EventItem from '../components/EventItem';
 import { api } from '../api/client';
@@ -7,10 +7,11 @@ import { useApi } from '../hooks/useApi';
 
 export default function Overview() {
   const { data: agents, loading: agentsLoading, error: agentsError, refresh: refreshAgents } = useApi(() => api.getAgents(), { pollMs: 15000 });
+  const { data: account, loading: accountLoading, error: accountError, refresh: refreshAccount } = useApi(() => api.getAccountInfo(), { pollMs: 15000 });
   const { data: events, loading: eventsLoading, error: eventsError, refresh: refreshEvents } = useApi(() => api.getAuditEvents(), { pollMs: 15000 });
 
-  const loading = agentsLoading || eventsLoading;
-  const error = agentsError || eventsError;
+  const loading = agentsLoading || accountLoading || eventsLoading;
+  const error = agentsError || accountError || eventsError;
 
   const agentsOnline = (agents || []).filter((a: any) => a.status === 'online').length;
   const agentsTotal = (agents || []).length;
@@ -25,12 +26,11 @@ export default function Overview() {
     details: e.details,
   }));
 
-  const shieldColor = loading ? 'var(--tg-hint)' : error ? 'var(--tg-danger)' : 'var(--tg-success)';
-
   const onRetry = useCallback(() => {
     refreshAgents();
+    refreshAccount();
     refreshEvents();
-  }, [refreshAgents, refreshEvents]);
+  }, [refreshAgents, refreshAccount, refreshEvents]);
 
   if (loading) {
     return (
@@ -53,13 +53,34 @@ export default function Overview() {
     );
   }
 
+  const planBadge = account?.plan_name
+    ? <span className="px-2 py-1 rounded-full bg-tg-hint text-tg-button-text text-xs font-medium">{account.plan_name}</span>
+    : <span className="px-2 py-1 rounded-full bg-tg-button text-tg-button-text text-xs font-medium">Free</span>;
+
   return (
     <div className="px-4 pt-4">
+      {/* Account Info */}
+      <div className="mb-6 bg-tg-hint/10 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold">Account</h2>
+          {planBadge}
+        </div>
+        {account && (
+          <div className="space-y-2">
+            <div className="flex justify-between"><span className="text-sm text-tg-hint">Email:</span><span className="text-sm font-medium">{account.user.email}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-tg-hint">Name:</span><span className="text-sm font-medium">{account.user.name || 'Not set'}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-tg-hint">Plan:</span><span className="text-sm font-medium">{account.plan_name || 'Free'}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-tg-hint">Servers:</span><span className="text-sm font-medium">{account.servers_count}/∞</span></div>
+            <div className="flex justify-between"><span className="text-sm text-tg-hint">Active:</span><span className={`text-sm font-medium ${account.active ? 'text-tg-success' : 'text-tg-danger'}`}>{account.active ? 'Yes' : 'No'}</span></div>
+          </div>
+        )}
+      </div>
+
       {/* Shield Status */}
       <div className="flex items-center justify-center gap-2 mb-5 py-3">
-        <div className="w-3 h-3 rounded-full animate-pulse" style={{ background: shieldColor }} />
-        <span className="text-sm font-semibold" style={{ color: shieldColor }}>
-          Shield Active
+        <div className="w-3 h-3 rounded-full animate-pulse" style={{ background: loading ? 'var(--tg-hint)' : (error ? 'var(--tg-danger)' : 'var(--tg-success)') }} />
+        <span className="text-sm font-semibold" style={{ color: loading ? 'var(--tg-hint)' : (error ? 'var(--tg-danger)' : 'var(--tg-success)') }}>
+          Shield Status
         </span>
       </div>
 
@@ -67,7 +88,7 @@ export default function Overview() {
       <div className="flex gap-3 mb-6">
         <StatCard label="Agents Online" value={agentsOnline} icon="🤖" color="var(--tg-success)" />
         <StatCard label="Total Agents" value={agentsTotal} icon="💻" color="var(--tg-button)" />
-        <StatCard label="Events" value={mappedEvents.length} icon="⚡" color="var(--tg-button)" />
+        <StatCard label="Servers" value={account?.servers_count || 0} icon="🖥" color="var(--tg-button)" />
       </div>
 
       {/* Activity Feed */}

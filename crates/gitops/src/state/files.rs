@@ -80,42 +80,45 @@ impl FileCollector {
         }
     }
 
-    fn collect_directory<'a>(dir_path: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<FileInfo>>> + Send + 'a>> {
+    fn collect_directory<'a>(
+        dir_path: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<FileInfo>>> + Send + 'a>>
+    {
         Box::pin(async move {
-        let mut files = Vec::new();
-        let path = Path::new(dir_path);
+            let mut files = Vec::new();
+            let path = Path::new(dir_path);
 
-        if !path.exists() {
-            debug!("Directory {} does not exist", dir_path);
-            return Ok(files);
-        }
-
-        let mut entries = fs::read_dir(path)
-            .await
-            .map_err(|e| anyhow!("Failed to read directory {}: {}", dir_path, e))?;
-
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| anyhow!("Failed to read directory entry: {}", e))?
-        {
-            let entry_path = entry.path();
-            let entry_str = entry_path.to_string_lossy().to_string();
-
-            let metadata = entry.metadata().await;
-            match metadata {
-                Ok(m) if m.is_file() => {
-                    files.push(Self::collect_file_info(&entry_str).await);
-                }
-                Ok(m) if m.is_dir() => {
-                    let subdir_files = Self::collect_directory(&entry_str).await?;
-                    files.extend(subdir_files);
-                }
-                _ => {}
+            if !path.exists() {
+                debug!("Directory {} does not exist", dir_path);
+                return Ok(files);
             }
-        }
 
-        Ok(files)
+            let mut entries = fs::read_dir(path)
+                .await
+                .map_err(|e| anyhow!("Failed to read directory {}: {}", dir_path, e))?;
+
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| anyhow!("Failed to read directory entry: {}", e))?
+            {
+                let entry_path = entry.path();
+                let entry_str = entry_path.to_string_lossy().to_string();
+
+                let metadata = entry.metadata().await;
+                match metadata {
+                    Ok(m) if m.is_file() => {
+                        files.push(Self::collect_file_info(&entry_str).await);
+                    }
+                    Ok(m) if m.is_dir() => {
+                        let subdir_files = Self::collect_directory(&entry_str).await?;
+                        files.extend(subdir_files);
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok(files)
         })
     }
 
@@ -241,12 +244,10 @@ impl StateCollector for FileCollector {
             } else if desired_file.exists {
                 let content = Self::get_file_content_for_hash(&desired_file.hash);
                 match content {
-                    Some(content) => {
-                        match Self::write_file(&desired_file.path, &content).await {
-                            Ok(()) => applied.push(desired_file.path.clone()),
-                            Err(e) => failed.push((desired_file.path.clone(), e.to_string())),
-                        }
-                    }
+                    Some(content) => match Self::write_file(&desired_file.path, &content).await {
+                        Ok(()) => applied.push(desired_file.path.clone()),
+                        Err(e) => failed.push((desired_file.path.clone(), e.to_string())),
+                    },
                     None => {
                         failed.push((
                             desired_file.path.clone(),

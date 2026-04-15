@@ -32,9 +32,9 @@
 //! guard.stop().await?;
 //! ```
 
+pub mod command_runner;
 pub mod event_types;
 pub mod guard_mode;
-pub mod command_runner;
 pub mod pipeline;
 
 use std::collections::HashMap;
@@ -42,11 +42,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::mpsc;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
+use command_runner::CommandRunner;
 use event_types::{GuardAlert, GuardEvent};
 use guard_mode::GuardKillswitch;
-use command_runner::CommandRunner;
 use pipeline::{Pipeline, PipelineConfig, PipelineOutcome};
 
 /// ServerGuard configuration
@@ -95,8 +95,12 @@ fn default_watch_paths() -> Vec<String> {
     ]
 }
 
-fn default_true() -> bool { true }
-fn default_state_interval() -> u64 { 300 }
+fn default_true() -> bool {
+    true
+}
+fn default_state_interval() -> u64 {
+    300
+}
 
 impl Default for ServerGuardConfig {
     fn default() -> Self {
@@ -163,7 +167,9 @@ impl ServerGuard {
         info!("🛡 ServerGuard starting...");
 
         // Take the receiver (can only be consumed once)
-        let event_rx = self.event_rx.take()
+        let event_rx = self
+            .event_rx
+            .take()
             .ok_or_else(|| anyhow::anyhow!("ServerGuard already started"))?;
 
         let event_tx = self.event_tx.clone();
@@ -183,7 +189,10 @@ impl ServerGuard {
                 if let Some(url) = relay_url {
                     send_alert_to_relay(&url, &agent_id, &agent_token, &alert).await;
                 } else {
-                    info!("🛡 ServerGuard alert (no relay configured): {}", alert.summary);
+                    info!(
+                        "🛡 ServerGuard alert (no relay configured): {}",
+                        alert.summary
+                    );
                 }
             });
         });
@@ -224,7 +233,10 @@ impl ServerGuard {
         });
         self.tasks.push(handle);
 
-        info!("🛡 ServerGuard started with {} background tasks", self.tasks.len());
+        info!(
+            "🛡 ServerGuard started with {} background tasks",
+            self.tasks.len()
+        );
         Ok(())
     }
 
@@ -309,7 +321,10 @@ async fn start_file_watcher(tx: mpsc::Sender<GuardEvent>, paths: Vec<String>) {
         return;
     }
 
-    info!("🛡 ServerGuard: file watcher started on {} paths", watcher.watched_paths().len());
+    info!(
+        "🛡 ServerGuard: file watcher started on {} paths",
+        watcher.watched_paths().len()
+    );
 
     while let Some(event) = watcher.next_event().await {
         let current_hash = file_sha256(&event.path);
@@ -322,12 +337,8 @@ async fn start_file_watcher(tx: mpsc::Sender<GuardEvent>, paths: Vec<String>) {
             }
         }
 
-        let guard_event = GuardEvent::file_change(
-            event.path,
-            event.kind,
-            current_hash,
-            baseline_hash,
-        );
+        let guard_event =
+            GuardEvent::file_change(event.path, event.kind, current_hash, baseline_hash);
         if tx.send(guard_event).await.is_err() {
             break;
         }
@@ -371,23 +382,31 @@ async fn start_state_collector(tx: mpsc::Sender<GuardEvent>, interval_secs: u64)
 
     let mut interval = time::interval(time::Duration::from_secs(interval_secs));
 
-    info!("🛡 ServerGuard: state collector started (interval: {}s)", interval_secs);
+    info!(
+        "🛡 ServerGuard: state collector started (interval: {}s)",
+        interval_secs
+    );
 
     loop {
         interval.tick().await;
 
         // Check services
         let result = tokio::process::Command::new("systemctl")
-            .args(["list-units", "--type=service", "--state=failed", "--no-legend", "--no-pager"])
+            .args([
+                "list-units",
+                "--type=service",
+                "--state=failed",
+                "--no-legend",
+                "--no-pager",
+            ])
             .output()
             .await;
 
         if let Ok(output) = result {
             if output.status.success() {
                 let failed = String::from_utf8_lossy(&output.stdout);
-                let failed_services: Vec<&str> = failed.lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .collect();
+                let failed_services: Vec<&str> =
+                    failed.lines().filter(|l| !l.trim().is_empty()).collect();
 
                 if !failed_services.is_empty() {
                     let mut diff = std::collections::HashMap::new();
@@ -417,26 +436,32 @@ async fn start_state_collector(tx: mpsc::Sender<GuardEvent>, interval_secs: u64)
 // Pipeline processor (main event loop)
 // ---------------------------------------------------------------------------
 
-async fn run_pipeline(
-    mut rx: mpsc::Receiver<GuardEvent>,
-    pipeline: &mut Pipeline,
-) {
+async fn run_pipeline(mut rx: mpsc::Receiver<GuardEvent>, pipeline: &mut Pipeline) {
     info!("🛡 ServerGuard: pipeline processor started");
 
     while let Some(event) = rx.recv().await {
         let outcome = pipeline.process(event).await;
 
         match &outcome {
-            PipelineOutcome::Escalated { severity, killswitch_mode } => {
+            PipelineOutcome::Escalated {
+                severity,
+                killswitch_mode,
+            } => {
                 warn!(
                     "🚨 ServerGuard: escalated event (severity={:?}, mode={:?})",
                     severity, killswitch_mode
                 );
             }
-            PipelineOutcome::AutoFixed { command, success: true } => {
+            PipelineOutcome::AutoFixed {
+                command,
+                success: true,
+            } => {
                 info!("🔧 ServerGuard: auto-fixed via: {}", command);
             }
-            PipelineOutcome::AutoFixed { command, success: false } => {
+            PipelineOutcome::AutoFixed {
+                command,
+                success: false,
+            } => {
                 warn!("⚠️ ServerGuard: auto-fix failed via: {}", command);
             }
             PipelineOutcome::Dropped { reason } => {
@@ -462,7 +487,10 @@ async fn send_alert_to_relay(
     use reqwest::Client;
 
     let client = match Client::new()
-        .post(format!("{}/api/shield/ingest", relay_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/api/shield/ingest",
+            relay_url.trim_end_matches('/')
+        ))
         .header("Content-Type", "application/json")
         .json(&alert)
     {
@@ -471,7 +499,9 @@ async fn send_alert_to_relay(
 
     // Add auth headers if available
     let client = if let (Some(id), Some(token)) = (agent_id, agent_token) {
-        client.header("X-Agent-ID", id).header("X-Agent-Token", token)
+        client
+            .header("X-Agent-ID", id)
+            .header("X-Agent-Token", token)
     } else {
         client
     };
@@ -526,7 +556,7 @@ mod tests {
         let mut guard = ServerGuard::new(ServerGuardConfig {
             watch_paths: vec![], // no file watcher (needs real paths)
             watch_docker: false, // no docker (may not be available)
-            watch_state: false, // no state collector
+            watch_state: false,  // no state collector
             ..ServerGuardConfig::default()
         });
 

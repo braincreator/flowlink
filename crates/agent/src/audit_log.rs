@@ -142,7 +142,6 @@ fn sign_entry(entry: &AuditEntry, secret: &[u8]) -> String {
 
 /// Constant-time HMAC comparison.
 fn hmac_constant_eq(a: &str, b: &str) -> bool {
-    
     // Simple constant-time comparison via subtle or manual
     let a_bytes = a.as_bytes();
     let b_bytes = b.as_bytes();
@@ -168,7 +167,9 @@ fn dirs_home() -> PathBuf {
 
 /// Verify a single raw JSON map entry (for generic use).
 pub fn verify_entry(entry: &mut BTreeMap<String, serde_json::Value>, secret: &[u8]) -> bool {
-    let stored = entry.remove(HMAC_FIELD).and_then(|v| v.as_str().map(String::from));
+    let stored = entry
+        .remove(HMAC_FIELD)
+        .and_then(|v| v.as_str().map(String::from));
     match stored {
         Some(s) => {
             let json_bytes = serde_json::to_vec(entry).unwrap_or_default();
@@ -288,6 +289,9 @@ mod tests {
         let k2 = AuditLog::generate_key().unwrap();
         assert_eq!(k1.len(), HMAC_SECRET_LEN);
         assert_eq!(k2.len(), HMAC_SECRET_LEN);
-        assert_ne!(k1, k2, "two consecutive generate_key calls must produce different keys");
+        assert_ne!(
+            k1, k2,
+            "two consecutive generate_key calls must produce different keys"
+        );
     }
 }

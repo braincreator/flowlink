@@ -84,20 +84,18 @@ pub struct PolicyRule {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use super::*;
+    use serde_json::json;
 
     fn full_spec() -> FlowLinkShieldPolicySpec {
         FlowLinkShieldPolicySpec {
             enabled: true,
             mode: ShieldMode::Enforce,
-            rules: vec![
-                PolicyRule {
-                    name: "no-privileged".into(),
-                    action: "deny".into(),
-                    patterns: vec!["*".into()],
-                },
-            ],
+            rules: vec![PolicyRule {
+                name: "no-privileged".into(),
+                action: "deny".into(),
+                patterns: vec!["*".into()],
+            }],
             relay_url: "http://relay:8080".into(),
             sidecar_image: "custom/shield:v1".into(),
             watch_namespaces: vec!["default".into(), "prod".into()],
@@ -168,9 +166,21 @@ mod tests {
             enabled: true,
             mode: ShieldMode::Enforce,
             rules: vec![
-                PolicyRule { name: "rule1".into(), action: "deny".into(), patterns: vec!["nginx".into()] },
-                PolicyRule { name: "rule2".into(), action: "deny".into(), patterns: vec!["redis".into()] },
-                PolicyRule { name: "rule3".into(), action: "allow".into(), patterns: vec!["safe/*".into()] },
+                PolicyRule {
+                    name: "rule1".into(),
+                    action: "deny".into(),
+                    patterns: vec!["nginx".into()],
+                },
+                PolicyRule {
+                    name: "rule2".into(),
+                    action: "deny".into(),
+                    patterns: vec!["redis".into()],
+                },
+                PolicyRule {
+                    name: "rule3".into(),
+                    action: "allow".into(),
+                    patterns: vec!["safe/*".into()],
+                },
             ],
             relay_url: "http://relay:8080".into(),
             sidecar_image: "shield:latest".into(),
@@ -205,7 +215,8 @@ mod tests {
             "enabled": true,
             "rules": [],
             "relay_url": "http://x"
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(empty_ns.watch_namespaces.is_empty());
     }
 

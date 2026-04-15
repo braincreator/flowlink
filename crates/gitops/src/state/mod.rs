@@ -53,8 +53,7 @@ impl StateManager {
     }
 
     pub async fn collect_all(&self) -> Result<ServerState> {
-        let hostname = hostname::get()
-            .unwrap_or_else(|_| "unknown".to_string());
+        let hostname = hostname::get().unwrap_or_else(|_| "unknown".to_string());
 
         let mut components = HashMap::new();
 
@@ -65,11 +64,7 @@ impl StateManager {
                     components.insert(component_type.to_string(), state);
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to collect state for {}: {}",
-                        component_type,
-                        e
-                    );
+                    tracing::warn!("Failed to collect state for {}: {}", component_type, e);
                 }
             }
         }
@@ -110,18 +105,12 @@ impl StateManager {
             let desired_state = desired.components.get(&component_type);
 
             match (current_state, desired_state) {
-                (Some(current), Some(desired)) => {
-                    match collector.diff(current, desired).await {
-                        Ok(drifts) => all_drifts.extend(drifts),
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to diff state for {}: {}",
-                                component_type,
-                                e
-                            );
-                        }
+                (Some(current), Some(desired)) => match collector.diff(current, desired).await {
+                    Ok(drifts) => all_drifts.extend(drifts),
+                    Err(e) => {
+                        tracing::warn!("Failed to diff state for {}: {}", component_type, e);
                     }
-                }
+                },
                 (None, Some(desired)) => {
                     all_drifts.push(SemanticDrift {
                         path: component_type.clone(),
@@ -167,18 +156,15 @@ impl Default for StateManager {
 }
 
 pub mod hostname {
-    
 
     pub fn get() -> std::io::Result<String> {
         #[cfg(unix)]
         {
             use std::ffi::CStr;
-            
 
             let mut buf = [0u8; 256];
-            let result = unsafe {
-                libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len())
-            };
+            let result =
+                unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
 
             if result == 0 {
                 let cstr = unsafe { CStr::from_ptr(buf.as_ptr() as *const libc::c_char) };
@@ -224,9 +210,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_state_manager_with_collectors() {
-        let manager = StateManager::new()
-            .with_packages()
-            .with_services();
+        let manager = StateManager::new().with_packages().with_services();
 
         let state = manager.collect_all().await.unwrap();
 

@@ -59,7 +59,9 @@ impl Executor {
             Priority::User => &self.user_sem,
         };
 
-        let _permit = sem.acquire().await
+        let _permit = sem
+            .acquire()
+            .await
             .map_err(|_| anyhow::anyhow!("Executor semaphore closed"))?;
 
         self.exec_inner(payload).await
@@ -78,7 +80,11 @@ impl Executor {
     /// The actual command execution logic.
     async fn exec_inner_static(payload: &ExecRequestPayload) -> anyhow::Result<ExecResult> {
         let request_id = payload.request_id.clone();
-        let timeout_secs = if payload.timeout_sec == 0 { 60 } else { payload.timeout_sec as u64 };
+        let timeout_secs = if payload.timeout_sec == 0 {
+            60
+        } else {
+            payload.timeout_sec as u64
+        };
         let shell = payload.shell.as_deref().unwrap_or("/bin/sh");
 
         let start = std::time::Instant::now();
@@ -98,13 +104,11 @@ impl Executor {
             }
         }
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            async {
-                let output = cmd.output().await?;
-                Ok::<_, anyhow::Error>((output.status, output.stdout, output.stderr))
-            },
-        ).await;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            let output = cmd.output().await?;
+            Ok::<_, anyhow::Error>((output.status, output.stdout, output.stderr))
+        })
+        .await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -250,7 +254,10 @@ mod tests {
 
         // System command should still execute immediately
         let system_payload = test_payload("echo system-ok");
-        let result = executor.exec(&system_payload, Priority::System).await.unwrap();
+        let result = executor
+            .exec(&system_payload, Priority::System)
+            .await
+            .unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.contains("system-ok"));
 

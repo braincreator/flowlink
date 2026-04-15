@@ -1,28 +1,31 @@
 //! Database migrations — PostgreSQL schema
 
-use sqlx::PgPool;
 use anyhow::Result;
+use sqlx::PgPool;
 
 /// Run all migrations
 pub async fn run(pool: &PgPool) -> Result<()> {
     let migrations = get_migrations();
 
     // Create migrations tracking table
-    sqlx::raw_sql(r#"
+    sqlx::raw_sql(
+        r#"
         CREATE TABLE IF NOT EXISTS _migrations (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
             applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
-    "#).execute(pool).await?;
+    "#,
+    )
+    .execute(pool)
+    .await?;
 
     for (name, sql) in &migrations {
-        let applied: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM _migrations WHERE name = $1)"
-        )
-        .bind(name)
-        .fetch_one(pool)
-        .await?;
+        let applied: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM _migrations WHERE name = $1)")
+                .bind(name)
+                .fetch_one(pool)
+                .await?;
 
         if !applied {
             tracing::info!("📦 Migration: {}", name);
@@ -39,7 +42,9 @@ pub async fn run(pool: &PgPool) -> Result<()> {
 
 fn get_migrations() -> Vec<(&'static str, &'static str)> {
     vec![
-        ("001_accounts", r#"
+        (
+            "001_accounts",
+            r#"
             CREATE TABLE IF NOT EXISTS accounts (
                 account_id TEXT PRIMARY KEY,
                 plan_id TEXT NOT NULL DEFAULT 'free',
@@ -54,9 +59,11 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             );
             CREATE INDEX IF NOT EXISTS idx_accounts_plan ON accounts(plan_id);
             CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts(active);
-        "#),
-
-        ("002_usage_daily", r#"
+        "#,
+        ),
+        (
+            "002_usage_daily",
+            r#"
             CREATE TABLE IF NOT EXISTS usage_daily (
                 id SERIAL PRIMARY KEY,
                 account_id TEXT NOT NULL REFERENCES accounts(account_id),
@@ -70,9 +77,11 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
                 UNIQUE(account_id, date)
             );
             CREATE INDEX IF NOT EXISTS idx_usage_account_date ON usage_daily(account_id, date);
-        "#),
-
-        ("003_invoices", r#"
+        "#,
+        ),
+        (
+            "003_invoices",
+            r#"
             CREATE TABLE IF NOT EXISTS invoices (
                 id TEXT PRIMARY KEY,
                 account_id TEXT NOT NULL REFERENCES accounts(account_id),
@@ -101,9 +110,11 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
                 sort_order INT NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
-        "#),
-
-        ("004_audit_log", r#"
+        "#,
+        ),
+        (
+            "004_audit_log",
+            r#"
             CREATE TABLE IF NOT EXISTS audit_log (
                 id SERIAL PRIMARY KEY,
                 timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -123,9 +134,11 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_audit_account ON audit_log(account_id);
             CREATE INDEX IF NOT EXISTS idx_audit_agent ON audit_log(agent_id);
             CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_log(category);
-        "#),
-
-        ("005_agents_devices", r#"
+        "#,
+        ),
+        (
+            "005_agents_devices",
+            r#"
             CREATE TABLE IF NOT EXISTS agents (
                 agent_id TEXT PRIMARY KEY,
                 account_id TEXT,
@@ -156,9 +169,11 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             );
             CREATE INDEX IF NOT EXISTS idx_devices_account ON devices(account_id);
             CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
-        "#),
-
-        ("006_subscriptions", r#"
+        "#,
+        ),
+        (
+            "006_subscriptions",
+            r#"
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id TEXT PRIMARY KEY,
                 account_id TEXT NOT NULL REFERENCES accounts(account_id),
@@ -179,9 +194,11 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_subscriptions_account ON subscriptions(account_id);
             CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
             CREATE INDEX IF NOT EXISTS idx_subscriptions_tochka ON subscriptions(tochka_subscription_id) WHERE tochka_subscription_id IS NOT NULL;
-        "#),
-
-        ("007_orders", r#"
+        "#,
+        ),
+        (
+            "007_orders",
+            r#"
             CREATE TABLE IF NOT EXISTS orders (
                 id TEXT PRIMARY KEY,
                 account_id TEXT NOT NULL REFERENCES accounts(account_id),
@@ -198,9 +215,11 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             );
             CREATE INDEX IF NOT EXISTS idx_orders_account ON orders(account_id);
             CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
-        "#),
-
-        ("008_plans", r#"
+        "#,
+        ),
+        (
+            "008_plans",
+            r#"
             CREATE TABLE IF NOT EXISTS plans (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -217,15 +236,76 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
-        "#),
-
-        ("009_plans_indexes", r#"
+        "#,
+        ),
+        (
+            "009_plans_indexes",
+            r#"
             CREATE INDEX IF NOT EXISTS idx_plans_active ON plans(is_active) WHERE is_active = true
-        "#),
-
-        ("010_plans_sort_index", r#"
+        "#,
+        ),
+        (
+            "010_plans_sort_index",
+            r#"
             CREATE INDEX IF NOT EXISTS idx_plans_sort ON plans(sort_order)
-        "#),
+        "#,
+        ),
+        (
+            "011_orders_plan_id",
+            r#"
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS plan_id TEXT REFERENCES plans(id)
+        "#,
+        ),
+        (
+            "012_accounts_tg_id",
+            r#"
+            ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tg_id BIGINT;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_tg_id ON accounts(tg_id) WHERE tg_id IS NOT NULL
+        "#,
+        ),
+        (
+            "013_accounts_email",
+            r#"
+            ALTER TABLE accounts ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+            ALTER TABLE accounts ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email) WHERE email IS NOT NULL
+        "#,
+        ),
+        (
+            "014_email_verification_codes",
+            r#"
+            CREATE TABLE IF NOT EXISTS email_verification_codes (
+                id BIGSERIAL PRIMARY KEY,
+                email VARCHAR(255) NOT NULL,
+                code VARCHAR(6) NOT NULL,
+                purpose VARCHAR(20) NOT NULL DEFAULT 'auth',
+                used BOOLEAN NOT NULL DEFAULT FALSE,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_evc_email_code ON email_verification_codes(email, code);
+            CREATE INDEX IF NOT EXISTS idx_evc_email_created ON email_verification_codes(email, created_at)
+        "#,
+        ),
+        (
+            "015_email_queue",
+            r#"
+            CREATE TABLE IF NOT EXISTS email_queue (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                account_id VARCHAR(255) NOT NULL,
+                email_type VARCHAR(50) NOT NULL,
+                recipient VARCHAR(255) NOT NULL,
+                scheduled_at TIMESTAMPTZ NOT NULL,
+                sent_at TIMESTAMPTZ,
+                template_vars JSONB DEFAULT '{}',
+                attempts SMALLINT DEFAULT 0,
+                max_attempts SMALLINT DEFAULT 3,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_email_queue_pending ON email_queue(scheduled_at) WHERE sent_at IS NULL;
+            CREATE INDEX IF NOT EXISTS idx_email_queue_account ON email_queue(account_id)
+        "#,
+        ),
     ]
 }
 
@@ -236,7 +316,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 10);
+        assert_eq!(migrations.len(), 15);
     }
 
     #[test]
@@ -253,9 +333,18 @@ mod tests {
             "008_plans",
             "009_plans_indexes",
             "010_plans_sort_index",
+            "011_orders_plan_id",
+            "012_accounts_tg_id",
+            "013_accounts_email",
+            "014_email_verification_codes",
+            "015_email_queue",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
-            assert_eq!(*name, expected_names[i], "Migration at index {} has wrong name", i);
+            assert_eq!(
+                *name, expected_names[i],
+                "Migration at index {} has wrong name",
+                i
+            );
         }
     }
 
@@ -275,7 +364,8 @@ mod tests {
         for (name, sql) in &migrations {
             assert!(
                 sql.contains("CREATE TABLE") || sql.contains("CREATE INDEX"),
-                "Migration '{}' creates neither a table nor an index", name
+                "Migration '{}' creates neither a table nor an index",
+                name
             );
         }
     }
@@ -284,7 +374,11 @@ mod tests {
     fn all_migrations_use_if_not_exists() {
         let migrations = get_migrations();
         for (name, sql) in &migrations {
-            assert!(sql.contains("IF NOT EXISTS"), "Migration '{}' missing IF NOT EXISTS", name);
+            assert!(
+                sql.contains("IF NOT EXISTS"),
+                "Migration '{}' missing IF NOT EXISTS",
+                name
+            );
         }
     }
 
@@ -293,12 +387,23 @@ mod tests {
         let migrations = get_migrations();
         let (_, sql) = &migrations[0];
         let expected_cols = [
-            "account_id", "plan_id", "active", "balance_kopecks",
-            "payment_method", "activated_at", "expires_at", "cycle_start",
-            "created_at", "updated_at",
+            "account_id",
+            "plan_id",
+            "active",
+            "balance_kopecks",
+            "payment_method",
+            "activated_at",
+            "expires_at",
+            "cycle_start",
+            "created_at",
+            "updated_at",
         ];
         for col in &expected_cols {
-            assert!(sql.contains(col), "accounts migration missing column '{}'", col);
+            assert!(
+                sql.contains(col),
+                "accounts migration missing column '{}'",
+                col
+            );
         }
     }
 
@@ -315,11 +420,21 @@ mod tests {
         let migrations = get_migrations();
         let (_, sql) = &migrations[1];
         let expected_cols = [
-            "account_id", "date", "api_requests", "tokens",
-            "active_agents", "storage_bytes", "api_requests_total", "tokens_total",
+            "account_id",
+            "date",
+            "api_requests",
+            "tokens",
+            "active_agents",
+            "storage_bytes",
+            "api_requests_total",
+            "tokens_total",
         ];
         for col in &expected_cols {
-            assert!(sql.contains(col), "usage_daily migration missing column '{}'", col);
+            assert!(
+                sql.contains(col),
+                "usage_daily migration missing column '{}'",
+                col
+            );
         }
     }
 
@@ -342,13 +457,36 @@ mod tests {
     fn invoices_migration_has_expected_columns() {
         let migrations = get_migrations();
         let (_, sql) = &migrations[2];
-        let inv_cols = ["id", "account_id", "number", "status", "total_kopecks", "currency", "paid_at"];
+        let inv_cols = [
+            "id",
+            "account_id",
+            "number",
+            "status",
+            "total_kopecks",
+            "currency",
+            "paid_at",
+        ];
         for col in &inv_cols {
-            assert!(sql.contains(col), "invoices migration missing column '{}'", col);
+            assert!(
+                sql.contains(col),
+                "invoices migration missing column '{}'",
+                col
+            );
         }
-        let item_cols = ["invoice_id", "description", "quantity", "unit_price_kopecks", "total_kopecks", "sort_order"];
+        let item_cols = [
+            "invoice_id",
+            "description",
+            "quantity",
+            "unit_price_kopecks",
+            "total_kopecks",
+            "sort_order",
+        ];
         for col in &item_cols {
-            assert!(sql.contains(col), "invoice_items migration missing column '{}'", col);
+            assert!(
+                sql.contains(col),
+                "invoice_items migration missing column '{}'",
+                col
+            );
         }
     }
 
@@ -364,11 +502,24 @@ mod tests {
         let migrations = get_migrations();
         let (_, sql) = &migrations[3];
         let expected_cols = [
-            "timestamp", "level", "category", "agent_id", "account_id",
-            "action", "target", "result", "metadata", "hmac_hash", "source_ip",
+            "timestamp",
+            "level",
+            "category",
+            "agent_id",
+            "account_id",
+            "action",
+            "target",
+            "result",
+            "metadata",
+            "hmac_hash",
+            "source_ip",
         ];
         for col in &expected_cols {
-            assert!(sql.contains(col), "audit_log migration missing column '{}'", col);
+            assert!(
+                sql.contains(col),
+                "audit_log migration missing column '{}'",
+                col
+            );
         }
     }
 
@@ -402,10 +553,25 @@ mod tests {
     fn agents_migration_has_expected_columns() {
         let migrations = get_migrations();
         let (_, sql) = &migrations[4];
-        let expected_cols = ["agent_id", "account_id", "name", "status", "os", "arch", "version",
-                             "connected_at", "last_heartbeat", "metadata", "created_at"];
+        let expected_cols = [
+            "agent_id",
+            "account_id",
+            "name",
+            "status",
+            "os",
+            "arch",
+            "version",
+            "connected_at",
+            "last_heartbeat",
+            "metadata",
+            "created_at",
+        ];
         for col in &expected_cols {
-            assert!(sql.contains(col), "agents migration missing column '{}'", col);
+            assert!(
+                sql.contains(col),
+                "agents migration missing column '{}'",
+                col
+            );
         }
     }
 
@@ -413,10 +579,24 @@ mod tests {
     fn devices_migration_has_expected_columns() {
         let migrations = get_migrations();
         let (_, sql) = &migrations[4];
-        let expected_cols = ["device_id", "account_id", "name", "device_type", "fingerprint",
-                             "status", "paired_at", "last_seen", "metadata", "created_at"];
+        let expected_cols = [
+            "device_id",
+            "account_id",
+            "name",
+            "device_type",
+            "fingerprint",
+            "status",
+            "paired_at",
+            "last_seen",
+            "metadata",
+            "created_at",
+        ];
         for col in &expected_cols {
-            assert!(sql.contains(col), "devices migration missing column '{}'", col);
+            assert!(
+                sql.contains(col),
+                "devices migration missing column '{}'",
+                col
+            );
         }
     }
 
@@ -426,7 +606,8 @@ mod tests {
         for (name, sql) in &migrations {
             assert!(
                 sql.contains("CREATE INDEX") || sql.contains("CREATE TABLE"),
-                "Migration '{}' creates neither an index nor a table", name
+                "Migration '{}' creates neither an index nor a table",
+                name
             );
         }
     }
@@ -436,7 +617,12 @@ mod tests {
         let migrations = get_migrations();
         for (name, sql) in &migrations {
             assert!(!sql.trim().is_empty(), "Migration '{}' has empty SQL", name);
-            assert!(sql.len() > 50, "Migration '{}' SQL seems too short ({} bytes)", name, sql.len());
+            assert!(
+                sql.len() > 50,
+                "Migration '{}' SQL seems too short ({} bytes)",
+                name,
+                sql.len()
+            );
         }
     }
 

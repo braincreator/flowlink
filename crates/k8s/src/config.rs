@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::crd::ShieldMode;
 
@@ -39,8 +39,8 @@ impl Default for K8sConfig {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_default_config_values() {
@@ -76,9 +76,13 @@ mod tests {
     #[test]
     fn test_config_custom_exempt_labels() {
         let mut cfg = K8sConfig::default();
-        cfg.exempt_labels.insert("shield.flowlink.ai/exempt".into(), "true".into());
+        cfg.exempt_labels
+            .insert("shield.flowlink.ai/exempt".into(), "true".into());
         assert_eq!(cfg.exempt_labels.len(), 1);
-        assert_eq!(cfg.exempt_labels.get("shield.flowlink.ai/exempt").unwrap(), "true");
+        assert_eq!(
+            cfg.exempt_labels.get("shield.flowlink.ai/exempt").unwrap(),
+            "true"
+        );
     }
 
     #[test]
@@ -106,7 +110,8 @@ mod tests {
             "webhook_port": 8443,
             "cert_dir": "/tmp/certs",
             "sidecar_image": "test:latest"
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(cfg.exempt_namespaces.is_empty());
     }
 }

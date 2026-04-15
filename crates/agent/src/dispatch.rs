@@ -5,12 +5,12 @@ use serde::Deserialize;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::approval::ApprovalManager;
-use crate::executor::{Executor, ExecResult};
+use crate::executor::{ExecResult, Executor};
 use crate::fileops::FileOps;
 use crate::killswitch::KillSwitch;
 use crate::policy::PolicyEngine;
-use crate::skills::{SkillManager, Skill};
 use crate::sandbox::Sandbox;
+use crate::skills::{Skill, SkillManager};
 
 /// Global counter for shield alerts received by this agent.
 /// Incremented atomically so it is safe to read from any thread (metrics, status endpoints, etc.).
@@ -154,9 +154,7 @@ fn handle_shield_alert(msg: &Message) -> Option<Message> {
                     // Payload present but malformed — still log what we can
                     warn!(
                         "[ShieldAlert #{}] (malformed payload) agent={:?} error={}",
-                        count,
-                        msg.agent_id,
-                        e,
+                        count, msg.agent_id, e,
                     );
                 }
             }
@@ -164,8 +162,7 @@ fn handle_shield_alert(msg: &Message) -> Option<Message> {
         None => {
             warn!(
                 "[ShieldAlert #{}] received with no payload, agent={:?}",
-                count,
-                msg.agent_id,
+                count, msg.agent_id,
             );
         }
     }
@@ -183,7 +180,10 @@ async fn handle_approval_response(msg: &Message, approval: &ApprovalManager) {
         Some(r) => r,
         None => return,
     };
-    let approved = payload.get("approved").and_then(|v| v.as_bool()).unwrap_or(false);
+    let approved = payload
+        .get("approved")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let decision = if approved {
         crate::approval::ApprovalDecision::Approved
     } else {
@@ -211,16 +211,29 @@ async fn handle_exec(
             }
         },
         None => {
-            return Some(error_response(msg, "MISSING_PAYLOAD", "ExecRequest requires a payload"));
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "ExecRequest requires a payload",
+            ));
         }
     };
 
     // ── System commands: bypass policy and approval entirely ──
     if is_system {
-        info!("[SYSTEM] Executing (bypass policy/approval): {}", payload.command);
+        info!(
+            "[SYSTEM] Executing (bypass policy/approval): {}",
+            payload.command
+        );
         match executor.exec(&payload, Priority::System).await {
             Ok(result) => return Some(exec_done_response(msg, &result)),
-            Err(e) => return Some(error_response(msg, "EXEC_FAILED", &format!("Execution error: {e}"))),
+            Err(e) => {
+                return Some(error_response(
+                    msg,
+                    "EXEC_FAILED",
+                    &format!("Execution error: {e}"),
+                ))
+            }
         }
     }
 
@@ -276,7 +289,11 @@ async fn handle_exec(
     // Execute
     match executor.exec(&payload, Priority::User).await {
         Ok(result) => Some(exec_done_response(msg, &result)),
-        Err(e) => Some(error_response(msg, "EXEC_FAILED", &format!("Execution error: {e}"))),
+        Err(e) => Some(error_response(
+            msg,
+            "EXEC_FAILED",
+            &format!("Execution error: {e}"),
+        )),
     }
 }
 
@@ -297,13 +314,27 @@ fn exec_done_response(msg: &Message, result: &ExecResult) -> Message {
 }
 
 fn handle_file_read(msg: &Message, fileops: &FileOps) -> Option<Message> {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
-    let payload: FileReadPayload = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let payload: FileReadPayload = match msg
+        .payload
+        .as_ref()
+        .and_then(|p| serde_json::from_value(p.clone()).ok())
+    {
         Some(p) => p,
-        None => return Some(error_response(msg, "MISSING_PAYLOAD", "FileRead requires a payload with path")),
+        None => {
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "FileRead requires a payload with path",
+            ))
+        }
     };
     if payload.path.is_empty() {
-        return Some(error_response(msg, flowlink_core::codes::codes::FILE_EMPTY_PATH, "Path is empty"));
+        return Some(error_response(
+            msg,
+            flowlink_core::codes::codes::FILE_EMPTY_PATH,
+            "Path is empty",
+        ));
     }
     match fileops.read(&payload.path) {
         Ok(data) => {
@@ -324,57 +355,96 @@ fn handle_file_read(msg: &Message, fileops: &FileOps) -> Option<Message> {
                     }),
             )
         }
-        Err(e) => Some(error_response(msg, &e.split(':').next().unwrap_or("FILE_READ_ERROR"), &e)),
+        Err(e) => Some(error_response(
+            msg,
+            &e.split(':').next().unwrap_or("FILE_READ_ERROR"),
+            &e,
+        )),
     }
 }
 
 fn handle_file_write(msg: &Message, fileops: &FileOps) -> Option<Message> {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
-    let payload: FileWritePayload = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let payload: FileWritePayload = match msg
+        .payload
+        .as_ref()
+        .and_then(|p| serde_json::from_value(p.clone()).ok())
+    {
         Some(p) => p,
-        None => return Some(error_response(msg, "MISSING_PAYLOAD", "FileWrite requires a payload")),
+        None => {
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "FileWrite requires a payload",
+            ))
+        }
     };
     let data = match STANDARD.decode(&payload.content) {
         Ok(d) => d,
-        Err(e) => return Some(error_response(msg, "INVALID_ENCODING", &format!("Base64 decode failed: {e}"))),
+        Err(e) => {
+            return Some(error_response(
+                msg,
+                "INVALID_ENCODING",
+                &format!("Base64 decode failed: {e}"),
+            ))
+        }
     };
     match fileops.write(&payload.path, &data) {
-        Ok(()) => {
-            Some(
-                Message::new(MessageType::FileResponse)
-                    .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
-                    .with_payload(FileResponsePayload {
-                        request_id: None,
-                        path: Some(payload.path),
-                        content: None,
-                        encoding: Some("base64".into()),
-                        mode: payload.mode,
-                        size: Some(data.len() as i64),
-                        is_dir: Some(false),
-                        entries: None,
-                        error: None,
-                    }),
-            )
-        }
-        Err(e) => Some(error_response(msg, &e.split(':').next().unwrap_or("FILE_WRITE_ERROR"), &e)),
+        Ok(()) => Some(
+            Message::new(MessageType::FileResponse)
+                .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
+                .with_payload(FileResponsePayload {
+                    request_id: None,
+                    path: Some(payload.path),
+                    content: None,
+                    encoding: Some("base64".into()),
+                    mode: payload.mode,
+                    size: Some(data.len() as i64),
+                    is_dir: Some(false),
+                    entries: None,
+                    error: None,
+                }),
+        ),
+        Err(e) => Some(error_response(
+            msg,
+            &e.split(':').next().unwrap_or("FILE_WRITE_ERROR"),
+            &e,
+        )),
     }
 }
 
 fn handle_file_list(msg: &Message, fileops: &FileOps) -> Option<Message> {
     #[derive(Deserialize)]
-    struct ListReq { path: String, #[serde(default)] recursive: bool }
-    let payload: ListReq = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {
+    struct ListReq {
+        path: String,
+        #[serde(default)]
+        recursive: bool,
+    }
+    let payload: ListReq = match msg
+        .payload
+        .as_ref()
+        .and_then(|p| serde_json::from_value(p.clone()).ok())
+    {
         Some(p) => p,
-        None => return Some(error_response(msg, "MISSING_PAYLOAD", "FileList requires a payload with path")),
+        None => {
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "FileList requires a payload with path",
+            ))
+        }
     };
     match fileops.list(&payload.path, payload.recursive) {
         Ok(entries) => {
-            let core_entries: Vec<flowlink_core::FileEntry> = entries.iter().map(|e| flowlink_core::FileEntry {
-                name: e.name.clone(),
-                size: e.size,
-                is_dir: e.is_dir,
-                mode: e.mode,
-            }).collect();
+            let core_entries: Vec<flowlink_core::FileEntry> = entries
+                .iter()
+                .map(|e| flowlink_core::FileEntry {
+                    name: e.name.clone(),
+                    size: e.size,
+                    is_dir: e.is_dir,
+                    mode: e.mode,
+                })
+                .collect();
             Some(
                 Message::new(MessageType::FileResponse)
                     .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
@@ -391,7 +461,11 @@ fn handle_file_list(msg: &Message, fileops: &FileOps) -> Option<Message> {
                     }),
             )
         }
-        Err(e) => Some(error_response(msg, &e.split(':').next().unwrap_or("FILE_READ_ERROR"), &e)),
+        Err(e) => Some(error_response(
+            msg,
+            &e.split(':').next().unwrap_or("FILE_READ_ERROR"),
+            &e,
+        )),
     }
 }
 
@@ -405,8 +479,8 @@ fn error_response(msg: &Message, code: &str, message: &str) -> Message {
 }
 
 use crate::backup::BackupManager;
-use std::cell::RefCell;
 use flowlink_core::ShieldAlertPayload;
+use std::cell::RefCell;
 
 thread_local! {
     /// Queue of shield alerts generated during dispatch (picked up by connection layer)
@@ -423,9 +497,19 @@ fn whoami_fallback() -> String {
 }
 
 async fn handle_backup_create(msg: &Message, backup: &BackupManager) -> Option<Message> {
-    let payload: BackupRequestPayload = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {
+    let payload: BackupRequestPayload = match msg
+        .payload
+        .as_ref()
+        .and_then(|p| serde_json::from_value(p.clone()).ok())
+    {
         Some(p) => p,
-        None => return Some(error_response(msg, "MISSING_PAYLOAD", "BackupRequest requires a payload")),
+        None => {
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "BackupRequest requires a payload",
+            ))
+        }
     };
     let paths = payload.paths.unwrap_or_default();
     let label = payload.description.unwrap_or_default();
@@ -444,35 +528,60 @@ async fn handle_backup_create(msg: &Message, backup: &BackupManager) -> Option<M
                     error: None,
                 }),
         ),
-        Err(e) => Some(error_response(msg, codes::codes::BACKUP_CREATE_ERROR, &e.to_string())),
+        Err(e) => Some(error_response(
+            msg,
+            codes::codes::BACKUP_CREATE_ERROR,
+            &e.to_string(),
+        )),
     }
 }
 
 async fn handle_backup_list(msg: &Message, backup: &BackupManager) -> Option<Message> {
     match backup.list().await {
         Ok(snapshots) => {
-            let entries: Vec<Snapshot> = snapshots.into_iter().map(|m| Snapshot {
-                id: m.id,
-                description: if m.label.is_empty() { None } else { Some(m.label) },
-                timestamp: m.created_at,
-                size: m.size_bytes as i64,
-                paths: m.paths,
-                filename: m.filename,
-            }).collect();
+            let entries: Vec<Snapshot> = snapshots
+                .into_iter()
+                .map(|m| Snapshot {
+                    id: m.id,
+                    description: if m.label.is_empty() {
+                        None
+                    } else {
+                        Some(m.label)
+                    },
+                    timestamp: m.created_at,
+                    size: m.size_bytes as i64,
+                    paths: m.paths,
+                    filename: m.filename,
+                })
+                .collect();
             Some(
                 Message::new(MessageType::BackupListResp)
                     .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
                     .with_payload(serde_json::json!({ "snapshots": entries })),
             )
         }
-        Err(e) => Some(error_response(msg, codes::codes::BACKUP_CREATE_ERROR, &e.to_string())),
+        Err(e) => Some(error_response(
+            msg,
+            codes::codes::BACKUP_CREATE_ERROR,
+            &e.to_string(),
+        )),
     }
 }
 
 async fn handle_backup_restore(msg: &Message, backup: &BackupManager) -> Option<Message> {
-    let payload: BackupRestorePayload = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {
+    let payload: BackupRestorePayload = match msg
+        .payload
+        .as_ref()
+        .and_then(|p| serde_json::from_value(p.clone()).ok())
+    {
         Some(p) => p,
-        None => return Some(error_response(msg, "MISSING_PAYLOAD", "BackupRestore requires a payload")),
+        None => {
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "BackupRestore requires a payload",
+            ))
+        }
     };
     match backup.restore(&payload.snapshot_id, None).await {
         Ok(()) => Some(
@@ -485,9 +594,19 @@ async fn handle_backup_restore(msg: &Message, backup: &BackupManager) -> Option<
 }
 
 async fn handle_backup_delete(msg: &Message, backup: &BackupManager) -> Option<Message> {
-    let payload: BackupRestorePayload = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {
+    let payload: BackupRestorePayload = match msg
+        .payload
+        .as_ref()
+        .and_then(|p| serde_json::from_value(p.clone()).ok())
+    {
         Some(p) => p,
-        None => return Some(error_response(msg, "MISSING_PAYLOAD", "BackupDelete requires a payload")),
+        None => {
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "BackupDelete requires a payload",
+            ))
+        }
     };
     match backup.delete(&payload.snapshot_id).await {
         Ok(()) => Some(
@@ -500,9 +619,19 @@ async fn handle_backup_delete(msg: &Message, backup: &BackupManager) -> Option<M
 }
 
 fn handle_skill_push(msg: &Message, skill_mgr: &SkillManager) -> Option<Message> {
-    let payload: Skill = match msg.payload.as_ref().and_then(|p| serde_json::from_value(p.clone()).ok()) {
+    let payload: Skill = match msg
+        .payload
+        .as_ref()
+        .and_then(|p| serde_json::from_value(p.clone()).ok())
+    {
         Some(s) => s,
-        None => return Some(error_response(msg, "MISSING_PAYLOAD", "SkillPush requires a payload")),
+        None => {
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "SkillPush requires a payload",
+            ))
+        }
     };
     let mut skill = payload;
     match skill_mgr.install(&mut skill) {
@@ -527,9 +656,19 @@ fn handle_skill_list(msg: &Message, skill_mgr: &SkillManager) -> Option<Message>
 }
 
 fn handle_skill_delete(msg: &Message, skill_mgr: &SkillManager) -> Option<Message> {
-    let name = match msg.payload.as_ref().and_then(|p| p.get("name").and_then(|v| v.as_str())) {
+    let name = match msg
+        .payload
+        .as_ref()
+        .and_then(|p| p.get("name").and_then(|v| v.as_str()))
+    {
         Some(n) => n,
-        None => return Some(error_response(msg, "MISSING_PAYLOAD", "SkillDelete requires a payload with 'name'")),
+        None => {
+            return Some(error_response(
+                msg,
+                "MISSING_PAYLOAD",
+                "SkillDelete requires a payload with 'name'",
+            ))
+        }
     };
     match skill_mgr.delete(name) {
         Ok(()) => Some(
@@ -564,16 +703,27 @@ mod tests {
         let policy = PolicyEngine::new(false, false);
         let approval = ApprovalManager::new(crate::approval::ApprovalMode::Auto);
         let fileops = FileOps::new(vec![tmp_str.into()], 1024 * 1024);
-        let backup = BackupManager::new(tmp.path().join("backups").to_str().unwrap().into(), 10, 30);
+        let backup =
+            BackupManager::new(tmp.path().join("backups").to_str().unwrap().into(), 10, 30);
         let killswitch = KillSwitch::new();
         let skill_mgr = SkillManager::new(tmp.path().to_str().unwrap()).unwrap();
-        let sandbox = Sandbox::new(vec![tmp.path().to_str().unwrap().into()], vec![], 0, 0, false);
+        let sandbox = Sandbox::new(
+            vec![tmp.path().to_str().unwrap().into()],
+            vec![],
+            0,
+            0,
+            false,
+        );
         let executor = Executor::default_executor();
-        (tmp, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox, executor)
+        (
+            tmp, policy, approval, fileops, backup, killswitch, skill_mgr, sandbox, executor,
+        )
     }
 
     fn msg_with(t: MessageType, payload: serde_json::Value) -> Message {
-        Message::new(t).with_agent_id("test-agent").with_payload(payload)
+        Message::new(t)
+            .with_agent_id("test-agent")
+            .with_payload(payload)
     }
 
     fn system_msg_with(t: MessageType, payload: serde_json::Value) -> Message {
@@ -585,73 +735,98 @@ mod tests {
 
     #[tokio::test]
     async fn test_ping_ack() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         let msg = Message::new(MessageType::Heartbeat).with_agent_id("test");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::HeartbeatAck);
     }
 
     #[tokio::test]
     async fn test_exec_done() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         let payload = serde_json::json!({
             "command": "echo hello",
             "timeout_sec": 10,
             "request_id": "e1"
         });
         let msg = msg_with(MessageType::ExecRequest, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::ExecDone);
     }
 
     #[tokio::test]
     async fn test_exec_blocked() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         let payload = serde_json::json!({
             "command": "rm -rf /",
             "timeout_sec": 10,
             "request_id": "e2"
         });
         let msg = msg_with(MessageType::ExecRequest, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::Error);
     }
 
     #[tokio::test]
     async fn test_file_read() {
-        let (tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         let path = tmp.path().join("test.txt");
         std::fs::write(&path, "hello").unwrap();
         let payload = serde_json::json!({ "path": path.to_str().unwrap() });
         let msg = msg_with(MessageType::FileRead, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::FileResponse);
     }
 
     #[tokio::test]
     async fn test_backup_list() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         let msg = Message::new(MessageType::BackupList).with_agent_id("test");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::BackupListResp);
     }
 
     #[tokio::test]
     async fn test_skill_list() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         let msg = Message::new(MessageType::SkillList).with_agent_id("test");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
         assert!(resp.is_some());
     }
 
     #[tokio::test]
     async fn test_killswitch_blocks_user_exec() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         ks.pause("test");
         let payload = serde_json::json!({
             "command": "echo hello",
@@ -659,7 +834,10 @@ mod tests {
             "request_id": "e3"
         });
         let msg = msg_with(MessageType::ExecRequest, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::Error);
     }
@@ -667,7 +845,8 @@ mod tests {
     #[tokio::test]
     async fn test_system_bypasses_killswitch() {
         // System priority MUST pass through even when killswitch is paused
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         ks.pause("test");
 
         let payload = serde_json::json!({
@@ -676,7 +855,10 @@ mod tests {
             "request_id": "sys-1"
         });
         let msg = system_msg_with(MessageType::ExecRequest, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
 
         assert!(resp.is_some());
         let r = resp.unwrap();
@@ -686,7 +868,8 @@ mod tests {
     #[tokio::test]
     async fn test_system_bypasses_policy() {
         // System priority should execute even destructive commands
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
 
         let payload = serde_json::json!({
             "command": "rm -rf /nonexistent_test_dir",
@@ -694,7 +877,10 @@ mod tests {
             "request_id": "sys-2"
         });
         let msg = system_msg_with(MessageType::ExecRequest, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
 
         // Should execute (not be blocked) — even though rm -rf is normally blocked
         assert!(resp.is_some());
@@ -703,16 +889,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_payload_error() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         let msg = Message::new(MessageType::ExecRequest).with_agent_id("test");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::Error);
     }
 
     #[tokio::test]
     async fn test_shield_alert_increments_counter() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
 
         // Reset the counter for the test
         let before = shield_alert_count();
@@ -728,7 +919,10 @@ mod tests {
             "timestamp": 1700000000
         });
         let msg = msg_with(MessageType::ShieldAlert, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
 
         // ShieldAlert handler returns None (no reply)
         assert!(resp.is_none());
@@ -738,12 +932,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_shield_alert_no_payload() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
 
         let before = shield_alert_count();
 
         let msg = Message::new(MessageType::ShieldAlert).with_agent_id("test-agent");
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
 
         assert!(resp.is_none());
         // Counter still increments even without payload
@@ -752,14 +950,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_shield_alert_malformed_payload() {
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
 
         let before = shield_alert_count();
 
         // Payload that doesn't match ShieldAlertPayload schema
         let payload = serde_json::json!({ "garbage": true });
         let msg = msg_with(MessageType::ShieldAlert, payload);
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
 
         assert!(resp.is_none());
         assert_eq!(shield_alert_count(), before + 1);
@@ -771,16 +973,23 @@ mod tests {
         // it bypasses policy. This test verifies the dispatch-level behavior.
         // Note: connection layer strips System for inbound, but internal
         // components create System messages programmatically.
-        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) = test_deps();
+        let (_tmp, policy, approval, fileops, backup, ks, skill_mgr, sandbox, executor) =
+            test_deps();
         ks.pause("test");
 
         // Simulate an internal System message (not from WebSocket)
-        let msg = system_msg_with(MessageType::ExecRequest, serde_json::json!({
-            "command": "echo internal-system",
-            "timeout_sec": 5,
-            "request_id": "internal-1"
-        }));
-        let resp = dispatch(&msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor).await;
+        let msg = system_msg_with(
+            MessageType::ExecRequest,
+            serde_json::json!({
+                "command": "echo internal-system",
+                "timeout_sec": 5,
+                "request_id": "internal-1"
+            }),
+        );
+        let resp = dispatch(
+            &msg, &policy, &approval, &fileops, &backup, &ks, &skill_mgr, &sandbox, &executor,
+        )
+        .await;
 
         assert!(resp.is_some());
         assert_eq!(resp.unwrap().msg_type, MessageType::ExecDone);

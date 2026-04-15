@@ -4,7 +4,9 @@
 use anyhow::Result;
 use std::process::Command;
 
-use crate::forensic::{PlatformProcessInfo, ProcessOrigin, ProcessTreeNode, SshInfo, ContainerInfo};
+use crate::forensic::{
+    ContainerInfo, PlatformProcessInfo, ProcessOrigin, ProcessTreeNode, SshInfo,
+};
 
 pub fn collect_process_info(pid: u32) -> Result<PlatformProcessInfo> {
     // Use ps for process info on macOS
@@ -97,14 +99,19 @@ pub fn detect_origin(pid: u32, tree: &[ProcessTreeNode]) -> ProcessOrigin {
                 };
             }
             "launchd" => {
-                return ProcessOrigin::Systemd { unit: "launchd".into() };
+                return ProcessOrigin::Systemd {
+                    unit: "launchd".into(),
+                };
             }
             _ => {}
         }
     }
 
     // Check environment for agent
-    if let Ok(output) = Command::new("ps").args(["-E", "-p", &pid.to_string()]).output() {
+    if let Ok(output) = Command::new("ps")
+        .args(["-E", "-p", &pid.to_string()])
+        .output()
+    {
         let env_str = String::from_utf8_lossy(&output.stdout);
         for pair in env_str.split_whitespace() {
             if pair.starts_with("FLOWLINK_AGENT_ID=") {
@@ -151,7 +158,10 @@ pub fn get_cwd(pid: u32) -> Result<String> {
 }
 
 pub fn get_boot_offset_ms() -> Option<u64> {
-    let output = Command::new("sysctl").args(["-n", "kern.boottime"]).output().ok()?;
+    let output = Command::new("sysctl")
+        .args(["-n", "kern.boottime"])
+        .output()
+        .ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Format: { sec = 1712400000, usec = 123456 } ...
     let sec: u64 = stdout
@@ -183,7 +193,9 @@ fn get_executable_path(pid: u32) -> Result<String> {
     if path.exists() {
         return Ok(std::fs::read_link(path)?.display().to_string());
     }
-    let output = Command::new("ps").args(["-o", "comm=", "-p", &pid.to_string()]).output()?;
+    let output = Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
@@ -193,7 +205,11 @@ fn get_tty(pid: u32) -> Option<String> {
         .output()
         .ok()?;
     let tty = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if tty.is_empty() || tty == "??" { None } else { Some(tty) }
+    if tty.is_empty() || tty == "??" {
+        None
+    } else {
+        Some(tty)
+    }
 }
 
 fn get_session_leader(pid: u32) -> Option<u32> {

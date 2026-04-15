@@ -1,9 +1,9 @@
-use std::collections::HashSet;
 use serde_json::Value;
+use std::collections::HashSet;
 
 use crate::crd::PolicyRule;
 
-use super::{AdmissionWebhook, types::*};
+use super::{types::*, AdmissionWebhook};
 
 /// DANGER: capabilities that should always be denied
 const DANGEROUS_CAPS: &[&str] = &[
@@ -45,7 +45,10 @@ impl AdmissionWebhook {
         let mut violations = Vec::new();
 
         let spec = pod.get("spec");
-        if let Some(true) = spec.and_then(|s| s.get("hostPID")).and_then(|v| v.as_bool()) {
+        if let Some(true) = spec
+            .and_then(|s| s.get("hostPID"))
+            .and_then(|v| v.as_bool())
+        {
             violations.push(PolicyViolation {
                 severity: ViolationSeverity::Error,
                 message: "hostPID is not allowed".into(),
@@ -53,7 +56,10 @@ impl AdmissionWebhook {
             });
         }
 
-        if let Some(true) = spec.and_then(|s| s.get("hostNetwork")).and_then(|v| v.as_bool()) {
+        if let Some(true) = spec
+            .and_then(|s| s.get("hostNetwork"))
+            .and_then(|v| v.as_bool())
+        {
             violations.push(PolicyViolation {
                 severity: ViolationSeverity::Error,
                 message: "hostNetwork is not allowed".into(),
@@ -61,7 +67,10 @@ impl AdmissionWebhook {
             });
         }
 
-        if let Some(true) = spec.and_then(|s| s.get("hostIPC")).and_then(|v| v.as_bool()) {
+        if let Some(true) = spec
+            .and_then(|s| s.get("hostIPC"))
+            .and_then(|v| v.as_bool())
+        {
             violations.push(PolicyViolation {
                 severity: ViolationSeverity::Error,
                 message: "hostIPC is not allowed".into(),
@@ -106,10 +115,7 @@ impl AdmissionWebhook {
                     .and_then(|c| c.get("add"))
                     .and_then(|a| a.as_array())
                 {
-                    let caps: HashSet<&str> = add_caps
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .collect();
+                    let caps: HashSet<&str> = add_caps.iter().filter_map(|v| v.as_str()).collect();
 
                     for &cap in DANGEROUS_CAPS {
                         if caps.contains(cap) {
@@ -169,9 +175,7 @@ impl AdmissionWebhook {
                                 severity: ViolationSeverity::Error,
                                 message: format!(
                                     "volume '{}' mounts dangerous host path: {}",
-                                    vol.get("name")
-                                        .and_then(|n| n.as_str())
-                                        .unwrap_or("?"),
+                                    vol.get("name").and_then(|n| n.as_str()).unwrap_or("?"),
                                     path
                                 ),
                                 field: format!("spec.volumes[{}].hostPath.path", i),

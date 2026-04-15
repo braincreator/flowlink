@@ -15,7 +15,10 @@ pub(super) struct ToolRateTracker {
 
 impl ToolRateTracker {
     pub fn new(limit: ToolRateLimit) -> Self {
-        Self { timestamps: Vec::new(), limit }
+        Self {
+            timestamps: Vec::new(),
+            limit,
+        }
     }
 
     pub fn check(&mut self, now: Instant) -> Result<(), u32> {
@@ -32,7 +35,8 @@ impl ToolRateTracker {
     pub fn clean_expired(&mut self) {
         let cutoff = Duration::from_secs(self.limit.window_seconds);
         let now = Instant::now();
-        self.timestamps.retain(|ts| now.duration_since(*ts) < cutoff);
+        self.timestamps
+            .retain(|ts| now.duration_since(*ts) < cutoff);
     }
 
     pub fn count_in_window(&self) -> u32 {
@@ -54,7 +58,10 @@ pub(super) struct TierRateTracker {
 
 impl TierRateTracker {
     pub fn new(limit: ToolRateLimit) -> Self {
-        Self { timestamps: Vec::new(), limit }
+        Self {
+            timestamps: Vec::new(),
+            limit,
+        }
     }
 
     pub fn check(&mut self, now: Instant) -> Result<(), u32> {
@@ -71,7 +78,8 @@ impl TierRateTracker {
     pub fn clean_expired(&mut self) {
         let cutoff = Duration::from_secs(self.limit.window_seconds);
         let now = Instant::now();
-        self.timestamps.retain(|ts| now.duration_since(*ts) < cutoff);
+        self.timestamps
+            .retain(|ts| now.duration_since(*ts) < cutoff);
     }
 
     pub fn count_in_window(&self) -> u32 {
@@ -93,7 +101,10 @@ pub(super) struct GlobalTracker {
 
 impl GlobalTracker {
     pub fn new(limit: GlobalRateLimit) -> Self {
-        Self { timestamps: Vec::new(), limit }
+        Self {
+            timestamps: Vec::new(),
+            limit,
+        }
     }
 
     pub fn check(&mut self, now: Instant) -> Result<(), u32> {
@@ -110,7 +121,8 @@ impl GlobalTracker {
     pub fn clean_expired(&mut self) {
         let cutoff = Duration::from_secs(self.limit.window_seconds);
         let now = Instant::now();
-        self.timestamps.retain(|ts| now.duration_since(*ts) < cutoff);
+        self.timestamps
+            .retain(|ts| now.duration_since(*ts) < cutoff);
     }
 
     pub fn count_in_window(&self) -> u32 {
@@ -169,7 +181,8 @@ impl CircuitBreakerInternal {
             success: false,
         };
         self.failure_window.push(record);
-        self.consecutive_failures = self.failure_window.iter().filter(|r| !r.success).count() as u32;
+        self.consecutive_failures =
+            self.failure_window.iter().filter(|r| !r.success).count() as u32;
         self.update_state_for_failure(now);
     }
 
@@ -182,7 +195,10 @@ impl CircuitBreakerInternal {
                     self.transition_to_closed();
                 }
             }
-            BreakerState::Open { since, failure_count: _ } => {
+            BreakerState::Open {
+                since,
+                failure_count: _,
+            } => {
                 let elapsed: Duration = (chrono::Utc::now() - since).to_std().unwrap_or_default();
                 if elapsed >= Duration::from_secs(self.config.open_duration_seconds) {
                     self.transition_to_half_open(now);
@@ -254,7 +270,8 @@ impl CircuitBreakerInternal {
         }
 
         let cutoff = Duration::from_secs(self.config.window_seconds);
-        let recent_failures: Vec<_> = self.failure_window
+        let recent_failures: Vec<_> = self
+            .failure_window
             .iter()
             .filter(|r| now.duration_since(r.timestamp) < cutoff)
             .collect();

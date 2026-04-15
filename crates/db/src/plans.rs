@@ -3,9 +3,9 @@
 //! Plans are loaded from DB at startup and cached in PlanRegistry.
 //! Admin can update prices/features via DB or admin API.
 
-use sqlx::PgPool;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 
 /// Plan limits stored as JSONB
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -36,6 +36,7 @@ pub struct DbPlan {
     pub features: Vec<String>,
     pub is_active: bool,
     pub sort_order: i32,
+    pub trial_days: i32,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -45,11 +46,11 @@ impl DbPlan {
     pub async fn list_active(pool: &PgPool) -> Result<Vec<Self>> {
         let rows = sqlx::query_as::<_, PlanRow>(
             "SELECT id, name, description, tier, price_kopecks, annual_price_kopecks,
-                    period, currency, limits, features, is_active, sort_order,
+                    period, currency, limits, features, is_active, sort_order, trial_days,
                     created_at, updated_at
              FROM plans
              WHERE is_active = true
-             ORDER BY sort_order ASC"
+             ORDER BY sort_order ASC",
         )
         .fetch_all(pool)
         .await?;
@@ -61,9 +62,9 @@ impl DbPlan {
     pub async fn get_by_id(pool: &PgPool, id: &str) -> Result<Option<Self>> {
         let row = sqlx::query_as::<_, PlanRow>(
             "SELECT id, name, description, tier, price_kopecks, annual_price_kopecks,
-                    period, currency, limits, features, is_active, sort_order,
+                    period, currency, limits, features, is_active, sort_order, trial_days,
                     created_at, updated_at
-             FROM plans WHERE id = $1"
+             FROM plans WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(pool)
@@ -93,7 +94,7 @@ impl DbPlan {
                features = EXCLUDED.features,
                is_active = EXCLUDED.is_active,
                sort_order = EXCLUDED.sort_order,
-               updated_at = NOW()"#
+               updated_at = NOW()"#,
         )
         .bind(&plan.id)
         .bind(&plan.name)
@@ -115,10 +116,11 @@ impl DbPlan {
 
     /// Deactivate a plan
     pub async fn deactivate(pool: &PgPool, id: &str) -> Result<bool> {
-        let result = sqlx::query("UPDATE plans SET is_active = false, updated_at = NOW() WHERE id = $1")
-            .bind(id)
-            .execute(pool)
-            .await?;
+        let result =
+            sqlx::query("UPDATE plans SET is_active = false, updated_at = NOW() WHERE id = $1")
+                .bind(id)
+                .execute(pool)
+                .await?;
         Ok(result.rows_affected() > 0)
     }
 }
@@ -138,6 +140,7 @@ struct PlanRow {
     features: serde_json::Value,
     is_active: bool,
     sort_order: i32,
+    trial_days: i32,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -157,6 +160,7 @@ impl From<PlanRow> for DbPlan {
             features: serde_json::from_value(r.features).unwrap_or_default(),
             is_active: r.is_active,
             sort_order: r.sort_order,
+            trial_days: r.trial_days,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }

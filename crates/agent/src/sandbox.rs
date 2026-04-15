@@ -51,10 +51,18 @@ impl Sandbox {
     }
 
     /// Runtime setters for ConfigUpdate hot-reload.
-    pub fn set_allowed_dirs(&mut self, dirs: Vec<String>) { self.allowed_dirs = dirs; }
-    pub fn set_blocked_patterns(&mut self, patterns: Vec<String>) { self.blocked_patterns = patterns; }
-    pub fn set_allow_sudo(&mut self, allow: bool) { self.allow_sudo = allow; }
-    pub fn set_max_exec_timeout(&mut self, timeout: u32) { self.max_exec_timeout = timeout; }
+    pub fn set_allowed_dirs(&mut self, dirs: Vec<String>) {
+        self.allowed_dirs = dirs;
+    }
+    pub fn set_blocked_patterns(&mut self, patterns: Vec<String>) {
+        self.blocked_patterns = patterns;
+    }
+    pub fn set_allow_sudo(&mut self, allow: bool) {
+        self.allow_sudo = allow;
+    }
+    pub fn set_max_exec_timeout(&mut self, timeout: u32) {
+        self.max_exec_timeout = timeout;
+    }
 
     /// Validate a file path: must be within allowed_dirs, resolve symlinks, reject traversal.
     pub fn validate_path(&self, path: &str) -> Result<PathBuf> {
@@ -72,11 +80,20 @@ impl Sandbox {
                     let mut components = Vec::new();
                     for part in p.components() {
                         match part {
-                            std::path::Component::ParentDir => { components.pop(); }
+                            std::path::Component::ParentDir => {
+                                components.pop();
+                            }
                             std::path::Component::CurDir => {}
-                            std::path::Component::Normal(s) => { components.push(s); }
-                            std::path::Component::RootDir => { components.clear(); }
-                            std::path::Component::Prefix(p) => { components.clear(); components.push(p.as_os_str()); }
+                            std::path::Component::Normal(s) => {
+                                components.push(s);
+                            }
+                            std::path::Component::RootDir => {
+                                components.clear();
+                            }
+                            std::path::Component::Prefix(p) => {
+                                components.clear();
+                                components.push(p.as_os_str());
+                            }
                         }
                     }
                     let mut cleaned = PathBuf::from("/");
@@ -94,11 +111,16 @@ impl Sandbox {
         if !self.allowed_dirs.is_empty() {
             let allowed = self.allowed_dirs.iter().any(|dir| {
                 let dir_path = Path::new(dir);
-                let canonical_dir = dir_path.canonicalize().unwrap_or_else(|_| dir_path.to_path_buf());
+                let canonical_dir = dir_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| dir_path.to_path_buf());
                 resolved.starts_with(&canonical_dir) || resolved == canonical_dir
             });
             if !allowed {
-                bail!("path '{}' is outside allowed directories", resolved.display());
+                bail!(
+                    "path '{}' is outside allowed directories",
+                    resolved.display()
+                );
             }
         }
 
@@ -147,7 +169,10 @@ impl Sandbox {
     /// Prepare a sandboxed environment.
     pub fn prepare_env(&self) -> Result<SandboxEnv> {
         match self.isolation_level {
-            IsolationLevel::None => Ok(SandboxEnv { temp_dir: None, isolated: false }),
+            IsolationLevel::None => Ok(SandboxEnv {
+                temp_dir: None,
+                isolated: false,
+            }),
             IsolationLevel::Chroot => self.prepare_chroot(),
             IsolationLevel::Container => {
                 bail!(
@@ -169,18 +194,30 @@ impl Sandbox {
     /// - /proc for process information
     /// - Content from allowed_dirs mounted/copied in
     fn prepare_chroot(&self) -> Result<SandboxEnv> {
-        let root = tempfile::tempdir()
-            .context("Failed to create chroot temp directory")?;
+        let root = tempfile::tempdir().context("Failed to create chroot temp directory")?;
         let root_path = root.path();
 
         // Create minimal directory structure
-        for dir in &["bin", "lib", "lib64", "tmp", "proc", "dev", "etc", "usr/bin", "usr/lib"] {
+        for dir in &[
+            "bin", "lib", "lib64", "tmp", "proc", "dev", "etc", "usr/bin", "usr/lib",
+        ] {
             std::fs::create_dir_all(root_path.join(dir))
                 .with_context(|| format!("Failed to create {dir}/ in chroot"))?;
         }
 
         // Copy essential binaries and their shared library dependencies
-        let essential_bins = ["/bin/sh", "/bin/bash", "/bin/ls", "/bin/cat", "/bin/echo", "/bin/mkdir", "/bin/cp", "/bin/mv", "/bin/rm", "/bin/chmod"];
+        let essential_bins = [
+            "/bin/sh",
+            "/bin/bash",
+            "/bin/ls",
+            "/bin/cat",
+            "/bin/echo",
+            "/bin/mkdir",
+            "/bin/cp",
+            "/bin/mv",
+            "/bin/rm",
+            "/bin/chmod",
+        ];
 
         for bin_path in &essential_bins {
             let src = Path::new(bin_path);
@@ -215,8 +252,11 @@ impl Sandbox {
         create_dev_node(root_path, "stderr", libc::S_IFCHR as u32, (1, 2))?;
 
         // Create /etc/passwd and /etc/group (minimal)
-        std::fs::write(root_path.join("etc/passwd"), "root:x:0:0:root:/root:/bin/sh\nsandbox:x:1000:1000:sandbox:/tmp:/bin/sh\n")
-            .context("Failed to create /etc/passwd in chroot")?;
+        std::fs::write(
+            root_path.join("etc/passwd"),
+            "root:x:0:0:root:/root:/bin/sh\nsandbox:x:1000:1000:sandbox:/tmp:/bin/sh\n",
+        )
+        .context("Failed to create /etc/passwd in chroot")?;
         std::fs::write(root_path.join("etc/group"), "root:x:0:\nsandbox:x:1000:\n")
             .context("Failed to create /etc/group in chroot")?;
 
@@ -224,9 +264,9 @@ impl Sandbox {
         for allowed_dir in &self.allowed_dirs {
             let src_dir = Path::new(allowed_dir);
             if src_dir.is_dir() {
-                let dst_dir = root_path.join("workspace").join(
-                    src_dir.file_name().unwrap_or_default()
-                );
+                let dst_dir = root_path
+                    .join("workspace")
+                    .join(src_dir.file_name().unwrap_or_default());
                 if let Err(e) = copy_dir_recursive(src_dir, &dst_dir) {
                     log::warn!("Failed to copy {} to chroot workspace: {}", allowed_dir, e);
                 }
@@ -244,7 +284,10 @@ impl Sandbox {
         log::info!(
             "Chroot environment prepared at: {:?} (bins: {}, dirs: {})",
             root_path,
-            essential_bins.iter().filter(|b| Path::new(b).exists()).count(),
+            essential_bins
+                .iter()
+                .filter(|b| Path::new(b).exists())
+                .count(),
             self.allowed_dirs.len()
         );
 
@@ -293,18 +336,10 @@ fn copy_shared_libs(binary: &Path, chroot_root: &Path) -> Result<()> {
         let parts: Vec<&str> = line.split("=>").collect();
         let lib_path = if parts.len() >= 2 {
             // "lib => /path/to/lib (addr)" format
-            parts[1]
-                .split('(')
-                .next()
-                .unwrap_or("")
-                .trim()
+            parts[1].split('(').next().unwrap_or("").trim()
         } else {
             // "/path/to/lib (addr)" format (e.g., linux-vdso.so.1)
-            parts[0]
-                .split('(')
-                .next()
-                .unwrap_or("")
-                .trim()
+            parts[0].split('(').next().unwrap_or("").trim()
         };
 
         if lib_path.is_empty() || !lib_path.starts_with('/') {
@@ -331,7 +366,9 @@ fn copy_shared_libs(binary: &Path, chroot_root: &Path) -> Result<()> {
         // Also handle the dynamic linker (ld-linux.so)
         if lib_path.contains("ld-linux") || lib_path.contains("ld-musl") {
             let ld_src = src;
-            let ld_dst = chroot_root.join("lib").join(ld_src.file_name().unwrap_or_default());
+            let ld_dst = chroot_root
+                .join("lib")
+                .join(ld_src.file_name().unwrap_or_default());
             if !ld_dst.exists() {
                 std::fs::copy(ld_src, &ld_dst).ok();
             }
@@ -343,7 +380,12 @@ fn copy_shared_libs(binary: &Path, chroot_root: &Path) -> Result<()> {
 
 /// Create a character device node in the chroot.
 #[cfg(unix)]
-fn create_dev_node(chroot_root: &Path, name: &str, dev_type: u32, major_minor: (u32, u32)) -> Result<()> {
+fn create_dev_node(
+    chroot_root: &Path,
+    name: &str,
+    dev_type: u32,
+    major_minor: (u32, u32),
+) -> Result<()> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
@@ -395,9 +437,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
 /// Check if a command starts with sudo.
 fn contains_sudo(cmd: &str) -> bool {
-    cmd == "sudo"
-        || cmd.starts_with("sudo ")
-        || cmd.starts_with("sudo\t")
+    cmd == "sudo" || cmd.starts_with("sudo ") || cmd.starts_with("sudo\t")
 }
 
 /// Simple glob matching: supports `*` at start, end, or middle.
@@ -428,14 +468,22 @@ mod tests {
     use super::*;
 
     fn basic_sandbox() -> Sandbox {
-        Sandbox::new(vec!["/home/user".into(), "/tmp".into()], vec![], 100, 60, false)
+        Sandbox::new(
+            vec!["/home/user".into(), "/tmp".into()],
+            vec![],
+            100,
+            60,
+            false,
+        )
     }
 
     fn restricted_sandbox() -> Sandbox {
         Sandbox::new(
             vec!["/home/user".into()],
             vec!["rm -rf *".into(), "mkfs*".into()],
-            100, 60, false,
+            100,
+            60,
+            false,
         )
     }
 

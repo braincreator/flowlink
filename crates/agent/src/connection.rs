@@ -3,7 +3,7 @@
 
 use flowlink_core::*;
 use futures_util::{SinkExt, StreamExt};
-use log::{info, warn, error};
+use log::{error, info, warn};
 use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
@@ -13,8 +13,8 @@ use crate::executor::Executor;
 use crate::fileops::FileOps;
 use crate::killswitch::KillSwitch;
 use crate::policy::PolicyEngine;
-use crate::skills::SkillManager;
 use crate::sandbox::Sandbox;
+use crate::skills::SkillManager;
 use std::sync::Arc;
 
 pub struct Connection {
@@ -48,10 +48,15 @@ impl Connection {
         shutdown: Arc<tokio::sync::Notify>,
     ) -> Self {
         Self {
-            url, agent_id, token,
+            url,
+            agent_id,
+            token,
             policy: Arc::new(RwLock::new(policy)),
             approval: Arc::new(RwLock::new(approval)),
-            fileops, backup, killswitch, skill_mgr,
+            fileops,
+            backup,
+            killswitch,
+            skill_mgr,
             sandbox: Arc::new(RwLock::new(sandbox)),
             executor,
             shutdown,
@@ -90,7 +95,10 @@ impl Connection {
     }
 
     async fn connect_and_loop(&self) -> anyhow::Result<()> {
-        let ws_url = format!("{}/ws?agent_id={}&token={}", self.url, self.agent_id, self.token);
+        let ws_url = format!(
+            "{}/ws?agent_id={}&token={}",
+            self.url, self.agent_id, self.token
+        );
 
         let (mut ws_stream, _resp) = tokio_tungstenite::connect_async(&ws_url).await?;
         info!("Connected to relay {}", self.url);
@@ -195,7 +203,8 @@ impl Connection {
             &self.skill_mgr,
             &*self.sandbox.read().await,
             &self.executor,
-        ).await;
+        )
+        .await;
         response
     }
 
@@ -205,25 +214,32 @@ impl Connection {
             Some(p) => p,
             None => {
                 warn!("PolicyUpdate received with no payload");
-                return Some(Message::new(MessageType::PolicyAck)
-                    .with_agent_id(&self.agent_id)
-                    .with_payload(serde_json::json!({
-                        "status": "error",
-                        "reason": "no payload"
-                    })));
+                return Some(
+                    Message::new(MessageType::PolicyAck)
+                        .with_agent_id(&self.agent_id)
+                        .with_payload(serde_json::json!({
+                            "status": "error",
+                            "reason": "no payload"
+                        })),
+                );
             }
         };
 
-        let action = payload.get("action").and_then(|v| v.as_str()).unwrap_or("add_allow");
+        let action = payload
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("add_allow");
         let pattern = payload.get("pattern").and_then(|v| v.as_str());
 
         if pattern.is_none() && action != "list" {
-            return Some(Message::new(MessageType::PolicyAck)
-                .with_agent_id(&self.agent_id)
-                .with_payload(serde_json::json!({
-                    "status": "error",
-                    "reason": "pattern is required for add_allow/add_deny/remove"
-                })));
+            return Some(
+                Message::new(MessageType::PolicyAck)
+                    .with_agent_id(&self.agent_id)
+                    .with_payload(serde_json::json!({
+                        "status": "error",
+                        "reason": "pattern is required for add_allow/add_deny/remove"
+                    })),
+            );
         }
 
         let pattern = pattern.unwrap();
@@ -242,23 +258,27 @@ impl Connection {
                 if policy.remove_rule(pattern) {
                     format!("rule '{}' removed", pattern)
                 } else {
-                    return Some(Message::new(MessageType::PolicyAck)
-                        .with_agent_id(&self.agent_id)
-                        .with_payload(serde_json::json!({
-                            "status": "error",
-                            "reason": format!("rule '{}' not found", pattern)
-                        })));
+                    return Some(
+                        Message::new(MessageType::PolicyAck)
+                            .with_agent_id(&self.agent_id)
+                            .with_payload(serde_json::json!({
+                                "status": "error",
+                                "reason": format!("rule '{}' not found", pattern)
+                            })),
+                    );
                 }
             }
             "list" => {
                 let (allow, deny) = policy.runtime_rules();
-                return Some(Message::new(MessageType::PolicyAck)
-                    .with_agent_id(&self.agent_id)
-                    .with_payload(serde_json::json!({
-                        "status": "ok",
-                        "allow_rules": allow,
-                        "deny_rules": deny,
-                    })));
+                return Some(
+                    Message::new(MessageType::PolicyAck)
+                        .with_agent_id(&self.agent_id)
+                        .with_payload(serde_json::json!({
+                            "status": "ok",
+                            "allow_rules": allow,
+                            "deny_rules": deny,
+                        })),
+                );
             }
             other => {
                 return Some(Message::new(MessageType::PolicyAck)
@@ -271,12 +291,14 @@ impl Connection {
         };
 
         info!("Policy update: {}", result);
-        Some(Message::new(MessageType::PolicyAck)
-            .with_agent_id(&self.agent_id)
-            .with_payload(serde_json::json!({
-                "status": "ok",
-                "result": result,
-            })))
+        Some(
+            Message::new(MessageType::PolicyAck)
+                .with_agent_id(&self.agent_id)
+                .with_payload(serde_json::json!({
+                    "status": "ok",
+                    "result": result,
+                })),
+        )
     }
 
     /// Handle ConfigUpdate from relay — apply new config and send ConfigAck.
@@ -288,12 +310,14 @@ impl Connection {
             Some(p) => p,
             None => {
                 warn!("ConfigUpdate received with no payload");
-                return Some(Message::new(MessageType::ConfigAck)
-                    .with_agent_id(&self.agent_id)
-                    .with_payload(serde_json::json!({
-                        "status": "error",
-                        "reason": "no payload"
-                    })));
+                return Some(
+                    Message::new(MessageType::ConfigAck)
+                        .with_agent_id(&self.agent_id)
+                        .with_payload(serde_json::json!({
+                            "status": "error",
+                            "reason": "no payload"
+                        })),
+                );
             }
         };
 
@@ -310,8 +334,12 @@ impl Connection {
         }
 
         // Update sandbox allowed_dirs
-        if let Some(dirs) = payload.get("sandbox_allowed_dirs").and_then(|v| v.as_array()) {
-            let dirs: Vec<String> = dirs.iter()
+        if let Some(dirs) = payload
+            .get("sandbox_allowed_dirs")
+            .and_then(|v| v.as_array())
+        {
+            let dirs: Vec<String> = dirs
+                .iter()
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect();
             {
@@ -322,15 +350,22 @@ impl Connection {
         }
 
         // Update sandbox blocked_patterns
-        if let Some(patterns) = payload.get("sandbox_blocked_patterns").and_then(|v| v.as_array()) {
-            let patterns: Vec<String> = patterns.iter()
+        if let Some(patterns) = payload
+            .get("sandbox_blocked_patterns")
+            .and_then(|v| v.as_array())
+        {
+            let patterns: Vec<String> = patterns
+                .iter()
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect();
             {
                 let mut sb = self.sandbox.write().await;
                 sb.set_blocked_patterns(patterns.clone());
             }
-            applied.push(format!("sandbox_blocked_patterns=[{} items]", patterns.len()));
+            applied.push(format!(
+                "sandbox_blocked_patterns=[{} items]",
+                patterns.len()
+            ));
         }
 
         // Update sandbox allow_sudo
@@ -343,7 +378,10 @@ impl Connection {
         }
 
         // Update sandbox max_exec_timeout
-        if let Some(timeout) = payload.get("sandbox_max_exec_timeout").and_then(|v| v.as_u64()) {
+        if let Some(timeout) = payload
+            .get("sandbox_max_exec_timeout")
+            .and_then(|v| v.as_u64())
+        {
             {
                 let mut sb = self.sandbox.write().await;
                 sb.set_max_exec_timeout(timeout as u32);
@@ -360,13 +398,15 @@ impl Connection {
                 "auto" => ApprovalMode::Auto,
                 other => {
                     warnings.push(format!("unknown approval_mode '{other}', ignored"));
-                    return Some(Message::new(MessageType::ConfigAck)
-                        .with_agent_id(&self.agent_id)
-                        .with_payload(serde_json::json!({
-                            "status": "partial",
-                            "applied": applied,
-                            "warnings": warnings,
-                        })));
+                    return Some(
+                        Message::new(MessageType::ConfigAck)
+                            .with_agent_id(&self.agent_id)
+                            .with_payload(serde_json::json!({
+                                "status": "partial",
+                                "applied": applied,
+                                "warnings": warnings,
+                            })),
+                    );
                 }
             };
             {
@@ -379,24 +419,32 @@ impl Connection {
         // Log fields that require reconnect (cannot be applied at runtime)
         for field in &["relay_url", "agent_id", "token"] {
             if payload.get(*field).is_some() {
-                warnings.push(format!("{field} changed — requires agent restart to take effect"));
+                warnings.push(format!(
+                    "{field} changed — requires agent restart to take effect"
+                ));
             }
         }
 
-        let status = if warnings.is_empty() { "applied" } else { "partial" };
+        let status = if warnings.is_empty() {
+            "applied"
+        } else {
+            "partial"
+        };
         info!(
             "Config update: status={status}, applied=[{}], warnings=[{}]",
             applied.join(", "),
             warnings.join(", "),
         );
 
-        Some(Message::new(MessageType::ConfigAck)
-            .with_agent_id(&self.agent_id)
-            .with_payload(serde_json::json!({
-                "status": status,
-                "applied": applied,
-                "warnings": warnings,
-            })))
+        Some(
+            Message::new(MessageType::ConfigAck)
+                .with_agent_id(&self.agent_id)
+                .with_payload(serde_json::json!({
+                    "status": status,
+                    "applied": applied,
+                    "warnings": warnings,
+                })),
+        )
     }
 
     /// After dispatch returns, drain any queued shield alerts. Called from connect_and_loop.
@@ -482,8 +530,7 @@ mod tests {
     #[tokio::test]
     async fn test_config_update_no_payload() {
         let conn = test_connection();
-        let msg = Message::new(MessageType::ConfigUpdate)
-            .with_agent_id("test-agent");
+        let msg = Message::new(MessageType::ConfigUpdate).with_agent_id("test-agent");
 
         let resp = conn.handle_config_update(&msg).await.unwrap();
         let payload = resp.payload.unwrap();
@@ -500,6 +547,10 @@ mod tests {
         let resp = conn.handle_config_update(&msg).await.unwrap();
         let payload = resp.payload.unwrap();
         assert_eq!(payload["status"], "partial");
-        assert!(payload["warnings"].as_array().unwrap().iter().any(|w| w.as_str().unwrap().contains("relay_url")));
+        assert!(payload["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("relay_url")));
     }
 }

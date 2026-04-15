@@ -37,7 +37,6 @@ pub use real_es::*;
 mod real_es {
     use super::*;
     use std::os::raw::c_void;
-    
 
     // Opaque ES client handle
     pub struct EsClient {
@@ -110,7 +109,11 @@ mod stub_es {
             anyhow::bail!("not available")
         }
 
-        pub fn respond_auth_result(&self, _event: &EsProcessEvent, _result: EsAuthResult) -> Result<()> {
+        pub fn respond_auth_result(
+            &self,
+            _event: &EsProcessEvent,
+            _result: EsAuthResult,
+        ) -> Result<()> {
             anyhow::bail!("not available")
         }
     }

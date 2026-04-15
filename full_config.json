@@ -1,0 +1,29 @@
+{
+  "client_name": "FlowLink Relay",
+  "api_token": "test-secret-token-123",
+
+  "wss_addr": "127.0.0.1:8444",
+  "http_addr": "127.0.0.1:8081",
+
+  "tls": {
+    "insecure": true,
+    "cert_pinning": false
+  },
+
+  "llm": {
+    "enabled": false,
+    "timeout_sec": 30,
+    "backends": []
+  },
+
+  "billing": {
+    "enabled": false,
+    "currency": "RUB",
+    "plans": []
+  },
+
+  "registry": {
+    "data_path": "~/.flowlink/relay",
+    "max_agents": 100
+  }
+}

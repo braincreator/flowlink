@@ -105,28 +105,75 @@ mod tests {
 
     fn all_codes() -> Vec<&'static str> {
         vec![
-            OK, UNKNOWN_ERROR, INVALID_JSON, INVALID_PAYLOAD, AGENT_NOT_FOUND,
-            AGENT_NOT_CONNECTED, UNAUTHORIZED, FORBIDDEN, INTERNAL_ERROR, UNKNOWN_MESSAGE_TYPE,
-            TOKEN_MISSING, TOKEN_INVALID, TOKEN_EXPIRED, TOKEN_REVOKED, TOKEN_BLACKLISTED,
-            SIGNATURE_INVALID, SECRET_NOT_FOUND,
-            AGENT_CONNECT_FAILED, AGENT_DISCONNECTED, AGENT_NOT_AUTHORIZED,
-            AGENT_LIMIT_EXCEEDED, AGENT_PAUSED, AGENT_EMERGENCY_STOP, PROTOCOL_VERSION_MISMATCH,
-            EXEC_SUCCESS, EXEC_TIMEOUT, EXEC_BLOCKED, EXEC_BLOCKED_READONLY, EXEC_BLOCKED_SANDBOX,
-            EXEC_BLOCKED_SUDO, EXEC_FAILED, EXEC_NEEDS_APPROVAL, EXEC_AWAITING_APPROVAL,
-            EXEC_REJECTED, EXEC_APPROVED,
-            FILE_EMPTY_PATH, FILE_INVALID_PATH, FILE_NOT_FOUND, FILE_TOO_LARGE,
-            FILE_READ_ERROR, FILE_WRITE_ERROR,
-            CONFIG_APPLIED, CONFIG_FAILED, CONFIG_LOAD_ERROR,
-            SKILL_ALREADY_EXISTS, SKILL_NOT_FOUND,
-            TASK_ACCEPTED, TASK_ERROR, TASK_DONE,
-            KILL_SWITCH_DISK_FULL, KILL_SWITCH_CPU_HIGH, KILL_SWITCH_PAUSED,
-            KILL_SWITCH_RESUMED, KILL_SWITCH_EMERGENCY,
-            BACKUP_CREATE_ERROR, BACKUP_SNAPSHOT_NOT_FOUND, BACKUP_RESTORE_ERROR,
-            BACKUP_DELETE_ERROR, BACKUP_CHECKSUM_MISMATCH,
-            MCP_AGENT_NOT_FOUND, MCP_TIMEOUT,
-            LLM_ALL_BACKENDS_DOWN, LLM_REQUEST_ERROR,
-            SHIELD_BLOCKED, SHIELD_SNAPSHOT_CREATED, SHIELD_PROCESS_STOPPED,
-            SHIELD_PROCESS_KILLED, SHIELD_TIMEOUT, SHIELD_ALERT_SENT,
+            OK,
+            UNKNOWN_ERROR,
+            INVALID_JSON,
+            INVALID_PAYLOAD,
+            AGENT_NOT_FOUND,
+            AGENT_NOT_CONNECTED,
+            UNAUTHORIZED,
+            FORBIDDEN,
+            INTERNAL_ERROR,
+            UNKNOWN_MESSAGE_TYPE,
+            TOKEN_MISSING,
+            TOKEN_INVALID,
+            TOKEN_EXPIRED,
+            TOKEN_REVOKED,
+            TOKEN_BLACKLISTED,
+            SIGNATURE_INVALID,
+            SECRET_NOT_FOUND,
+            AGENT_CONNECT_FAILED,
+            AGENT_DISCONNECTED,
+            AGENT_NOT_AUTHORIZED,
+            AGENT_LIMIT_EXCEEDED,
+            AGENT_PAUSED,
+            AGENT_EMERGENCY_STOP,
+            PROTOCOL_VERSION_MISMATCH,
+            EXEC_SUCCESS,
+            EXEC_TIMEOUT,
+            EXEC_BLOCKED,
+            EXEC_BLOCKED_READONLY,
+            EXEC_BLOCKED_SANDBOX,
+            EXEC_BLOCKED_SUDO,
+            EXEC_FAILED,
+            EXEC_NEEDS_APPROVAL,
+            EXEC_AWAITING_APPROVAL,
+            EXEC_REJECTED,
+            EXEC_APPROVED,
+            FILE_EMPTY_PATH,
+            FILE_INVALID_PATH,
+            FILE_NOT_FOUND,
+            FILE_TOO_LARGE,
+            FILE_READ_ERROR,
+            FILE_WRITE_ERROR,
+            CONFIG_APPLIED,
+            CONFIG_FAILED,
+            CONFIG_LOAD_ERROR,
+            SKILL_ALREADY_EXISTS,
+            SKILL_NOT_FOUND,
+            TASK_ACCEPTED,
+            TASK_ERROR,
+            TASK_DONE,
+            KILL_SWITCH_DISK_FULL,
+            KILL_SWITCH_CPU_HIGH,
+            KILL_SWITCH_PAUSED,
+            KILL_SWITCH_RESUMED,
+            KILL_SWITCH_EMERGENCY,
+            BACKUP_CREATE_ERROR,
+            BACKUP_SNAPSHOT_NOT_FOUND,
+            BACKUP_RESTORE_ERROR,
+            BACKUP_DELETE_ERROR,
+            BACKUP_CHECKSUM_MISMATCH,
+            MCP_AGENT_NOT_FOUND,
+            MCP_TIMEOUT,
+            LLM_ALL_BACKENDS_DOWN,
+            LLM_REQUEST_ERROR,
+            SHIELD_BLOCKED,
+            SHIELD_SNAPSHOT_CREATED,
+            SHIELD_PROCESS_STOPPED,
+            SHIELD_PROCESS_KILLED,
+            SHIELD_TIMEOUT,
+            SHIELD_ALERT_SENT,
         ]
     }
 
@@ -176,7 +223,6 @@ mod tests {
         assert_eq!(BACKUP_CHECKSUM_MISMATCH, "BACKUP_CHECKSUM_MISMATCH");
     }
 
-
     #[test]
     fn test_common_codes_present() {
         assert_eq!(OK, "OK");
@@ -197,8 +243,11 @@ mod tests {
     #[test]
     fn test_code_format_uppercase_snake() {
         for code in all_codes() {
-            assert!(code.chars().all(|c| c.is_ascii_uppercase() || c == '_'),
-                "Code '{}' should be UPPER_SNAKE_CASE", code);
+            assert!(
+                code.chars().all(|c| c.is_ascii_uppercase() || c == '_'),
+                "Code '{}' should be UPPER_SNAKE_CASE",
+                code
+            );
         }
     }
 

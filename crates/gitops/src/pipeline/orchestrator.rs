@@ -81,7 +81,7 @@ impl PipelineOrchestrator {
         let classifier = ActionClassifier::with_default_rules();
         let tempo = Arc::new(TempoController::new(config.tempo.clone()));
         let plan = PlanEngine::new(ActionClassifier::with_default_rules());
-        
+
         Self {
             config: Arc::new(config),
             literal_checker: LiteralChecker::with_enabled(true),
@@ -127,7 +127,9 @@ impl PipelineOrchestrator {
             return PipelineResult {
                 command: command.to_string(),
                 args: args.to_vec(),
-                action: PipelineAction::Blocked { reason: denial.reason.clone() },
+                action: PipelineAction::Blocked {
+                    reason: denial.reason.clone(),
+                },
                 audit_entry_id: None,
                 backup_id: None,
                 tier: ActionTier::Blocked,
@@ -166,7 +168,9 @@ impl PipelineOrchestrator {
                 return PipelineResult {
                     command: command.to_string(),
                     args: args.to_vec(),
-                    action: PipelineAction::RateLimited { reason: denial.reason.clone() },
+                    action: PipelineAction::RateLimited {
+                        reason: denial.reason.clone(),
+                    },
                     audit_entry_id: None,
                     backup_id: None,
                     tier,
@@ -179,20 +183,16 @@ impl PipelineOrchestrator {
 
         // Step 4: Handle based on tier
         let result = match tier {
-            ActionTier::ReadOnly => {
-                self.execute_readonly(command, args).await
-            }
-            ActionTier::Destructive => {
-                self.execute_destructive(command, args).await
-            }
+            ActionTier::ReadOnly => self.execute_readonly(command, args).await,
+            ActionTier::Destructive => self.execute_destructive(command, args).await,
             ActionTier::Modify => {
-                self.execute_modify(command, args, &classification.verdict).await
+                self.execute_modify(command, args, &classification.verdict)
+                    .await
             }
-            ActionTier::Network => {
-                self.execute_network(command, args).await
-            }
+            ActionTier::Network => self.execute_network(command, args).await,
             ActionTier::Blocked => {
-                let reason = classification.verdict
+                let reason = classification
+                    .verdict
                     .as_ref()
                     .map(|v| match v {
                         ShieldVerdict::Deny { .. } => "Command denied by policy",
@@ -204,11 +204,9 @@ impl PipelineOrchestrator {
                     .to_string();
                 PipelineAction::Blocked { reason }
             }
-            ActionTier::Unclassified => {
-                PipelineAction::PendingApproval {
-                    approval_id: uuid::Uuid::new_v4().to_string(),
-                }
-            }
+            ActionTier::Unclassified => PipelineAction::PendingApproval {
+                approval_id: uuid::Uuid::new_v4().to_string(),
+            },
         };
 
         // Step 5: Record success/failure for rate limiter
@@ -299,7 +297,11 @@ impl PipelineOrchestrator {
 
     /// Execute a network command (requires approval)
     async fn execute_network(&self, command: &str, args: &[String]) -> PipelineAction {
-        debug!("Network command requires approval: {} {}", command, args.join(" "));
+        debug!(
+            "Network command requires approval: {} {}",
+            command,
+            args.join(" ")
+        );
         PipelineAction::PendingApproval {
             approval_id: uuid::Uuid::new_v4().to_string(),
         }
@@ -332,7 +334,9 @@ impl PipelineOrchestrator {
             if !HealthChecker::is_healthy(&result) {
                 warn!("Post-execution health check FAILED");
                 return PostCheckResult::Unhealthy {
-                    failed_checks: result.checks.iter()
+                    failed_checks: result
+                        .checks
+                        .iter()
                         .filter(|c| !matches!(c.result, CheckResult::Pass))
                         .map(|c| c.detail.clone())
                         .collect(),

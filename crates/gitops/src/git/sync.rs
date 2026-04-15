@@ -50,7 +50,9 @@ impl GitSync {
                 if let Ok(token) = std::env::var("FLOWLINK_GIT_TOKEN") {
                     git2::Cred::userpass_plaintext(username_from_url.unwrap_or("git"), &token)
                 } else {
-                    Err(git2::Error::from_str("No authentication credentials available"))
+                    Err(git2::Error::from_str(
+                        "No authentication credentials available",
+                    ))
                 }
             } else {
                 Err(git2::Error::from_str("Unsupported credential type"))
@@ -153,7 +155,10 @@ impl GitSync {
         }
 
         // Perform fast-forward
-        let mut head_ref = repo.head()?.resolve().context("Failed to resolve HEAD reference")?;
+        let mut head_ref = repo
+            .head()?
+            .resolve()
+            .context("Failed to resolve HEAD reference")?;
         head_ref
             .set_target(remote_oid, "Fast-forward pull")
             .context("Failed to fast-forward — local changes may conflict")?;
@@ -162,7 +167,10 @@ impl GitSync {
         repo.checkout_head(None)
             .context("Failed to checkout after fast-forward")?;
 
-        info!("Pull completed: fast-forwarded to {}", &remote_oid.to_string()[..8]);
+        info!(
+            "Pull completed: fast-forwarded to {}",
+            &remote_oid.to_string()[..8]
+        );
         Ok(())
     }
 
@@ -239,8 +247,12 @@ impl GitSync {
 
     /// Count commits ahead of remote
     fn count_ahead(&self, repo: &Repository, branch: &str) -> Result<usize> {
-        let local_oid = repo.revparse_single(&format!("refs/heads/{}", branch))?.id();
-        let remote_oid = repo.revparse_single(&format!("refs/remotes/origin/{}", branch))?.id();
+        let local_oid = repo
+            .revparse_single(&format!("refs/heads/{}", branch))?
+            .id();
+        let remote_oid = repo
+            .revparse_single(&format!("refs/remotes/origin/{}", branch))?
+            .id();
 
         if local_oid == remote_oid {
             return Ok(0);
@@ -255,8 +267,12 @@ impl GitSync {
 
     /// Count commits behind remote
     fn count_behind(&self, repo: &Repository, branch: &str) -> Result<usize> {
-        let local_oid = repo.revparse_single(&format!("refs/heads/{}", branch))?.id();
-        let remote_oid = repo.revparse_single(&format!("refs/remotes/origin/{}", branch))?.id();
+        let local_oid = repo
+            .revparse_single(&format!("refs/heads/{}", branch))?
+            .id();
+        let remote_oid = repo
+            .revparse_single(&format!("refs/remotes/origin/{}", branch))?
+            .id();
 
         if local_oid == remote_oid {
             return Ok(0);
@@ -304,15 +320,8 @@ mod tests {
             builder.write().unwrap()
         };
         let tree = repo.find_tree(tree_oid).unwrap();
-        repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            "Initial commit",
-            &tree,
-            &[],
-        )
-        .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
 
         let config = GitConfig {
             repo_path: dir.path().to_string_lossy().to_string(),
@@ -363,15 +372,8 @@ mod tests {
             builder.write().unwrap()
         };
         let tree = repo.find_tree(tree_oid).unwrap();
-        repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            "Initial",
-            &tree,
-            &[],
-        )
-        .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
 
         let config = GitConfig {
             repo_path: dir.path().to_string_lossy().to_string(),
@@ -403,15 +405,8 @@ mod tests {
             builder.write().unwrap()
         };
         let tree = repo.find_tree(tree_oid).unwrap();
-        repo.commit(
-            Some("HEAD"),
-            &sig,
-            &sig,
-            "Initial",
-            &tree,
-            &[],
-        )
-        .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial", &tree, &[])
+            .unwrap();
 
         let config = GitConfig {
             repo_path: dir.path().to_string_lossy().to_string(),

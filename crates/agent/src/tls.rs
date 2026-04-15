@@ -81,20 +81,36 @@ mod tests {
 
     #[test]
     fn test_parse_fingerprint_with_prefix() {
-        let result = parse_fingerprint("SHA256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789").unwrap();
-        assert_eq!(result, "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+        let result = parse_fingerprint(
+            "SHA256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789",
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        );
     }
 
     #[test]
     fn test_parse_fingerprint_without_prefix() {
-        let result = parse_fingerprint("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789").unwrap();
-        assert_eq!(result, "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+        let result =
+            parse_fingerprint("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789")
+                .unwrap();
+        assert_eq!(
+            result,
+            "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        );
     }
 
     #[test]
     fn test_parse_fingerprint_lowercase() {
-        let result = parse_fingerprint("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789").unwrap();
-        assert_eq!(result, "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789");
+        let result =
+            parse_fingerprint("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+                .unwrap();
+        assert_eq!(
+            result,
+            "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        );
     }
 
     #[test]

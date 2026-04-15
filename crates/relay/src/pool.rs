@@ -17,6 +17,25 @@ pub struct AgentInfo {
     pub capabilities: Vec<String>,
 }
 
+impl AgentInfo {
+    pub fn id(&self) -> &str {
+        &self.agent_id
+    }
+    
+    pub fn name(&self) -> &str {
+        &self.hostname
+    }
+    
+    pub fn is_connected(&self) -> bool {
+        let now = chrono::Utc::now().timestamp();
+        (now - self.last_heartbeat) < 90 // heartbeat_timeout_sec = 90
+    }
+    
+    pub fn last_activity(&self) -> Option<i64> {
+        Some(self.last_heartbeat)
+    }
+}
+
 pub struct AgentPool {
     agents: Arc<DashMap<String, AgentInfo>>,
 }

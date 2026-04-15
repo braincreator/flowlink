@@ -1,13 +1,14 @@
 // FlowLink Shield — HTTP API for remote management
 
-use std::sync::Arc;
+use crate::guard::ShieldGuard;
 use axum::{
-    Router, Json, extract::{Path, State},
+    extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
+    Json, Router,
 };
 use serde::Serialize;
-use crate::guard::ShieldGuard;
+use std::sync::Arc;
 
 /// Shared state for the HTTP server
 #[derive(Clone)]
@@ -80,9 +81,15 @@ async fn stats(State(state): State<ShieldState>) -> Json<StatsResponse> {
 }
 
 async fn list_pending(State(state): State<ShieldState>) -> Json<Vec<PendingItem>> {
-    let items: Vec<PendingItem> = state.guard.list_pending()
+    let items: Vec<PendingItem> = state
+        .guard
+        .list_pending()
         .into_iter()
-        .map(|(pid, threat, command)| PendingItem { pid, threat, command })
+        .map(|(pid, threat, command)| PendingItem {
+            pid,
+            threat,
+            command,
+        })
         .collect();
     Json(items)
 }
@@ -92,18 +99,27 @@ async fn approve(
     Path(pid): Path<u32>,
 ) -> (StatusCode, Json<ActionResponse>) {
     match state.guard.resolve_approval(pid, true).await {
-        Ok(true) => (StatusCode::OK, Json(ActionResponse {
-            success: true,
-            message: format!("PID {} approved and resumed", pid),
-        })),
-        Ok(false) => (StatusCode::NOT_FOUND, Json(ActionResponse {
-            success: false,
-            message: format!("PID {} not found in pending list", pid),
-        })),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(ActionResponse {
-            success: false,
-            message: format!("Error: {}", e),
-        })),
+        Ok(true) => (
+            StatusCode::OK,
+            Json(ActionResponse {
+                success: true,
+                message: format!("PID {} approved and resumed", pid),
+            }),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(ActionResponse {
+                success: false,
+                message: format!("PID {} not found in pending list", pid),
+            }),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ActionResponse {
+                success: false,
+                message: format!("Error: {}", e),
+            }),
+        ),
     }
 }
 
@@ -112,18 +128,27 @@ async fn reject(
     Path(pid): Path<u32>,
 ) -> (StatusCode, Json<ActionResponse>) {
     match state.guard.resolve_approval(pid, false).await {
-        Ok(true) => (StatusCode::OK, Json(ActionResponse {
-            success: true,
-            message: format!("PID {} rejected and killed", pid),
-        })),
-        Ok(false) => (StatusCode::NOT_FOUND, Json(ActionResponse {
-            success: false,
-            message: format!("PID {} not found in pending list", pid),
-        })),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(ActionResponse {
-            success: false,
-            message: format!("Error: {}", e),
-        })),
+        Ok(true) => (
+            StatusCode::OK,
+            Json(ActionResponse {
+                success: true,
+                message: format!("PID {} rejected and killed", pid),
+            }),
+        ),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(ActionResponse {
+                success: false,
+                message: format!("PID {} not found in pending list", pid),
+            }),
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ActionResponse {
+                success: false,
+                message: format!("Error: {}", e),
+            }),
+        ),
     }
 }
 
@@ -132,16 +157,19 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use tower::ServiceExt;
     use tempfile::NamedTempFile;
+    use tower::ServiceExt;
 
     fn make_test_router() -> Router {
         let tmp = NamedTempFile::new().unwrap();
         let audit = Arc::new(tokio::sync::RwLock::new(
-            crate::audit::AuditLog::open(tmp.path()).unwrap()
+            crate::audit::AuditLog::open(tmp.path()).unwrap(),
         ));
         let notifier = crate::notifier::Notifier::new(None);
-        let engine = crate::engine::AnalysisEngine { enable_ast: false, enable_interpreter: false };
+        let engine = crate::engine::AnalysisEngine {
+            enable_ast: false,
+            enable_interpreter: false,
+        };
         let guard = Arc::new(crate::guard::ShieldGuard::new(
             engine,
             crate::snapshot::SnapshotBackend::None,
@@ -155,7 +183,10 @@ mod tests {
     #[tokio::test]
     async fn health_endpoint() {
         let app = make_test_router();
-        let req = Request::builder().uri("/health").body(Body::empty()).unwrap();
+        let req = Request::builder()
+            .uri("/health")
+            .body(Body::empty())
+            .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
@@ -167,7 +198,10 @@ mod tests {
     #[tokio::test]
     async fn stats_endpoint() {
         let app = make_test_router();
-        let req = Request::builder().uri("/api/stats").body(Body::empty()).unwrap();
+        let req = Request::builder()
+            .uri("/api/stats")
+            .body(Body::empty())
+            .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
@@ -180,7 +214,10 @@ mod tests {
     #[tokio::test]
     async fn pending_endpoint_empty() {
         let app = make_test_router();
-        let req = Request::builder().uri("/api/pending").body(Body::empty()).unwrap();
+        let req = Request::builder()
+            .uri("/api/pending")
+            .body(Body::empty())
+            .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
@@ -192,7 +229,11 @@ mod tests {
     #[tokio::test]
     async fn approve_nonexistent_returns_404() {
         let app = make_test_router();
-        let req = Request::builder().method("POST").uri("/api/approve/99999").body(Body::empty()).unwrap();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/approve/99999")
+            .body(Body::empty())
+            .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
@@ -200,35 +241,56 @@ mod tests {
     #[tokio::test]
     async fn reject_nonexistent_returns_404() {
         let app = make_test_router();
-        let req = Request::builder().method("POST").uri("/api/reject/99999").body(Body::empty()).unwrap();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/reject/99999")
+            .body(Body::empty())
+            .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]
     fn health_response_serialization() {
-        let r = HealthResponse { status: "ok".into(), version: "0.1.0".into() };
+        let r = HealthResponse {
+            status: "ok".into(),
+            version: "0.1.0".into(),
+        };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("ok"));
     }
 
     #[test]
     fn stats_response_serialization() {
-        let r = StatsResponse { total_analyzed: 10, allowed: 8, blocked: 1, released: 1, timeout_killed: 0, pending: 0 };
+        let r = StatsResponse {
+            total_analyzed: 10,
+            allowed: 8,
+            blocked: 1,
+            released: 1,
+            timeout_killed: 0,
+            pending: 0,
+        };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("total_analyzed"));
     }
 
     #[test]
     fn pending_item_serialization() {
-        let r = PendingItem { pid: 1234, threat: "rm_rf".into(), command: "rm -rf /".into() };
+        let r = PendingItem {
+            pid: 1234,
+            threat: "rm_rf".into(),
+            command: "rm -rf /".into(),
+        };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("rm_rf"));
     }
 
     #[test]
     fn action_response_serialization() {
-        let r = ActionResponse { success: true, message: "done".into() };
+        let r = ActionResponse {
+            success: true,
+            message: "done".into(),
+        };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("done"));
     }

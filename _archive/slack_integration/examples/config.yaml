@@ -1,0 +1,36 @@
+# FlowLink Slack Integration Configuration
+
+# Slack Bot Configuration
+bot:
+  bot_token: "xoxb-your-bot-token"
+  app_token: "xapp-your-app-token"
+  signing_secret: "your-signing-secret"
+  allowed_channels:
+    - "#general"
+    - "#devops"
+    - "#approvals"
+  approval_channel: "#approvals"
+
+# Slack Webhook Configuration
+webhook:
+  port: 3001
+  signing_secret: "your-signing-secret"
+  verification_token: "your-verification-token"
+
+# FlowLink Configuration
+flowlink_endpoint: "http://localhost:8080"
+app_id: "your-slack-app-id"
+sign_secret: "your-signing-secret"
+
+# Admin Users (allowed to approve commands)
+admin_users:
+  - "U1234567890"
+  - "U0987654321"
+
+# Environment variables that can be used instead of config
+# SLACK_BOT_TOKEN=xoxb-your-bot-token
+# SLACK_APP_TOKEN=xapp-your-app-token
+# SLACK_SIGNING_SECRET=your-signing-secret
+# SLACK_VERIFICATION_TOKEN=your-verification-token
+# SLACK_APPROVAL_CHANNEL=#approvals
+# SLACK_ALLOWED_CHANNELS=#general,#devops,#approvals

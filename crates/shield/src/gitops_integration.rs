@@ -18,11 +18,11 @@
 
 use std::sync::Arc;
 
-use crate::guard::InterceptResult;
 use crate::engine::{AnalysisResult, Threat, ThreatLevel};
+use crate::guard::InterceptResult;
+use flowlink_gitops::config::GitOpsConfig;
 use flowlink_gitops::pipeline::orchestrator::{PipelineOrchestrator, PipelineResult};
 use flowlink_gitops::server_guard::{ServerGuard, ServerGuardConfig};
-use flowlink_gitops::config::GitOpsConfig;
 
 /// L3 GitOps integration layer
 pub struct GitOpsLayer {
@@ -119,7 +119,10 @@ impl GitOpsLayer {
 
         // Low-threat commands: skip pipeline, pass through
         let needs_processing = threat.map_or(false, |t| {
-            matches!(t.level, ThreatLevel::Medium | ThreatLevel::High | ThreatLevel::Critical)
+            matches!(
+                t.level,
+                ThreatLevel::Medium | ThreatLevel::High | ThreatLevel::Critical
+            )
         });
 
         if !needs_processing {
@@ -167,7 +170,10 @@ impl GitOpsLayer {
                 format!("Requires human approval (id: {})", approval_id)
             }
             PipelineAction::Error(e) => format!("Pipeline error: {}", e),
-            PipelineAction::Rewritten { original, rewritten } => {
+            PipelineAction::Rewritten {
+                original,
+                rewritten,
+            } => {
                 format!("Rewrite: {} → {}", original, rewritten)
             }
             _ => format!(
@@ -228,7 +234,9 @@ mod tests {
         let config = GitOpsConfig::default();
         let orch = PipelineOrchestrator::new(config);
         let layer = GitOpsLayer::with_orchestrator(orch);
-        let verdict = layer.evaluate("cat", &["/etc/hosts".to_string()], None).await;
+        let verdict = layer
+            .evaluate("cat", &["/etc/hosts".to_string()], None)
+            .await;
         assert!(verdict.allowed);
     }
 
@@ -245,7 +253,9 @@ mod tests {
             snapshot: false,
             timeout_secs: 0,
         };
-        let verdict = layer.evaluate("rm", &["-rf".to_string(), "/".to_string()], Some(&threat)).await;
+        let verdict = layer
+            .evaluate("rm", &["-rf".to_string(), "/".to_string()], Some(&threat))
+            .await;
         // rm -rf / should be blocked by the pipeline (literal checker or classifier)
         assert!(!verdict.allowed || verdict.tier.as_deref() == Some("Blocked"));
     }
@@ -263,7 +273,13 @@ mod tests {
             snapshot: false,
             timeout_secs: 0,
         };
-        let verdict = layer.evaluate("systemctl", &["restart".to_string(), "nginx".to_string()], Some(&threat)).await;
+        let verdict = layer
+            .evaluate(
+                "systemctl",
+                &["restart".to_string(), "nginx".to_string()],
+                Some(&threat),
+            )
+            .await;
         assert!(verdict.allowed);
     }
 }

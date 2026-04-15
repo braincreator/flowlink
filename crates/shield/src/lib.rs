@@ -3,44 +3,46 @@
 #[cfg(feature = "gitops")]
 mod gitops_integration;
 
-mod engine;
-mod interceptor;
-mod snapshot;
 mod audit;
-mod notifier;
 mod canary;
-mod guard;
-mod ebpf_kernel;
-mod guard_hybrid;
 mod ebpf;
+mod ebpf_kernel;
+mod engine;
 mod es_framework;
 mod es_monitor;
-mod server;
-mod policy_dsl;
-mod relay_client;
 mod forensic;
-pub mod metrics;
 #[cfg(target_os = "linux")]
 pub(crate) mod forensic_linux;
 #[cfg(target_os = "macos")]
 pub(crate) mod forensic_macos;
+mod guard;
+mod guard_hybrid;
+mod interceptor;
+pub mod metrics;
+mod notifier;
+mod policy_dsl;
+mod relay_client;
+mod server;
+mod snapshot;
 
-pub use engine::{AnalysisEngine, Command, AnalysisResult, Threat, ThreatLevel};
-pub use interceptor::{ProcessInfo, sigstop, sigcont, sigkill};
-pub use snapshot::SnapshotBackend;
-pub use audit::{AuditLog, AuditEntry};
-pub use notifier::Notifier;
-pub use guard::{ShieldGuard, ShieldGuardConfig, InterceptResult, ShieldStats, ApprovalRequest};
-pub use ebpf_kernel::{KernelEvent, DangerousPattern, default_patterns};
-pub use guard_hybrid::{HybridGuard, HybridConfig, HybridHandle};
+pub use audit::{AuditEntry, AuditLog};
 pub use ebpf::{ProcessMonitor, SimulatedMonitor};
-pub use server::shield_router;
-pub use relay_client::RelayClient;
-pub use policy_dsl::{PolicyEngine, PolicySet, PolicyRule, PolicyAction, PolicyDecision, Condition, EvalContext};
+pub use ebpf_kernel::{default_patterns, DangerousPattern, KernelEvent};
+pub use engine::{AnalysisEngine, AnalysisResult, Command, Threat, ThreatLevel};
 pub use forensic::ForensicContext;
+pub use guard::{ApprovalRequest, InterceptResult, ShieldGuard, ShieldGuardConfig, ShieldStats};
+pub use guard_hybrid::{HybridConfig, HybridGuard, HybridHandle};
+pub use interceptor::{sigcont, sigkill, sigstop, ProcessInfo};
+pub use notifier::Notifier;
+pub use policy_dsl::{
+    Condition, EvalContext, PolicyAction, PolicyDecision, PolicyEngine, PolicyRule, PolicySet,
+};
+pub use relay_client::RelayClient;
+pub use server::shield_router;
+pub use snapshot::SnapshotBackend;
 
-use std::sync::Arc;
 use anyhow::Result;
+use std::sync::Arc;
 
 /// Top-level shield server that ties everything together
 pub struct ShieldServer {
@@ -65,12 +67,10 @@ impl ShieldServer {
                     // Fallback to temp dir
                     let tmp = std::env::temp_dir().join("flowlink-shield-audit.jsonl");
                     AuditLog::open(&tmp).expect("Cannot open audit log anywhere")
-                })
+                }),
         ));
 
-        let notifier = Notifier::new(
-            std::env::var("FLOWLINK_SHIELD_WEBHOOK").ok()
-        );
+        let notifier = Notifier::new(std::env::var("FLOWLINK_SHIELD_WEBHOOK").ok());
 
         let guard = Arc::new(ShieldGuard::new(
             engine,

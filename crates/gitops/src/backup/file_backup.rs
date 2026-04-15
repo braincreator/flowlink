@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use flowlink_crypto::sha256_hex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tar::Builder;
@@ -16,7 +17,6 @@ use tokio::fs;
 use tokio::task::spawn_blocking;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use flowlink_crypto::sha256_hex;
 
 /// Engine for creating file snapshots and backups
 pub struct FileBackupEngine {
@@ -49,7 +49,7 @@ impl FileBackupEngine {
 
         // Collect all files with their hashes
         let file_hashes = self.collect_files_with_hashes(paths).await?;
-        
+
         if file_hashes.is_empty() {
             warn!("No files found to backup");
             return self.create_empty_manifest();
@@ -60,8 +60,7 @@ impl FileBackupEngine {
         if total_size > self.max_backup_size {
             error!(
                 "Backup size {} exceeds maximum {}",
-                total_size,
-                self.max_backup_size
+                total_size, self.max_backup_size
             );
             anyhow::bail!(
                 "Backup size {} exceeds maximum allowed size {}",
@@ -72,12 +71,10 @@ impl FileBackupEngine {
 
         // Create tar.gz archive
         let backup_id = Uuid::new_v4().to_string();
-        let temp_path = std::env::temp_dir()
-            .join(format!("backup-{}.tar.gz", backup_id));
+        let temp_path = std::env::temp_dir().join(format!("backup-{}.tar.gz", backup_id));
 
-        let (archive_checksum, compressed_size) = self
-            .create_archive(&file_hashes, &temp_path)
-            .await?;
+        let (archive_checksum, compressed_size) =
+            self.create_archive(&file_hashes, &temp_path).await?;
 
         // Create manifest
         let manifest = BackupManifest {
@@ -91,7 +88,10 @@ impl FileBackupEngine {
             trigger_command: None,
             risk_level: RiskLevel::Medium,
             backup_type: BackupType::FileSnapshot {
-                paths: paths.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+                paths: paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect(),
                 include_hashes: true,
             },
             size_bytes: compressed_size,
@@ -149,7 +149,9 @@ impl FileBackupEngine {
         let changed_paths: Vec<PathBuf> = current_hashes
             .iter()
             .filter(|(path, hash)| {
-                previous_hashes.get(*path).map_or(true, |old_hash| old_hash != *hash)
+                previous_hashes
+                    .get(*path)
+                    .map_or(true, |old_hash| old_hash != *hash)
             })
             .map(|(path, _)| path.clone())
             .collect();
@@ -174,7 +176,10 @@ impl FileBackupEngine {
     }
 
     /// Collect files with their SHA256 hashes
-    async fn collect_files_with_hashes(&self, paths: &[PathBuf]) -> Result<HashMap<PathBuf, String>> {
+    async fn collect_files_with_hashes(
+        &self,
+        paths: &[PathBuf],
+    ) -> Result<HashMap<PathBuf, String>> {
         let mut file_hashes = HashMap::new();
 
         for path in paths {
@@ -203,7 +208,11 @@ impl FileBackupEngine {
                 .context(format!("Failed to read directory: {:?}", current_dir))?;
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let path = entry.path();
-                if entry.file_type().await.map_or(false, |ft: std::fs::FileType| ft.is_dir()) {
+                if entry
+                    .file_type()
+                    .await
+                    .map_or(false, |ft: std::fs::FileType| ft.is_dir())
+                {
                     stack.push(path);
                 } else {
                     let hash = self.compute_file_hash(&path).await?;
@@ -217,10 +226,9 @@ impl FileBackupEngine {
     /// Compute SHA256 hash of a file
     async fn compute_file_hash(&self, path: &Path) -> Result<String> {
         let path = path.to_path_buf();
-        
+
         spawn_blocking(move || {
-            let data = std::fs::read(&path)
-                .context(format!("Failed to read file: {:?}", path))?;
+            let data = std::fs::read(&path).context(format!("Failed to read file: {:?}", path))?;
             Ok(sha256_hex(&data))
         })
         .await
@@ -251,10 +259,8 @@ impl FileBackupEngine {
         let output_path = output_path.to_path_buf();
 
         spawn_blocking(move || {
-            
-
-            let file = std::fs::File::create(&output_path)
-                .context("Failed to create archive file")?;
+            let file =
+                std::fs::File::create(&output_path).context("Failed to create archive file")?;
             let encoder = GzEncoder::new(file, Compression::default());
             let mut builder = Builder::new(encoder);
 
@@ -274,9 +280,7 @@ impl FileBackupEngine {
             let encoder = builder
                 .into_inner()
                 .context("Failed to recover gzip encoder")?;
-            encoder
-                .finish()
-                .context("Failed to finalize gzip stream")?;
+            encoder.finish().context("Failed to finalize gzip stream")?;
 
             // Compute checksum of the archive
             let archive_data = std::fs::read(&output_path)?;
@@ -347,14 +351,14 @@ mod tests {
     async fn test_create_snapshot_empty() {
         let engine = FileBackupEngine::new(500);
         let temp_dir = tempdir().unwrap();
-        
+
         let config = VaultConfig {
             path: temp_dir.path().to_string_lossy().to_string(),
             permissions: 0o700,
             encryption: crate::config::VaultEncryption::None,
             max_size_mb: 100,
         };
-        
+
         let vault = VaultManager::new(config);
         vault.init().await.unwrap();
 
@@ -367,12 +371,10 @@ mod tests {
     async fn test_create_snapshot_with_files() {
         let engine = FileBackupEngine::new(500);
         let temp_dir = tempdir().unwrap();
-        
+
         // Create test files
         let test_file = temp_dir.path().join("test.txt");
-        tokio::fs::write(&test_file, b"test content")
-            .await
-            .unwrap();
+        tokio::fs::write(&test_file, b"test content").await.unwrap();
 
         let config = VaultConfig {
             path: temp_dir.path().to_string_lossy().to_string(),
@@ -380,13 +382,13 @@ mod tests {
             encryption: crate::config::VaultEncryption::None,
             max_size_mb: 100,
         };
-        
+
         let vault = VaultManager::new(config);
         vault.init().await.unwrap();
 
         let paths = vec![test_file];
         let result = engine.create_snapshot(&paths, &vault).await;
-        
+
         assert!(result.is_ok());
         let manifest = result.unwrap();
         assert_eq!(manifest.files_count, 1);
@@ -403,7 +405,7 @@ mod tests {
 
         let engine = FileBackupEngine::new(500);
         let hash = engine.compute_file_hash(&test_file).await.unwrap();
-        
+
         // SHA256 produces a 64-character hex string
         assert_eq!(hash.len(), 64);
         assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));

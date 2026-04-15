@@ -112,8 +112,13 @@ pub struct RateBudget {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum BreakerState {
     Closed,
-    Open { since: DateTime<Utc>, failure_count: u32 },
-    HalfOpen { probe_remaining: u32 },
+    Open {
+        since: DateTime<Utc>,
+        failure_count: u32,
+    },
+    HalfOpen {
+        probe_remaining: u32,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -143,13 +148,24 @@ pub enum ApprovalChannel {
 pub enum ApprovalStatus {
     PendingBackup,
     PendingApproval,
-    Approved { by: ApprovalIdentity },
-    Rejected { by: ApprovalIdentity, reason: String },
+    Approved {
+        by: ApprovalIdentity,
+    },
+    Rejected {
+        by: ApprovalIdentity,
+        reason: String,
+    },
     Expired,
     Executing,
-    Completed { exit_code: i32 },
-    Failed { error: String },
-    AutoRestored { backup_id: String },
+    Completed {
+        exit_code: i32,
+    },
+    Failed {
+        error: String,
+    },
+    AutoRestored {
+        backup_id: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -204,7 +220,12 @@ pub struct OsInfo {
 
 impl Default for OsInfo {
     fn default() -> Self {
-        Self { name: String::new(), version: String::new(), arch: String::new(), kernel: String::new() }
+        Self {
+            name: String::new(),
+            version: String::new(),
+            arch: String::new(),
+            kernel: String::new(),
+        }
     }
 }
 
@@ -424,10 +445,22 @@ pub struct DriftEvent {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum DriftSource {
-    FileChange { path: String, kind: FileChangeKind },
-    DockerEvent { container: String, action: String },
-    SystemdEvent { service: String, from: String, to: String },
-    PeriodicCheck { component: String },
+    FileChange {
+        path: String,
+        kind: FileChangeKind,
+    },
+    DockerEvent {
+        container: String,
+        action: String,
+    },
+    SystemdEvent {
+        service: String,
+        from: String,
+        to: String,
+    },
+    PeriodicCheck {
+        component: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -442,15 +475,37 @@ pub enum FileChangeKind {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum HealthCheck {
-    HttpGet { url: String, expected_status: u16 },
-    TcpPort { port: u16 },
-    ProcessRunning { name: String },
-    DockerContainer { name: String },
-    SystemdService { name: String },
-    CustomCommand { command: String },
-    DatabasePing { db_type: DbType, host: String, port: u16 },
-    DiskUsage { path: String, max_percent: u8 },
-    MemoryUsage { max_percent: u8 },
+    HttpGet {
+        url: String,
+        expected_status: u16,
+    },
+    TcpPort {
+        port: u16,
+    },
+    ProcessRunning {
+        name: String,
+    },
+    DockerContainer {
+        name: String,
+    },
+    SystemdService {
+        name: String,
+    },
+    CustomCommand {
+        command: String,
+    },
+    DatabasePing {
+        db_type: DbType,
+        host: String,
+        port: u16,
+    },
+    DiskUsage {
+        path: String,
+        max_percent: u8,
+    },
+    MemoryUsage {
+        max_percent: u8,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -498,41 +553,41 @@ pub struct AuditEntry {
     pub timestamp: DateTime<Utc>,
     pub agent_id: String,
     pub session_id: String,
-    
+
     pub command: String,
     pub args: Vec<String>,
     pub cwd: String,
     pub env_var_names: Vec<String>,
-    
+
     pub risk_level: RiskLevel,
     pub shield_verdict: ShieldVerdictType,
     pub shield_rules_matched: Vec<String>,
     pub tier: ActionTier,
-    
+
     pub original_command: Option<String>,
     pub rewritten_command: Option<String>,
-    
+
     pub rate_remaining: Option<RateBudget>,
     pub breaker_state: Option<BreakerState>,
-    
+
     pub exit_code: Option<i32>,
     pub stdout_hash: String,
     pub stderr_hash: String,
     pub duration_ms: u64,
-    
+
     pub files_modified: Vec<String>,
     pub services_affected: Vec<String>,
     pub containers_affected: Vec<String>,
     pub databases_affected: Vec<String>,
-    
+
     pub git_commit: String,
     pub backup_id: Option<String>,
     pub rollback_available: bool,
-    
+
     pub health_check: Option<HealthCheckResult>,
     pub auto_restored: bool,
     pub auto_restore_backup_id: Option<String>,
-    
+
     pub policy_hash: String,
     pub classification_rule: Option<String>,
     pub hmac: String,

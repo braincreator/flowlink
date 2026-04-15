@@ -6,8 +6,7 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ProcessInfo {
     pub pid: u32,
     pub ppid: u32,
@@ -28,12 +27,10 @@ impl ProcessInfo {
             .trim()
             .to_string();
 
-        let stat = fs::read_to_string(proc_dir.join("stat"))
-            .unwrap_or_default();
+        let stat = fs::read_to_string(proc_dir.join("stat")).unwrap_or_default();
         let ppid = parse_ppid_from_stat(&stat);
 
-        let status = fs::read_to_string(proc_dir.join("status"))
-            .unwrap_or_default();
+        let status = fs::read_to_string(proc_dir.join("status")).unwrap_or_default();
         let uid = parse_uid_from_status(&status);
 
         let comm = fs::read_to_string(proc_dir.join("comm"))
@@ -107,7 +104,12 @@ fn parse_uid_from_status(status: &str) -> u32 {
 pub fn send_signal(pid: u32, sig: i32) -> Result<()> {
     let ret = unsafe { libc::kill(pid as i32, sig) };
     if ret != 0 {
-        anyhow::bail!("Failed to send signal {} to pid {}: errno {}", sig, pid, std::io::Error::last_os_error());
+        anyhow::bail!(
+            "Failed to send signal {} to pid {}: errno {}",
+            sig,
+            pid,
+            std::io::Error::last_os_error()
+        );
     }
     Ok(())
 }
@@ -181,7 +183,9 @@ mod tests {
     #[test]
     fn test_full_command_prefer_cmdline() {
         let info = ProcessInfo {
-            pid: 1, ppid: 0, uid: 0,
+            pid: 1,
+            ppid: 0,
+            uid: 0,
             comm: "test".into(),
             cmdline: "test --arg1 --arg2".into(),
             exe: "/usr/bin/test".into(),
@@ -192,7 +196,9 @@ mod tests {
     #[test]
     fn test_full_command_fallback_comm() {
         let info = ProcessInfo {
-            pid: 1, ppid: 0, uid: 0,
+            pid: 1,
+            ppid: 0,
+            uid: 0,
             comm: "test".into(),
             cmdline: String::new(),
             exe: "/usr/bin/test".into(),
@@ -203,7 +209,9 @@ mod tests {
     #[test]
     fn test_username_resolves() {
         let info = ProcessInfo {
-            pid: 1, ppid: 0, uid: 0,
+            pid: 1,
+            ppid: 0,
+            uid: 0,
             comm: "root".into(),
             cmdline: String::new(),
             exe: "/usr/bin/test".into(),
@@ -219,7 +227,9 @@ mod tests {
     #[test]
     fn test_username_unknown_uid() {
         let info = ProcessInfo {
-            pid: 1, ppid: 0, uid: 99999,
+            pid: 1,
+            ppid: 0,
+            uid: 99999,
             comm: "test".into(),
             cmdline: String::new(),
             exe: "/usr/bin/test".into(),

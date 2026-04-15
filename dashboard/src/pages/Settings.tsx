@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Save, Server, Shield, Bell, Info, Globe, Volume2, VolumeX, TerminalSquare, ArrowRight } from 'lucide-react';
+import { Save, Server, Shield, Bell, Info, Globe, Volume2, VolumeX, TerminalSquare, ArrowRight, RefreshCw } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
-import { api } from '../api/client';
+import { useSettings, BillingInfo, ServerInfo } from '../hooks/useSettings';
 import { useNotifications } from '../hooks/useNotifications';
 import { useTerminalSettings } from '../hooks/useTerminalSettings';
 import { getTheme, themes } from '../components/terminal/themes';
@@ -12,7 +12,7 @@ import ThemePreview from '../components/terminal/ThemePreview';
 
 export default function Settings() {
   const { t, i18n } = useTranslation();
-  const { logout } = useAuth();
+  const { token } = useAuth();
   const { data: systemInfo, loading: infoLoading } = useApi(
     () => api.getSystemInfo(),
   );
@@ -20,6 +20,15 @@ export default function Settings() {
     () => api.getHealth(),
     { pollMs: 15000 }
   );
+  const {
+    billingInfo,
+    servers,
+    usage,
+    loading,
+    error,
+    changePlan,
+    refresh,
+  } = useSettings();
 
   const info = (systemInfo as any) || {};
   const healthStatus = (health as any)?.status === 'ok';
@@ -43,13 +52,180 @@ export default function Settings() {
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
   const { settings: notifSettings, updateSettings } = useNotifications();
   const { settings: termSettings, update: updateTermSettings } = useTerminalSettings();
   const navigate = useNavigate();
   const currentTheme = getTheme(termSettings.themeId);
 
+  const formatMemory = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const formatCurrency = (amount: string) => {
+    return amount.replace(/RUB/g, '₽').replace(/(\d+)/g, (match) => {
+      return parseInt(match).toLocaleString();
+    });
+  };
+
   return (
     <div className="mx-auto max-w-3xl space-y-6 fade-in">
+      {/* Billing Information */}
+      {billingInfo && (
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Info size={16} className="text-[var(--color-accent)]" />
+              <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">
+                {t('settings.billing')}
+              </h3>
+              <span className={`px-2 py-1 rounded text-xs font-medium ${
+                billingInfo.active 
+                  ? 'bg-green-500/20 text-green-400' 
+                  : 'bg-red-500/20 text-red-400'
+              }`}>
+                {billingInfo.active ? t('settings.active') : t('settings.inactive')}
+              </span>
+            </div>
+            <button 
+              onClick={refresh}
+              className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+              disabled={loading}
+            >
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+              {t('common.refresh')}
+            </button>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="rounded-lg bg-[var(--color-bg)] p-3">
+              <div className="text-xs text-[var(--color-dim)]">{t('settings.current_plan')}</div>
+              <div className="mt-1 font-medium">{billingInfo.plan_name}</div>
+            </div>
+            <div className="rounded-lg bg-[var(--color-bg)] p-3">
+              <div className="text-xs text-[var(--color-dim)]">{t('settings.billing_balance')}</div>
+              <div className="mt-1 font-medium text-green-400">{formatCurrency(billingInfo.balance_rub)}</div>
+            </div>
+            {billingInfo.expires_at && (
+              <div className="rounded-lg bg-[var(--color-bg)] p-3">
+                <div className="text-xs text-[var(--color-dim)]">{t('settings.expires_at')}</div>
+                <div className="mt-1 font-medium">
+                  {new Date(billingInfo.expires_at).toLocaleDateString()}
+                </div>
+              </div>
+            )}
+            <div className="rounded-lg bg-[var(--color-bg)] p-3">
+              <div className="text-xs text-[var(--color-dim)]">{t('settings.active_agents')}</div>
+              <div className="mt-1 font-medium">{usage?.tracker?.active_agents || 0}</div>
+            </div>
+          </div>
+
+          {/* Plan Selection */}
+          <div className="border-t border-[var(--color-border)] pt-4">
+            <h4 className="text-sm font-medium text-[var(--color-dim)] mb-3">{t('settings.available_plans')}</h4>
+            <div className="grid grid-cols-1 gap-3">
+              {billingInfo.available_plans.map((plan) => (
+                <div
+                  key={plan.id}
+                  className={`rounded-lg border p-3 transition-colors ${
+                    billingInfo.plan_id === plan.id
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/5'
+                      : 'border-[var(--color-border)] hover:border-[var(--color-dim)]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">{plan.name}</div>
+                      <div className="text-sm text-[var(--color-dim)]">{formatCurrency(plan.price_rub)}</div>
+                    </div>
+                    {billingInfo.plan_id !== plan.id && (
+                      <button
+                        onClick={() => changePlan(plan.id)}
+                        className="px-3 py-1 text-sm bg-[var(--color-accent)] text-white rounded hover:bg-[var(--color-accent-light)] transition-colors"
+                      >
+                        {t('settings.upgrade')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Server Management */}
+      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Server size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">
+              {t('settings.servers')}
+            </h3>
+            <span className="text-xs text-[var(--color-dim)]">
+              {servers.filter(s => s.status === 'online').length} online
+            </span>
+          </div>
+        </div>
+        
+        <div className="space-y-3">
+          {servers.length > 0 ? (
+            servers.map((server) => (
+              <div
+                key={server.id}
+                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-4"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`h-2 w-2 rounded-full ${
+                        server.status === 'online' ? 'bg-green-400' : 'bg-red-400'
+                      }`}
+                    />
+                    <span className="font-medium">{server.name}</span>
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      server.status === 'online' 
+                        ? 'bg-green-500/20 text-green-400' 
+                        : 'bg-red-500/20 text-red-400'
+                    }`}>
+                      {server.status}
+                    </span>
+                  </div>
+                  <span className="text-xs text-[var(--color-dim)]">
+                    {new Date(server.last_seen).toLocaleString()}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <div className="text-[var(--color-dim)]">CPU</div>
+                    <div className="font-medium">{server.cpu_percent.toFixed(1)}%</div>
+                  </div>
+                  <div>
+                    <div className="text-[var(--color-dim)]">Memory</div>
+                    <div className="font-medium">{formatMemory(server.memory_used)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[var(--color-dim)]">Commands</div>
+                    <div className="font-medium">{server.commands_processed}</div>
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-8 text-[var(--color-dim)]">
+              <Server size={24} className="mx-auto mb-2 opacity-50" />
+              <p>{t('settings.no_servers')}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* System Information */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <div className="flex items-center gap-2 mb-4">
           <Info size={16} className="text-[var(--color-accent)]" />
@@ -72,6 +248,34 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* Usage Statistics */}
+      {usage && (
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <RefreshCw size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">
+              {t('settings.usage_stats')}
+            </h3>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-4">
+            <div className="rounded-lg bg-[var(--color-bg)] p-3">
+              <div className="text-xs text-[var(--color-dim)]">{t('settings.daily_requests')}</div>
+              <div className="mt-1 font-medium">{usage.tracker.daily_requests.toLocaleString()}</div>
+            </div>
+            <div className="rounded-lg bg-[var(--color-bg)] p-3">
+              <div className="text-xs text-[var(--color-dim)]">{t('settings.daily_tokens')}</div>
+              <div className="mt-1 font-medium">{usage.tracker.daily_tokens.toLocaleString()}</div>
+            </div>
+            <div className="rounded-lg bg-[var(--color-bg)] p-3">
+              <div className="text-xs text-[var(--color-dim)]">{t('settings.active_agents')}</div>
+              <div className="mt-1 font-medium">{usage.tracker.active_agents}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Relay Configuration */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
         <div className="flex items-center gap-2 mb-4">
           <Server size={16} className="text-[var(--color-accent)]" />
@@ -94,44 +298,6 @@ export default function Settings() {
           </div>
         </div>
       </div>
-
-      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <Shield size={16} className="text-rose-400" />
-          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('settings.shield_config')}</h3>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.shield_mode")}</label>
-            <select value={shieldSettings.mode} onChange={e => setShieldSettings(s => ({...s, mode: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none">
-              <option value="monitor">Monitor (log only)</option><option value="alert">Alert</option><option value="intercept">Intercept</option><option value="enforce">Enforce</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.policy_file")}</label>
-            <input type="text" value={shieldSettings.policyFile} onChange={e => setShieldSettings(s => ({...s, policyFile: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <Bell size={16} className="text-amber-400" />
-          <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('settings.notifications')}</h3>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.telegram_bot_token")}</label>
-            <input type="password" value={notifConfig.botToken} onChange={e => setNotifConfig(s => ({...s, botToken: e.target.value}))} placeholder="Enter token..." className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none" />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm text-[var(--color-dim)]">{t("settings.telegram_channel")}</label>
-            <input type="text" value={notifConfig.channel} onChange={e => setNotifConfig(s => ({...s, channel: e.target.value}))} className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm focus:border-[var(--color-accent)] focus:outline-none" />
-          </div>
-        </div>
-      </div>
-
-      <NotificationPreferences />
 
       {/* Terminal Appearance */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
@@ -210,58 +376,12 @@ export default function Settings() {
         <button onClick={handleSave} className="flex items-center gap-2 rounded-xl bg-[var(--color-accent)] px-6 py-3 text-sm font-medium text-white transition-all hover:bg-[var(--color-accent-light)] hover:shadow-lg hover:shadow-indigo-500/20">
           <Save size={16} /> {saved ? t('common.saved') : t('common.save_configuration')}
         </button>
-        <button onClick={() => { logout(); window.location.href = '/login'; }}
-          className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-6 py-3 text-sm font-medium text-rose-400 transition-colors hover:bg-rose-500/20">
-          {t('common.sign_out')}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function NotificationPreferences() {
-  const { t } = useTranslation();
-  const { settings, updateSettings } = useNotifications();
-
-  const Toggle = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) => (
-    <label className="flex items-center justify-between py-2">
-      <span className="text-sm text-[var(--color-text)]">{label}</span>
-      <button
-        role="switch" aria-checked={checked} aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 rounded-full transition-colors ${checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-surface3)]'}`}
-      >
-        <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
-      </button>
-    </label>
-  );
-
-  return (
-    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5">
-      <div className="flex items-center gap-2 mb-4">
-        {settings.soundEnabled ? <Volume2 size={16} className="text-indigo-400" /> : <VolumeX size={16} className="text-[var(--color-dim)]" />}
-        <h3 className="text-sm font-semibold text-[var(--color-dim)] uppercase tracking-wider">{t('settings.notifications_browser')}</h3>
-      </div>
-      <div className="space-y-1">
-        <Toggle label="Browser notifications" checked={settings.browserEnabled} onChange={v => updateSettings({ browserEnabled: v })} />
-        <Toggle label={t('settings.notifications_sound')} checked={settings.soundEnabled} onChange={v => updateSettings({ soundEnabled: v })} />
-        <div className="py-2">
-          <label className="mb-2 block text-sm text-[var(--color-text)]">{t('settings.volume')}</label>
-          <input
-            type="range" min={0} max={0.5} step={0.01} value={settings.volume}
-            onChange={e => updateSettings({ volume: parseFloat(e.target.value) })}
-            aria-label={t('settings.volume')}
-            className="w-full max-w-xs accent-[var(--color-accent)]"
-          />
-          <span className="text-xs text-[var(--color-dim)]">{Math.round(settings.volume * 200)}%</span>
-        </div>
-        <div className="border-t border-[var(--color-border)] pt-2 mt-2">
-          <div className="text-xs text-[var(--color-dim)] uppercase tracking-wider mb-2">{t("settings.events")}</div>
-          <Toggle label={t('settings.events_l3')} checked={settings.events.l3} onChange={v => updateSettings({ events: { ...settings.events, l3: v } })} />
-          <Toggle label={t('settings.events_l2')} checked={settings.events.l2} onChange={v => updateSettings({ events: { ...settings.events, l2: v } })} />
-          <Toggle label={t('settings.events_agent')} checked={settings.events.agentEvents} onChange={v => updateSettings({ events: { ...settings.events, agentEvents: v } })} />
-          <Toggle label={t('settings.events_errors')} checked={settings.events.errors} onChange={v => updateSettings({ events: { ...settings.events, errors: v } })} />
-        </div>
+        {token && (
+          <button onClick={() => { logout(); window.location.href = '/login'; }}
+            className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-6 py-3 text-sm font-medium text-rose-400 transition-colors hover:bg-rose-500/20">
+            {t('common.sign_out')}
+          </button>
+        )}
       </div>
     </div>
   );

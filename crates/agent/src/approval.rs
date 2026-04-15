@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApprovalMode {
@@ -77,7 +77,10 @@ impl ApprovalManager {
             responder: tx,
         };
 
-        self.pending.lock().await.insert(request_id.clone(), pending);
+        self.pending
+            .lock()
+            .await
+            .insert(request_id.clone(), pending);
 
         // Wait for response (with timeout handled externally)
         match rx.await {
@@ -138,7 +141,10 @@ mod tests {
                 mode: mgr.mode.clone(),
                 pending: mgr.pending.clone(),
             };
-            async move { mgr.request_approval("r1".into(), "ls".into(), "high".into()).await }
+            async move {
+                mgr.request_approval("r1".into(), "ls".into(), "high".into())
+                    .await
+            }
         });
 
         // Give it a moment to register
@@ -157,7 +163,10 @@ mod tests {
                 mode: mgr.mode.clone(),
                 pending: mgr.pending.clone(),
             };
-            async move { mgr.request_approval("r2".into(), "rm -rf".into(), "high".into()).await }
+            async move {
+                mgr.request_approval("r2".into(), "rm -rf".into(), "high".into())
+                    .await
+            }
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -179,7 +188,9 @@ mod tests {
         // Instead, test that requestApproval returns TimedOut when timeout elapses.
         let mgr = ApprovalManager::new(ApprovalMode::Auto);
         // In auto mode, immediately approved — so this test just verifies no deadlock.
-        let decision = mgr.request_approval("r3".into(), "cmd".into(), "none".into()).await;
+        let decision = mgr
+            .request_approval("r3".into(), "cmd".into(), "none".into())
+            .await;
         assert_eq!(decision, ApprovalDecision::Approved);
     }
 }

@@ -12,7 +12,10 @@ fn compile_bpf() {
     let bpf_obj = std::path::PathBuf::from("src/bpf/shield.bpf.o");
 
     if !bpf_src.exists() {
-        eprintln!("cargo:warning=shield BPF source not found at {}", bpf_src.display());
+        eprintln!(
+            "cargo:warning=shield BPF source not found at {}",
+            bpf_src.display()
+        );
         return;
     }
 
@@ -21,12 +24,19 @@ fn compile_bpf() {
 
     let output = std::process::Command::new(&clang)
         .args([
-            "-g", "-O2", "-target", "bpf",
+            "-g",
+            "-O2",
+            "-target",
+            "bpf",
             "-D__TARGET_ARCH_x86",
-            "-I", "/usr/include/bpf",
-            "-I", "/usr/include/x86_64-linux-gnu",
-            "-c", bpf_src.to_str().unwrap(),
-            "-o", bpf_obj.to_str().unwrap(),
+            "-I",
+            "/usr/include/bpf",
+            "-I",
+            "/usr/include/x86_64-linux-gnu",
+            "-c",
+            bpf_src.to_str().unwrap(),
+            "-o",
+            bpf_obj.to_str().unwrap(),
         ])
         .output();
 
@@ -42,7 +52,10 @@ fn compile_bpf() {
             // Don't fail the build — eBPF is optional
         }
         Err(e) => {
-            eprintln!("cargo:warning=shield BPF compilation skipped (clang not found): {}", e);
+            eprintln!(
+                "cargo:warning=shield BPF compilation skipped (clang not found): {}",
+                e
+            );
         }
     }
 }

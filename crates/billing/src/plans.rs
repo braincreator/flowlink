@@ -138,7 +138,7 @@ impl Plan {
             name: "Starter".to_string(),
             description: "Для фрилансеров и small teams".to_string(),
             tier: 1,
-            price_kopecks: 199_000, // 1 990 RUB/month
+            price_kopecks: 199_000,                // 1 990 RUB/month
             annual_price_kopecks: Some(1_910_400), // 19 104 RUB/year (~20% discount)
             limits: PlanLimits {
                 max_hosts: 5,
@@ -159,20 +159,20 @@ impl Plan {
         }
     }
 
-    /// Pro plan — 5 990 ₽/мес
+    /// Pro plan — 4 990 ₽/мес
     pub fn pro() -> Self {
         Self {
             id: PlanId::Pro.as_str().to_string(),
             name: "Pro".to_string(),
             description: "Для стартапов, IT-отделов и DevOps teams".to_string(),
             tier: 2,
-            price_kopecks: 599_000, // 5 990 RUB/month
-            annual_price_kopecks: Some(5_750_800), // 57 508 RUB/year (~20% discount)
+            price_kopecks: 499_000,                // 4 990 RUB/month
+            annual_price_kopecks: Some(4_790_400), // 47 904 RUB/year (~20% discount)
             limits: PlanLimits {
                 max_hosts: 50,
                 max_users: 25,
                 backup_storage_mb: 0, // unlimited
-                max_snapshots: 0,    // unlimited
+                max_snapshots: 0,     // unlimited
                 retention_days: 365,
                 audit_retention_days: 365,
                 max_file_size_mb: 0, // configurable
@@ -226,7 +226,11 @@ impl Plan {
             features: db.features,
             available: db.is_active,
             legacy: false,
-            trial_days: None,
+            trial_days: if db.trial_days > 0 {
+                Some(db.trial_days as u16)
+            } else {
+                None
+            },
             billing_period: db.period.clone(),
         }
     }
@@ -284,7 +288,9 @@ impl PlanRegistry {
 
     /// Get all available plans
     pub fn list_available(&self) -> Vec<Plan> {
-        self.plans.read().unwrap()
+        self.plans
+            .read()
+            .unwrap()
             .values()
             .filter(|p| p.available && !p.legacy)
             .cloned()

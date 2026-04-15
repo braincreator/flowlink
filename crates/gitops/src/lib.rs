@@ -1,16 +1,16 @@
-pub mod types;
-pub mod config;
-pub mod git;
+pub mod approval;
 pub mod audit;
 pub mod backup;
-pub mod pipeline;
-pub mod state;
+pub mod config;
 pub mod drift;
-pub mod plan;
-pub mod approval;
+pub mod git;
 pub mod health;
+pub mod pipeline;
+pub mod plan;
 pub mod server_guard;
+pub mod state;
+pub mod types;
 
-pub use types::*;
 pub use config::GitOpsConfig;
 pub use git::GitOpsEngine;
+pub use types::*;

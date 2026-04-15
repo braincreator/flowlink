@@ -72,11 +72,7 @@ impl ImpactAnalyzer {
 
     /// Get basename of command (handle paths)
     fn get_basename(command: &str) -> String {
-        command
-            .rsplit('/')
-            .next()
-            .unwrap_or(command)
-            .to_string()
+        command.rsplit('/').next().unwrap_or(command).to_string()
     }
 
     /// Analyze file deletion commands (rm, rmdir, shred)
@@ -114,7 +110,10 @@ impl ImpactAnalyzer {
 
         ImpactAssessment {
             backup_type: BackupType::FileSnapshot {
-                paths: affected_paths.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+                paths: affected_paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect(),
                 include_hashes: true,
             },
             affected_paths,
@@ -197,11 +196,15 @@ impl ImpactAnalyzer {
 
                     // Try to extract table/database names
                     if keyword.starts_with("DROP TABLE") || keyword.starts_with("ALTER TABLE") {
-                        if let Some(name) = Self::extract_identifier_after_keyword(&arg_upper, keyword) {
+                        if let Some(name) =
+                            Self::extract_identifier_after_keyword(&arg_upper, keyword)
+                        {
                             tables.push(name);
                         }
                     } else if keyword.starts_with("DROP DATABASE") {
-                        if let Some(name) = Self::extract_identifier_after_keyword(&arg_upper, keyword) {
+                        if let Some(name) =
+                            Self::extract_identifier_after_keyword(&arg_upper, keyword)
+                        {
                             databases.push(name);
                         }
                     }
@@ -221,7 +224,11 @@ impl ImpactAnalyzer {
             backup_type: BackupType::DatabaseDump {
                 db_type,
                 databases,
-                tables: if tables.is_empty() { None } else { Some(tables) },
+                tables: if tables.is_empty() {
+                    None
+                } else {
+                    Some(tables)
+                },
                 format: DumpFormat::Sql,
             },
             affected_paths: Vec::new(),
@@ -358,7 +365,10 @@ impl ImpactAnalyzer {
 
         ImpactAssessment {
             backup_type: BackupType::FileSnapshot {
-                paths: affected_paths.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+                paths: affected_paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect(),
                 include_hashes: true,
             },
             affected_paths,
@@ -396,7 +406,10 @@ impl ImpactAnalyzer {
 
         ImpactAssessment {
             backup_type: BackupType::FileSnapshot {
-                paths: affected_paths.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+                paths: affected_paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect(),
                 include_hashes: true,
             },
             affected_paths,
@@ -441,7 +454,9 @@ mod tests {
             assessment.backup_type,
             BackupType::FileSnapshot { .. }
         ));
-        assert!(assessment.affected_paths.contains(&PathBuf::from("/tmp/test")));
+        assert!(assessment
+            .affected_paths
+            .contains(&PathBuf::from("/tmp/test")));
         assert_eq!(assessment.risk_level, ImpactLevel::High);
     }
 
@@ -450,7 +465,11 @@ mod tests {
         let analyzer = ImpactAnalyzer::new();
         let assessment = analyzer.analyze(
             "docker",
-            &["rm".to_string(), "container1".to_string(), "container2".to_string()],
+            &[
+                "rm".to_string(),
+                "container1".to_string(),
+                "container2".to_string(),
+            ],
         );
 
         if let BackupType::DockerState { containers, .. } = assessment.backup_type {
@@ -480,10 +499,7 @@ mod tests {
     #[test]
     fn test_analyze_systemctl_stop() {
         let analyzer = ImpactAnalyzer::new();
-        let assessment = analyzer.analyze(
-            "systemctl",
-            &["stop".to_string(), "nginx".to_string()],
-        );
+        let assessment = analyzer.analyze("systemctl", &["stop".to_string(), "nginx".to_string()]);
 
         if let BackupType::SystemConfig { components } = assessment.backup_type {
             assert!(components.iter().any(|c| c.contains("nginx")));
@@ -496,10 +512,7 @@ mod tests {
     #[test]
     fn test_analyze_package_removal() {
         let analyzer = ImpactAnalyzer::new();
-        let assessment = analyzer.analyze(
-            "apt",
-            &["remove".to_string(), "nginx".to_string()],
-        );
+        let assessment = analyzer.analyze("apt", &["remove".to_string(), "nginx".to_string()]);
 
         assert!(matches!(
             assessment.backup_type,
@@ -511,10 +524,7 @@ mod tests {
     #[test]
     fn test_permission_change_critical() {
         let analyzer = ImpactAnalyzer::new();
-        let assessment = analyzer.analyze(
-            "chmod",
-            &["777".to_string(), "/etc/shadow".to_string()],
-        );
+        let assessment = analyzer.analyze("chmod", &["777".to_string(), "/etc/shadow".to_string()]);
 
         assert_eq!(assessment.risk_level, ImpactLevel::Critical);
         assert!(assessment.description.contains("Security-critical"));
@@ -524,6 +534,9 @@ mod tests {
     fn test_basename_extraction() {
         assert_eq!(ImpactAnalyzer::get_basename("/usr/bin/rm"), "rm");
         assert_eq!(ImpactAnalyzer::get_basename("rm"), "rm");
-        assert_eq!(ImpactAnalyzer::get_basename("/usr/local/bin/docker"), "docker");
+        assert_eq!(
+            ImpactAnalyzer::get_basename("/usr/local/bin/docker"),
+            "docker"
+        );
     }
 }

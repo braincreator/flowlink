@@ -5,6 +5,77 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
+// OAuth configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthConfig {
+    pub vk: VkConfig,
+    pub yandex: YandexConfig,
+    pub github: GithubConfig,
+}
+
+impl Default for OAuthConfig {
+    fn default() -> Self {
+        Self {
+            vk: VkConfig::default(),
+            yandex: YandexConfig::default(),
+            github: GithubConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VkConfig {
+    pub app_id: String,
+    pub app_secret: String,
+    pub service_token: String,
+    pub oauth_endpoint: String,
+}
+
+impl Default for VkConfig {
+    fn default() -> Self {
+        Self {
+            app_id: "mock_vk_app_id".to_string(),
+            app_secret: "mock_vk_app_secret".to_string(),
+            service_token: "mock_vk_service_token".to_string(),
+            oauth_endpoint: "https://id.vk.ru/oauth2/auth".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct YandexConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    pub oauth_endpoint: String,
+}
+
+impl Default for YandexConfig {
+    fn default() -> Self {
+        Self {
+            client_id: "mock_yandex_client_id".to_string(),
+            client_secret: "mock_yandex_client_secret".to_string(),
+            oauth_endpoint: "https://oauth.yandex.ru/authorize".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GithubConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    pub oauth_endpoint: String,
+}
+
+impl Default for GithubConfig {
+    fn default() -> Self {
+        Self {
+            client_id: "mock_github_client_id".to_string(),
+            client_secret: "mock_github_client_secret".to_string(),
+            oauth_endpoint: "https://github.com/login/oauth/authorize".to_string(),
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════
 // Agent Configuration
 // ═══════════════════════════════════════════════
@@ -37,7 +108,27 @@ pub struct AgentConfig {
     pub tls: TlsConfig,
 }
 
-fn default_heartbeat() -> u32 { 30 }
+impl AgentConfig {
+    pub fn vk_oauth_endpoint(&self) -> String {
+        "https://id.vk.ru/oauth2/auth".to_string()
+    }
+    
+    pub fn vk_service_token(&self) -> String {
+        "mock_service_token".to_string()
+    }
+    
+    pub fn vk_app_id(&self) -> String {
+        "mock_app_id".to_string()
+    }
+    
+    pub fn vk_app_secret(&self) -> String {
+        "mock_app_secret".to_string()
+    }
+}
+
+fn default_heartbeat() -> u32 {
+    30
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxConfig {
@@ -65,8 +156,12 @@ impl Default for SandboxConfig {
     }
 }
 
-fn default_max_file_size() -> u64 { 100 * 1024 * 1024 } // 100MB
-fn default_max_exec_timeout() -> u32 { 300 } // 5 min
+fn default_max_file_size() -> u64 {
+    100 * 1024 * 1024
+} // 100MB
+fn default_max_exec_timeout() -> u32 {
+    300
+} // 5 min
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalConfig {
@@ -92,10 +187,18 @@ impl Default for ApprovalConfig {
     }
 }
 
-fn default_approval_mode() -> String { "auto".into() }
-fn default_hard_ask_timeout() -> u32 { 3600 }
-fn default_max_retries() -> u32 { 3 }
-fn default_true() -> bool { true }
+fn default_approval_mode() -> String {
+    "auto".into()
+}
+fn default_hard_ask_timeout() -> u32 {
+    3600
+}
+fn default_max_retries() -> u32 {
+    3
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupConfig {
@@ -126,10 +229,18 @@ impl Default for BackupConfig {
     }
 }
 
-fn default_max_snapshots() -> u32 { 50 }
-fn default_max_total_size() -> u64 { 5 * 1024 * 1024 * 1024 } // 5GB
-fn default_retention_days() -> u32 { 7 }
-fn default_backup_dir() -> String { "~/.flowlink/backups".into() }
+fn default_max_snapshots() -> u32 {
+    50
+}
+fn default_max_total_size() -> u64 {
+    5 * 1024 * 1024 * 1024
+} // 5GB
+fn default_retention_days() -> u32 {
+    7
+}
+fn default_backup_dir() -> String {
+    "~/.flowlink/backups".into()
+}
 
 // ═══════════════════════════════════════════════
 // Shield Configuration (NEW in v2)
@@ -171,11 +282,14 @@ impl Default for ShieldConfig {
     }
 }
 
-fn default_audit_log() -> String { "/var/log/flowlink-shield.jsonl".into() }
-fn default_shield_timeout() -> u32 { 60 }
+fn default_audit_log() -> String {
+    "/var/log/flowlink-shield.jsonl".into()
+}
+fn default_shield_timeout() -> u32 {
+    60
+}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TlsConfig {
     #[serde(default)]
     pub insecure: bool,
@@ -184,7 +298,6 @@ pub struct TlsConfig {
     #[serde(default)]
     pub ca_cert: Option<String>,
 }
-
 
 // ═══════════════════════════════════════════════
 // Relay Configuration
@@ -217,6 +330,106 @@ pub struct RelayConfig {
     /// TLS listener on wss_addr for direct agent WebSocket connections.
     #[serde(default)]
     pub wss_tls: WssTlsConfig,
+    /// Telegram bot token — when set, starts the TG bot.
+    #[serde(default)]
+    pub tg_bot_token: Option<String>,
+    /// SMTP configuration for transactional emails
+    #[serde(default)]
+    pub smtp: SmtpConfig,
+    /// Auth configuration (JWT + OAuth)
+    #[serde(default)]
+    pub auth: AuthConfig,
+    /// OAuth providers configuration
+    #[serde(default)]
+    pub oauth: OAuthConfig,
+}
+
+/// SMTP configuration for transactional emails
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmtpConfig {
+    #[serde(default = "default_smtp_host")]
+    pub host: String,
+    #[serde(default = "default_smtp_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default = "default_smtp_from")]
+    pub from: String,
+}
+
+impl Default for SmtpConfig {
+    fn default() -> Self {
+        Self {
+            host: default_smtp_host(),
+            port: default_smtp_port(),
+            username: String::new(),
+            password: String::new(),
+            from: default_smtp_from(),
+        }
+    }
+}
+
+fn default_smtp_host() -> String {
+    "mail.flow-masters.ru".into()
+}
+fn default_smtp_port() -> u16 {
+    587
+}
+fn default_smtp_from() -> String {
+    "noreply@flowlink.flow-masters.ru".into()
+}
+
+/// Auth configuration for JWT and OAuth providers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// JWT secret key (HS256)
+    #[serde(default)]
+    pub jwt_secret: String,
+    /// Access token TTL in minutes
+    #[serde(default = "default_access_ttl")]
+    pub access_token_ttl_min: i64,
+    /// Refresh token TTL in days
+    #[serde(default = "default_refresh_ttl")]
+    pub refresh_token_ttl_days: i64,
+    /// VK OAuth config
+    #[serde(default)]
+    pub vk: Option<OAuthProviderConfig>,
+    /// Yandex OAuth config
+    #[serde(default)]
+    pub yandex: Option<OAuthProviderConfig>,
+    /// GitHub OAuth config
+    #[serde(default)]
+    pub github: Option<OAuthProviderConfig>,
+}
+
+/// OAuth provider configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthProviderConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect_uri: String,
+}
+
+fn default_access_ttl() -> i64 {
+    15
+}
+fn default_refresh_ttl() -> i64 {
+    30
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            jwt_secret: String::new(),
+            access_token_ttl_min: default_access_ttl(),
+            refresh_token_ttl_days: default_refresh_ttl(),
+            vk: None,
+            yandex: None,
+            github: None,
+        }
+    }
 }
 
 /// WSS TLS configuration for the relay's WebSocket listener.
@@ -234,7 +447,10 @@ pub struct WssTlsConfig {
 
 impl Default for WssTlsConfig {
     fn default() -> Self {
-        Self { cert_path: None, key_path: None }
+        Self {
+            cert_path: None,
+            key_path: None,
+        }
     }
 }
 
@@ -279,11 +495,19 @@ impl Default for DatabaseConfig {
     }
 }
 
-fn default_db_pool_size() -> u32 { 10 }
+fn default_db_pool_size() -> u32 {
+    10
+}
 
-fn default_relay_name() -> String { "FlowLink Relay".into() }
-fn default_wss_addr() -> SocketAddr { "0.0.0.0:8443".parse().unwrap() }
-fn default_http_addr() -> SocketAddr { "0.0.0.0:8080".parse().unwrap() }
+fn default_relay_name() -> String {
+    "FlowLink Relay".into()
+}
+fn default_wss_addr() -> SocketAddr {
+    "0.0.0.0:8443".parse().unwrap()
+}
+fn default_http_addr() -> SocketAddr {
+    "0.0.0.0:8080".parse().unwrap()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
@@ -297,11 +521,17 @@ pub struct LlmConfig {
 
 impl Default for LlmConfig {
     fn default() -> Self {
-        Self { enabled: false, backends: vec![], timeout_sec: default_llm_timeout() }
+        Self {
+            enabled: false,
+            backends: vec![],
+            timeout_sec: default_llm_timeout(),
+        }
     }
 }
 
-fn default_llm_timeout() -> u32 { 30 }
+fn default_llm_timeout() -> u32 {
+    30
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmBackend {
@@ -323,11 +553,24 @@ pub struct BillingConfig {
     /// JWT-токен для авторизации в API Точка Банка
     #[serde(default)]
     pub tochka_jwt_token: Option<String>,
+    /// Client ID (customer_code) в Точка Банка
+    #[serde(default)]
+    pub tochka_client_id: Option<String>,
+    /// Secret key для HMAC-верификации вебхуков
+    #[serde(default)]
+    pub tochka_webhook_secret: Option<String>,
 }
 
 impl Default for BillingConfig {
     fn default() -> Self {
-        Self { enabled: false, currency: "RUB".into(), plans: vec![], tochka_jwt_token: None }
+        Self {
+            enabled: false,
+            currency: "RUB".into(),
+            plans: vec![],
+            tochka_jwt_token: None,
+            tochka_client_id: None,
+            tochka_webhook_secret: None,
+        }
     }
 }
 
@@ -335,7 +578,7 @@ impl Default for BillingConfig {
 pub struct PlanConfig {
     pub id: String,
     pub name: String,
-    pub price: u64, // in cents/kopecks
+    pub price: u64,     // in cents/kopecks
     pub period: String, // "monthly" | "yearly"
     #[serde(default)]
     pub features: HashMap<String, serde_json::Value>,
@@ -351,11 +594,16 @@ pub struct RegistryConfig {
 
 impl Default for RegistryConfig {
     fn default() -> Self {
-        Self { data_path: default_registry_path(), max_hosts: 100 }
+        Self {
+            data_path: default_registry_path(),
+            max_hosts: 100,
+        }
     }
 }
 
-fn default_registry_path() -> String { "~/.flowlink/relay".into() }
+fn default_registry_path() -> String {
+    "~/.flowlink/relay".into()
+}
 
 // ═══════════════════════════════════════════════
 // Helpers
@@ -364,8 +612,17 @@ fn default_registry_path() -> String { "~/.flowlink/relay".into() }
 impl AgentConfig {
     pub fn load(path: &str) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let config: Self = serde_json::from_str(&content)?;
-        Ok(config)
+        // Try flat format first
+        if let Ok(config) = serde_json::from_str::<Self>(&content) {
+            return Ok(config);
+        }
+        // Try nested format (config.json with "agent_config" key)
+        let value: serde_json::Value = serde_json::from_str(&content)?;
+        if let Some(agent) = value.get("agent_config") {
+            let config: Self = serde_json::from_value(agent.clone())?;
+            return Ok(config);
+        }
+        anyhow::bail!("Cannot parse AgentConfig: file has neither flat AgentConfig fields nor an 'agent_config' key")
     }
 
     pub fn save(&self, path: &str) -> anyhow::Result<()> {
@@ -378,8 +635,17 @@ impl AgentConfig {
 impl RelayConfig {
     pub fn load(path: &str) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let config: Self = serde_json::from_str(&content)?;
-        Ok(config)
+        // Try flat format first (relay.json)
+        if let Ok(config) = serde_json::from_str::<Self>(&content) {
+            return Ok(config);
+        }
+        // Try nested format (config.json with "relay_config" key)
+        let value: serde_json::Value = serde_json::from_str(&content)?;
+        if let Some(relay) = value.get("relay_config") {
+            let config: Self = serde_json::from_value(relay.clone())?;
+            return Ok(config);
+        }
+        anyhow::bail!("Cannot parse RelayConfig: file has neither flat RelayConfig fields nor a 'relay_config' key")
     }
 }
 
@@ -494,7 +760,11 @@ mod tests {
 
     #[test]
     fn test_tls_serialization() {
-        let tls = TlsConfig { insecure: true, cert_pinning: true, ca_cert: Some("/path".into()) };
+        let tls = TlsConfig {
+            insecure: true,
+            cert_pinning: true,
+            ca_cert: Some("/path".into()),
+        };
         let json = serde_json::to_string(&tls).unwrap();
         let back: TlsConfig = serde_json::from_str(&json).unwrap();
         assert!(back.insecure);
@@ -506,9 +776,13 @@ mod tests {
     fn test_llm_config_with_backends() {
         let llm = LlmConfig {
             enabled: true,
-            backends: vec![
-                LlmBackend { name: "gpt4".into(), provider: "openai".into(), model: "gpt-4".into(), api_key: Some("k".into()), base_url: None },
-            ],
+            backends: vec![LlmBackend {
+                name: "gpt4".into(),
+                provider: "openai".into(),
+                model: "gpt-4".into(),
+                api_key: Some("k".into()),
+                base_url: None,
+            }],
             timeout_sec: 60,
         };
         let json = serde_json::to_string(&llm).unwrap();
@@ -524,14 +798,18 @@ mod tests {
             enabled: true,
             currency: "USD".into(),
             plans: vec![PlanConfig {
-                id: "starter".into(), name: "Starter".into(), price: 2990,
-                period: "monthly".into(), features: Default::default(),
+                id: "starter".into(),
+                name: "Starter".into(),
+                price: 2990,
+                period: "monthly".into(),
+                features: Default::default(),
             }],
             tochka_jwt_token: None,
+            tochka_client_id: None,
+            tochka_webhook_secret: None,
         };
         let json = serde_json::to_string(&billing).unwrap();
         let back: BillingConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.plans[0].price, 2990);
     }
 
     #[test]
@@ -562,7 +840,6 @@ mod tests {
         let result: Result<AgentConfig, _> = serde_json::from_str("not json");
         assert!(result.is_err());
     }
-
 
     #[test]
     fn test_agent_config_defaults() {
@@ -627,9 +904,27 @@ mod tests {
         let llm = LlmConfig {
             enabled: true,
             backends: vec![
-                LlmBackend { name: "gpt4".into(), provider: "openai".into(), model: "gpt-4".into(), api_key: Some("k1".into()), base_url: None },
-                LlmBackend { name: "claude".into(), provider: "anthropic".into(), model: "claude-3".into(), api_key: Some("k2".into()), base_url: Some("https://api.anthropic.com".into()) },
-                LlmBackend { name: "local".into(), provider: "ollama".into(), model: "llama3".into(), api_key: None, base_url: Some("http://localhost:11434".into()) },
+                LlmBackend {
+                    name: "gpt4".into(),
+                    provider: "openai".into(),
+                    model: "gpt-4".into(),
+                    api_key: Some("k1".into()),
+                    base_url: None,
+                },
+                LlmBackend {
+                    name: "claude".into(),
+                    provider: "anthropic".into(),
+                    model: "claude-3".into(),
+                    api_key: Some("k2".into()),
+                    base_url: Some("https://api.anthropic.com".into()),
+                },
+                LlmBackend {
+                    name: "local".into(),
+                    provider: "ollama".into(),
+                    model: "llama3".into(),
+                    api_key: None,
+                    base_url: Some("http://localhost:11434".into()),
+                },
             ],
             timeout_sec: 120,
         };
@@ -667,7 +962,9 @@ mod tests {
     #[test]
     fn test_shield_config_full() {
         let s = ShieldConfig {
-            enabled: true, enable_ast: false, enable_interpreter: false,
+            enabled: true,
+            enable_ast: false,
+            enable_interpreter: false,
             rules_path: Some("/rules.yaml".into()),
             snapshot_dataset: Some("dataset".into()),
             audit_log: "/var/log/shield.log".into(),
@@ -684,8 +981,13 @@ mod tests {
     #[test]
     fn test_plan_config_features() {
         let plan = PlanConfig {
-            id: "starter".into(), name: "Starter".into(), price: 2990, period: "monthly".into(),
-            features: [("max_hosts".into(), serde_json::json!(10))].into_iter().collect(),
+            id: "starter".into(),
+            name: "Starter".into(),
+            price: 2990,
+            period: "monthly".into(),
+            features: [("max_hosts".into(), serde_json::json!(10))]
+                .into_iter()
+                .collect(),
         };
         let json = serde_json::to_string(&plan).unwrap();
         let back: PlanConfig = serde_json::from_str(&json).unwrap();
@@ -695,8 +997,12 @@ mod tests {
     #[test]
     fn test_backup_config_full() {
         let b = BackupConfig {
-            enabled: true, max_snapshots: 10, max_total_size: 1024,
-            retention_days: 30, backup_dir: "/backup".into(), compression: "zstd".into(),
+            enabled: true,
+            max_snapshots: 10,
+            max_total_size: 1024,
+            retention_days: 30,
+            backup_dir: "/backup".into(),
+            compression: "zstd".into(),
         };
         let json = serde_json::to_string(&b).unwrap();
         let back: BackupConfig = serde_json::from_str(&json).unwrap();

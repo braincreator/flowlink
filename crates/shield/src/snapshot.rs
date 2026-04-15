@@ -1,8 +1,8 @@
 // FlowLink Shield — ZFS/LVM snapshot trigger
 
 use anyhow::Result;
-use std::process::Command;
 use log::{info, warn};
+use std::process::Command;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SnapshotBackend {

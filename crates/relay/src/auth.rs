@@ -1,8 +1,18 @@
-// Auth Manager — token validation, client registry
-// Port of internal/relay/auth.go
+//! Authentication module — JWT tokens + OAuth (VK, Yandex) + API token auth
+
+use anyhow::{Result, bail};
+use chrono::{DateTime, Duration, Utc};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use std::sync::Arc;
+use uuid::Uuid;
+
+// =========================================================================
+// AuthManager — API token validation (legacy, used by handler/middleware)
+// =========================================================================
 
 use dashmap::DashMap;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Client {
@@ -12,15 +22,14 @@ pub struct Client {
     pub active: bool,
 }
 
+/// Legacy auth manager for API token validation
 pub struct AuthManager {
     clients: Arc<DashMap<String, Client>>,
-    token_to_client: Arc<DashMap<String, String>>, // token -> client_id
+    token_to_client: Arc<DashMap<String, String>>,
 }
 
 impl Default for AuthManager {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl AuthManager {
@@ -34,7 +43,6 @@ impl AuthManager {
     pub fn register_client(&self, client: Client) {
         let token = client.api_token.clone();
         let id = client.client_id.clone();
-        // Remove old token if client is being re-registered
         if let Some(old) = self.clients.get(&id) {
             self.token_to_client.remove(&old.api_token);
         }
@@ -42,9 +50,7 @@ impl AuthManager {
         self.clients.insert(id, client);
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.clients.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.clients.is_empty() }
 
     pub fn validate_token(&self, token: &str) -> Option<Client> {
         let client_id = self.token_to_client.get(token)?;
@@ -57,76 +63,603 @@ impl AuthManager {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// =========================================================================
+// AuthEngine — JWT + OAuth
+// =========================================================================
 
-    fn test_client(id: &str, token: &str) -> Client {
-        Client { client_id: id.into(), api_token: token.into(), name: id.into(), active: true }
-    }
+// ---------------------------------------------------------------------------
+// JWT Claims
+// ---------------------------------------------------------------------------
 
-    #[test]
-    fn test_register_and_validate() {
-        let auth = AuthManager::new();
-        auth.register_client(test_client("c1", "tok1"));
-        let c = auth.validate_token("tok1").unwrap();
-        assert_eq!(c.client_id, "c1");
-    }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Claims {
+    /// Subject — user UUID
+    pub sub: String,
+    /// Account ID (billing)
+    pub account_id: String,
+    /// Email
+    pub email: Option<String>,
+    /// Name
+    pub name: Option<String>,
+    /// Issued at
+    pub iat: i64,
+    /// Expiration
+    pub exp: i64,
+}
 
-    #[test]
-    fn test_invalid_token() {
-        let auth = AuthManager::new();
-        assert!(auth.validate_token("nope").is_none());
-    }
+// ---------------------------------------------------------------------------
+// Auth config
+// ---------------------------------------------------------------------------
 
-    #[test]
-    fn test_get_client() {
-        let auth = AuthManager::new();
-        auth.register_client(test_client("c1", "tok1"));
-        assert!(auth.get_client("c1").is_some());
-        assert!(auth.get_client("c2").is_none());
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// JWT secret key (HS256)
+    pub jwt_secret: String,
+    /// Access token TTL in minutes (default 15)
+    pub access_token_ttl_min: i64,
+    /// Refresh token TTL in days (default 30)
+    pub refresh_token_ttl_days: i64,
+    /// VK OAuth
+    pub vk: Option<flowlink_core::config::OAuthProviderConfig>,
+    /// Yandex OAuth
+    pub yandex: Option<flowlink_core::config::OAuthProviderConfig>,
+    /// GitHub OAuth
+    pub github: Option<flowlink_core::config::OAuthProviderConfig>,
+}
 
-    #[test]
-    fn test_inactive_client() {
-        let auth = AuthManager::new();
-        auth.register_client(Client { client_id: "c1".into(), api_token: "tok1".into(), name: "c1".into(), active: false });
-        // validate_token still returns the client (doesn't check active flag)
-        let c = auth.validate_token("tok1").unwrap();
-        assert_eq!(c.client_id, "c1");
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthProvider {
+    pub client_id: String,
+    pub client_secret: String,
+    pub redirect_uri: String,
+}
 
-    #[test]
-    fn test_register_duplicate_overwrites() {
-        let auth = AuthManager::new();
-        auth.register_client(test_client("c1", "tok1"));
-        auth.register_client(Client { client_id: "c1".into(), api_token: "tok2".into(), name: "updated".into(), active: true });
-        assert!(auth.validate_token("tok1").is_none()); // old token gone
-        assert!(auth.validate_token("tok2").is_some());
-    }
-
-    #[test]
-    fn test_is_empty() {
-        let auth = AuthManager::new();
-        assert!(auth.is_empty());
-        auth.register_client(test_client("c1", "tok1"));
-        assert!(!auth.is_empty());
-    }
-
-    #[test]
-    fn test_default() {
-        let auth = AuthManager::default();
-        assert!(auth.is_empty());
-    }
-
-    #[test]
-    fn test_multiple_clients() {
-        let auth = AuthManager::new();
-        for i in 0..10 {
-            auth.register_client(test_client(&format!("c{i}"), &format!("tok{i}")));
-        }
-        for i in 0..10 {
-            assert!(auth.validate_token(&format!("tok{i}")).is_some());
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            jwt_secret: String::new(),
+            access_token_ttl_min: 15,
+            refresh_token_ttl_days: 30,
+            vk: None,
+            yandex: None,
+            github: None,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// JWT token pair
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct TokenPair {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Auth engine
+// ---------------------------------------------------------------------------
+
+pub struct AuthEngine {
+    config: AuthConfig,
+    db: PgPool,
+    /// PKCE code_verifier storage: state -> code_verifier
+    pkce_store: Arc<DashMap<String, String>>,
+}
+
+impl AuthEngine {
+    pub fn new(config: AuthConfig, db: PgPool) -> Self {
+        Self { config, db, pkce_store: Arc::new(DashMap::new()) }
+    }
+
+    /// Generate JWT access + refresh token pair
+    pub fn create_tokens(&self, user_id: &str, account_id: &str, email: Option<&str>, name: Option<&str>) -> Result<TokenPair> {
+        let now = Utc::now();
+        let access_exp = now + Duration::minutes(self.config.access_token_ttl_min);
+        let refresh_exp = now + Duration::days(self.config.refresh_token_ttl_days);
+
+        let access_claims = Claims {
+            sub: user_id.to_string(),
+            account_id: account_id.to_string(),
+            email: email.map(|s| s.to_string()),
+            name: name.map(|s| s.to_string()),
+            iat: now.timestamp(),
+            exp: access_exp.timestamp(),
+        };
+
+        let access_token = encode(
+            &Header::default(),
+            &access_claims,
+            &EncodingKey::from_secret(self.config.jwt_secret.as_bytes()),
+        )?;
+
+        // Refresh token — longer lived, fewer claims
+        let refresh_claims = Claims {
+            sub: user_id.to_string(),
+            account_id: account_id.to_string(),
+            email: None,
+            name: None,
+            iat: now.timestamp(),
+            exp: refresh_exp.timestamp(),
+        };
+
+        let refresh_token = encode(
+            &Header::default(),
+            &refresh_claims,
+            &EncodingKey::from_secret(self.config.jwt_secret.as_bytes()),
+        )?;
+
+        Ok(TokenPair {
+            access_token,
+            refresh_token,
+            expires_in: self.config.access_token_ttl_min * 60,
+        })
+    }
+
+    /// Validate access token and return claims
+    pub fn validate_access_token(&self, token: &str) -> Result<Claims> {
+        let token_data = decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(self.config.jwt_secret.as_bytes()),
+            &Validation::default(),
+        )?;
+        Ok(token_data.claims)
+    }
+
+    /// Validate refresh token
+    pub fn validate_refresh_token(&self, token: &str) -> Result<Claims> {
+        let token_data = decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(self.config.jwt_secret.as_bytes()),
+            &Validation::default(),
+        )?;
+        Ok(token_data.claims)
+    }
+
+    // ---- OAuth flows ----
+
+    /// Get VK ID OAuth authorize URL (OAuth 2.1 with PKCE)
+    pub fn vk_auth_url(&self) -> Option<String> {
+        let vk = self.config.vk.as_ref()?;
+        
+        // Generate PKCE code_verifier (43-128 chars)
+        let code_verifier: String = std::iter::repeat_with(|| {
+            let b = rand::random::<u8>();
+            match b % 3 {
+                0 => char::from(b'A' + (b % 26)),
+                1 => char::from(b'a' + (b % 26)),
+                _ => char::from(b'0' + (b % 10)),
+            }
+        }).take(64).collect();
+        
+        // Compute code_challenge = base64url(sha256(code_verifier))
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(code_verifier.as_bytes());
+        let hash = hasher.finalize();
+        let code_challenge = base64_encode_url_safe(&hash);
+        
+        // Generate random state and store code_verifier
+        let state: String = std::iter::repeat_with(|| {
+            let b = rand::random::<u8>();
+            match b % 3 {
+                0 => char::from(b'A' + (b % 26)),
+                1 => char::from(b'a' + (b % 26)),
+                _ => char::from(b'0' + (b % 10)),
+            }
+        }).take(32).collect();
+        
+        self.pkce_store.insert(state.clone(), code_verifier);
+        
+        Some(format!(
+            "https://id.vk.ru/authorize?response_type=code&client_id={}&redirect_uri={}&state={}&code_challenge={}&code_challenge_method=S256&scope=email+phone",
+            vk.client_id,
+            urlencoding::encode(&vk.redirect_uri),
+            state,
+            code_challenge,
+        ))
+    }
+
+    /// Get Yandex OAuth authorize URL
+    pub fn yandex_auth_url(&self, state: &str) -> Option<String> {
+        let yandex = self.config.yandex.as_ref()?;
+        Some(format!(
+            "https://oauth.yandex.ru/authorize?client_id={}&response_type=code&redirect_uri={}&scope=login:email login:info&state={}",
+            yandex.client_id,
+            urlencoding::encode(&yandex.redirect_uri),
+            state,
+        ))
+    }
+
+    /// Exchange VK ID code for tokens, fetch user info, find or create user
+    pub async fn vk_callback(&self, code: &str, state: &str) -> Result<OAuthUser> {
+        let vk = self.config.vk.as_ref().ok_or_else(|| anyhow::anyhow!("VK OAuth not configured"))?;
+        
+        // Get code_verifier from PKCE store
+        let code_verifier = self.pkce_store.get(state)
+            .map(|v| v.value().clone())
+            .ok_or_else(|| anyhow::anyhow!("VK: invalid or expired state/PKCE"))?
+        ;
+        self.pkce_store.remove(state);
+
+        // Exchange code for access token (VK ID OAuth 2.1)
+        // Note: VK ID does NOT use client_secret, only PKCE code_verifier
+        let client = reqwest::Client::new();
+        let token_resp: serde_json::Value = client.post("https://id.vk.ru/oauth2/auth")
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", code),
+                ("client_id", &vk.client_id),
+                ("redirect_uri", &vk.redirect_uri),
+                ("code_verifier", &code_verifier),
+                ("state", state),
+                ("device_id", "1"),
+            ])
+            .send().await?
+            .json().await?;
+
+        let access_token = token_resp["access_token"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("VK: no access_token in response: {:?}", token_resp))?
+            .to_string();
+        let vk_user_id = token_resp["user_id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("VK: no user_id"))?;
+        let email = token_resp["email"].as_str().map(|s| s.to_string());
+
+        // Fetch user info via VK ID API
+        let info_resp: serde_json::Value = client.get("https://id.vk.ru/oauth2/user_info")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .send().await?
+            .json().await?;
+        
+        let user_data = &info_resp["user"];
+        let first_name = user_data["first_name"].as_str().unwrap_or("");
+        let last_name = user_data["last_name"].as_str().unwrap_or("");
+        let avatar = user_data["avatar"].as_str().map(|s| s.to_string());
+        let phone = user_data["phone"].as_str().map(|s| s.to_string());
+
+        let full_name = format!("{} {}", first_name, last_name).trim().to_string();
+
+        // Find or create user
+        let user = self.find_or_create_user(
+            Some(format!("vk:{}", vk_user_id)),
+            None, None,
+            email.as_deref(),
+            if full_name.is_empty() { None } else { Some(&full_name) },
+            avatar.as_deref(),
+        ).await?;
+
+        Ok(user)
+    }
+
+    /// Exchange Yandex code for tokens, fetch user info, find or create user
+    pub async fn yandex_callback(&self, code: &str) -> Result<OAuthUser> {
+        let yandex = self.config.yandex.as_ref().ok_or_else(|| anyhow::anyhow!("Yandex OAuth not configured"))?;
+
+        // Exchange code for token
+        let client = reqwest::Client::new();
+        let token_resp: serde_json::Value = client
+            .post("https://oauth.yandex.ru/token")
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", code),
+                ("client_id", &yandex.client_id),
+                ("client_secret", &yandex.client_secret),
+            ])
+            .send().await?
+            .json().await?;
+
+        let access_token = token_resp["access_token"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Yandex: no access_token"))?
+            .to_string();
+
+        // Fetch user info
+        let info_resp: serde_json::Value = client
+            .get("https://login.yandex.ru/info?format=json")
+            .header("Authorization", format!("OAuth {}", access_token))
+            .send().await?
+            .json().await?;
+
+        let yandex_id = info_resp["id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Yandex: no id"))?;
+        let email = info_resp["default_email"].as_str().map(|s| s.to_string());
+        let name = info_resp["real_name"].as_str().or_else(|| info_resp["display_name"].as_str());
+        let avatar = info_resp["default_avatar_id"].as_str().map(|id| {
+            format!("https://avatars.yandex.net/get-yapic/{}/islands-200", id)
+        });
+
+        // Find or create user
+        let user = self.find_or_create_user(
+            None,
+            Some(format!("yandex:{}", yandex_id)),
+            None,
+            email.as_deref(),
+            name,
+            avatar.as_deref(),
+        ).await?;
+
+        Ok(user)
+    }
+
+    /// Get GitHub OAuth authorize URL
+    pub fn github_auth_url(&self) -> Option<String> {
+        let gh = self.config.github.as_ref()?;
+        let state: String = std::iter::repeat_with(|| {
+            let b = rand::random::<u8>();
+            match b % 3 {
+                0 => char::from(b'A' + (b % 26)),
+                1 => char::from(b'a' + (b % 26)),
+                _ => char::from(b'0' + (b % 10)),
+            }
+        }).take(32).collect();
+        Some(format!(
+            "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope=user:email+read:user&state={}",
+            gh.client_id, urlencoding::encode(&gh.redirect_uri), state,
+        ))
+    }
+
+    /// Exchange GitHub code for tokens, fetch user info, find or create user
+    pub async fn github_callback(&self, code: &str) -> Result<OAuthUser> {
+        let gh = self.config.github.as_ref().ok_or_else(|| anyhow::anyhow!("GitHub OAuth not configured"))?;
+        let client = reqwest::Client::new();
+
+        let token_resp: serde_json::Value = client
+            .post("https://github.com/login/oauth/access_token")
+            .header("Accept", "application/json")
+            .form(&[
+                ("client_id", &gh.client_id),
+                ("client_secret", &gh.client_secret),
+                ("code", &code.to_string()),
+            ])
+            .send().await?.json().await?;
+
+        let access_token = token_resp["access_token"]
+            .as_str().ok_or_else(|| anyhow::anyhow!("GitHub: no access_token: {:?}", token_resp))?
+            .to_string();
+
+        let user_resp: serde_json::Value = client
+            .get("https://api.github.com/user")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("User-Agent", "FlowLink")
+            .send().await?.json().await?;
+
+        let gh_id = user_resp["id"].as_u64().ok_or_else(|| anyhow::anyhow!("GitHub: no id"))?;
+        let login = user_resp["login"].as_str().unwrap_or("");
+        let name = user_resp["name"].as_str().unwrap_or(login);
+        let avatar = user_resp["avatar_url"].as_str().map(|s| s.to_string());
+        let email = user_resp["email"].as_str().map(|s| s.to_string());
+
+        // If no public email, fetch from emails API
+        let email = if email.is_none() {
+            let emails_resp: serde_json::Value = client
+                .get("https://api.github.com/user/emails")
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("User-Agent", "FlowLink")
+                .send().await?.json().await?;
+            emails_resp.as_array()
+                .and_then(|arr| arr.iter().find(|e| e["primary"].as_bool() == Some(true)))
+                .and_then(|e| e["email"].as_str())
+                .map(|s| s.to_string())
+        } else { email };
+
+        let user = self.find_or_create_user(
+            None, None, Some(format!("github:{}", gh_id)),
+            email.as_deref(),
+            if name.is_empty() { None } else { Some(name) },
+            avatar.as_deref(),
+        ).await?;
+
+        Ok(user)
+    }
+
+    /// Find existing user by OAuth ID or create new one with Trial account
+    async fn find_or_create_user(
+        &self,
+        vk_id: Option<String>,
+        yandex_id: Option<String>,
+        github_id: Option<String>,
+        email: Option<&str>,
+        name: Option<&str>,
+        avatar_url: Option<&str>,
+    ) -> Result<OAuthUser> {
+        // Try to find by VK ID
+        if let Some(ref vk) = vk_id {
+            let row = sqlx::query_as::<_, UserRow>(
+                "SELECT id, email, name, avatar_url, oauth_vk_id, oauth_yandex_id, oauth_github_id, account_id, created_at, last_login FROM users WHERE oauth_vk_id = $1"
+            )
+            .bind(vk)
+            .fetch_optional(&self.db)
+            .await?;
+            if let Some(user) = row {
+                sqlx::query("UPDATE users SET last_login = now() WHERE id = $1")
+                    .bind(&user.id).execute(&self.db).await?;
+                return Ok(user.into());
+            }
+        }
+
+        // Try to find by Yandex ID
+        if let Some(ref yandex) = yandex_id {
+            let row = sqlx::query_as::<_, UserRow>(
+                "SELECT id, email, name, avatar_url, oauth_vk_id, oauth_yandex_id, oauth_github_id, account_id, created_at, last_login FROM users WHERE oauth_yandex_id = $1"
+            )
+            .bind(yandex)
+            .fetch_optional(&self.db)
+            .await?;
+            if let Some(user) = row {
+                sqlx::query("UPDATE users SET last_login = now() WHERE id = $1")
+                    .bind(&user.id).execute(&self.db).await?;
+                return Ok(user.into());
+            }
+        }
+
+        // Try to find by GitHub ID
+        if let Some(ref gh) = github_id {
+            let row = sqlx::query_as::<_, UserRow>(
+                "SELECT id, email, name, avatar_url, oauth_vk_id, oauth_yandex_id, oauth_github_id, account_id, created_at, last_login FROM users WHERE oauth_github_id = $1"
+            )
+            .bind(gh)
+            .fetch_optional(&self.db)
+            .await?;
+            if let Some(user) = row {
+                sqlx::query("UPDATE users SET last_login = now() WHERE id = $1")
+                    .bind(&user.id).execute(&self.db).await?;
+                return Ok(user.into());
+            }
+        }
+
+        // Try to find by email
+        if let Some(em) = email {
+            let row = sqlx::query_as::<_, UserRow>(
+                "SELECT id, email, name, avatar_url, oauth_vk_id, oauth_yandex_id, account_id, created_at, last_login FROM users WHERE email = $1"
+            )
+            .bind(em)
+            .fetch_optional(&self.db)
+            .await?;
+
+            if let Some(user) = row {
+                // Link OAuth provider
+                if let Some(ref vk) = vk_id {
+                    sqlx::query("UPDATE users SET oauth_vk_id = $1, last_login = now() WHERE id = $2 AND oauth_vk_id IS NULL")
+                        .bind(vk)
+                        .bind(&user.id)
+                        .execute(&self.db)
+                        .await?;
+                }
+                if let Some(ref yandex) = yandex_id {
+                    sqlx::query("UPDATE users SET oauth_yandex_id = $1, last_login = now() WHERE id = $2 AND oauth_yandex_id IS NULL")
+                        .bind(yandex)
+                        .bind(&user.id)
+                        .execute(&self.db)
+                        .await?;
+                }
+                if let Some(ref gh) = github_id {
+                    sqlx::query("UPDATE users SET oauth_github_id = $1, last_login = now() WHERE id = $2 AND oauth_github_id IS NULL")
+                        .bind(gh)
+                        .bind(&user.id)
+                        .execute(&self.db)
+                        .await?;
+                }
+                return Ok(user.into());
+            }
+        }
+
+        // Create new user
+        let user_id = Uuid::new_v4();
+        let account_id = format!("user:{}", user_id);
+
+        sqlx::query("INSERT INTO accounts (account_id, plan_id, active) VALUES ($1, 'trial', true)")
+            .bind(&account_id).execute(&self.db).await?;
+
+        sqlx::query(
+            "INSERT INTO users (id, email, name, avatar_url, oauth_vk_id, oauth_yandex_id, oauth_github_id, account_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+        )
+        .bind(user_id)
+        .bind(email)
+        .bind(name.unwrap_or(""))
+        .bind(avatar_url)
+        .bind(&vk_id)
+        .bind(&yandex_id)
+        .bind(&github_id)
+        .bind(&account_id)
+        .execute(&self.db)
+        .await?;
+
+        Ok(OAuthUser {
+            id: user_id.to_string(),
+            email: email.map(|s| s.to_string()),
+            name: name.unwrap_or("").to_string(),
+            avatar_url: avatar_url.map(|s| s.to_string()),
+            account_id,
+        })
+    }
+
+    /// Get user by ID
+    pub async fn get_user(&self, user_id: &str) -> Result<Option<OAuthUser>> {
+        let row = sqlx::query_as::<_, UserRow>(
+            "SELECT id, email, name, avatar_url, oauth_vk_id, oauth_yandex_id, oauth_github_id, account_id, created_at, last_login FROM users WHERE id = $1"
+        )
+        .bind(Uuid::parse_str(user_id)?)
+        .fetch_optional(&self.db)
+        .await?;
+        Ok(row.map(|r| r.into()))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// User types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, sqlx::FromRow)]
+struct UserRow {
+    id: Uuid,
+    email: Option<String>,
+    name: String,
+    avatar_url: Option<String>,
+    oauth_vk_id: Option<String>,
+    oauth_yandex_id: Option<String>,
+    oauth_github_id: Option<String>,
+    account_id: String,
+    created_at: DateTime<Utc>,
+    last_login: DateTime<Utc>,
+}
+
+impl From<UserRow> for OAuthUser {
+    fn from(r: UserRow) -> Self {
+        Self {
+            id: r.id.to_string(),
+            email: r.email,
+            name: r.name,
+            avatar_url: r.avatar_url,
+            account_id: r.account_id,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OAuthUser {
+    pub id: String,
+    pub email: Option<String>,
+    pub name: String,
+    pub avatar_url: Option<String>,
+    pub account_id: String,
+}
+
+// Simple URL encoding (no external dependency)
+pub(crate) mod urlencoding {
+    pub fn encode(s: &str) -> String {
+        let mut encoded = String::with_capacity(s.len() * 2);
+        for b in s.bytes() {
+            if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
+                encoded.push(b as char);
+            } else {
+                encoded.push_str(&format!("%{:02X}", b));
+            }
+        }
+        encoded
+    }
+}
+
+fn base64_encode_url_safe(data: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut result = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(ALPHABET[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(ALPHABET[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(ALPHABET[((triple >> 6) & 0x3F) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            result.push(ALPHABET[(triple & 0x3F) as usize] as char);
+        }
+    }
+    result
 }

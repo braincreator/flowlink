@@ -8,8 +8,7 @@ use crate::types::{DenialFeedback, RiskLevel};
 
 /// Commands that can cause irreversible data loss or system changes
 const DESTRUCTIVE_COMMANDS: &[&str] = &[
-    "rm", "rmdir", "mv", "cp", "chmod", "chown",
-    "truncate", "dd", "shred", "tee", "sed",
+    "rm", "rmdir", "mv", "cp", "chmod", "chown", "truncate", "dd", "shred", "tee", "sed",
 ];
 
 /// Shell expansion patterns that are dangerous in destructive commands
@@ -50,7 +49,7 @@ impl LiteralChecker {
     fn has_variable_expansion(arg: &str) -> bool {
         let chars: Vec<char> = arg.chars().collect();
         let mut i = 0;
-        
+
         while i < chars.len() {
             if chars[i] == '$' {
                 // Check for ${...} pattern
@@ -74,7 +73,7 @@ impl LiteralChecker {
     /// Note: ? at the start with - (like -?) is allowed as it's likely a flag
     fn has_glob_pattern(arg: &str) -> bool {
         let chars: Vec<char> = arg.chars().collect();
-        
+
         for (i, &c) in chars.iter().enumerate() {
             if c == '*' {
                 // Glob star is always suspicious in destructive commands
@@ -100,7 +99,7 @@ impl LiteralChecker {
     fn has_command_substitution(arg: &str) -> bool {
         let chars: Vec<char> = arg.chars().collect();
         let mut i = 0;
-        
+
         while i < chars.len() {
             if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '(' {
                 return true;
@@ -116,7 +115,7 @@ impl LiteralChecker {
         // Note: We check for these as standalone or as part of the argument
         let chars: Vec<char> = arg.chars().collect();
         let mut i = 0;
-        
+
         while i < chars.len() {
             match chars[i] {
                 '&' => {
@@ -213,11 +212,7 @@ impl LiteralChecker {
 
         for (arg, patterns) in &unsafe_args {
             let pattern_names: Vec<&str> = patterns.iter().map(|(name, _)| *name).collect();
-            details_parts.push(format!(
-                "Argument '{}': {}",
-                arg,
-                pattern_names.join(", ")
-            ));
+            details_parts.push(format!("Argument '{}': {}", arg, pattern_names.join(", ")));
         }
 
         let reason = format!("{}. {}", reason_parts.join(""), details_parts.join("; "));
@@ -225,12 +220,22 @@ impl LiteralChecker {
         let what_would_be_needed = format!(
             "Use literal paths instead of shell variables/globs. \
              First resolve the paths (e.g., with 'ls {}'), then use the literal values.",
-            unsafe_args.iter().map(|(arg, _)| arg.as_str()).take(1).collect::<Vec<_>>().join(" ")
+            unsafe_args
+                .iter()
+                .map(|(arg, _)| arg.as_str())
+                .take(1)
+                .collect::<Vec<_>>()
+                .join(" ")
         );
 
         let alternative = Some(format!(
             "Resolve paths first: ls {} → then use literal file names in the command",
-            unsafe_args.iter().map(|(arg, _)| arg.as_str()).take(1).collect::<Vec<_>>().join(" ")
+            unsafe_args
+                .iter()
+                .map(|(arg, _)| arg.as_str())
+                .take(1)
+                .collect::<Vec<_>>()
+                .join(" ")
         ));
 
         tracing::warn!(
@@ -267,18 +272,18 @@ mod tests {
     #[test]
     fn test_literal_rejects_var() {
         let checker = LiteralChecker::new();
-        
+
         // Test $VAR pattern
         let result = checker.check("rm", &["$HOME/file.txt".to_string()]);
         assert!(result.is_some(), "Should reject $VAR in rm command");
         let feedback = result.unwrap();
         assert!(feedback.reason.contains("Shell expansion"));
         assert!(feedback.alternative.is_some());
-        
+
         // Test ${VAR} pattern
         let result = checker.check("rm", &["${HOME}/file.txt".to_string()]);
         assert!(result.is_some(), "Should reject ${{HOME}} in rm command");
-        
+
         // Test with mv command
         let result = checker.check("mv", &["$FILE".to_string(), "/dest/".to_string()]);
         assert!(result.is_some(), "Should reject $VAR in mv command");
@@ -287,13 +292,13 @@ mod tests {
     #[test]
     fn test_literal_rejects_glob() {
         let checker = LiteralChecker::new();
-        
+
         let result = checker.check("rm", &["*.log".to_string()]);
         assert!(result.is_some());
-        
+
         let result = checker.check("rm", &["file?.txt".to_string()]);
         assert!(result.is_some());
-        
+
         let result = checker.check("rm", &["/var/log/*.log".to_string()]);
         assert!(result.is_some());
     }
@@ -301,10 +306,10 @@ mod tests {
     #[test]
     fn test_literal_rejects_command_substitution() {
         let checker = LiteralChecker::new();
-        
+
         let result = checker.check("rm", &["`find /tmp -name '*.log'`".to_string()]);
         assert!(result.is_some());
-        
+
         let result = checker.check("rm", &["$(cat /tmp/files.txt)".to_string()]);
         assert!(result.is_some());
     }
@@ -312,16 +317,16 @@ mod tests {
     #[test]
     fn test_literal_rejects_shell_operators() {
         let checker = LiteralChecker::new();
-        
+
         let result = checker.check("rm", &["file.txt".to_string(), "&&".to_string()]);
         assert!(result.is_some());
-        
+
         let result = checker.check("rm", &["file.txt".to_string(), "||".to_string()]);
         assert!(result.is_some());
-        
+
         let result = checker.check("rm", &["file.txt".to_string(), ";".to_string()]);
         assert!(result.is_some());
-        
+
         let result = checker.check("rm", &["file.txt".to_string(), "|".to_string()]);
         assert!(result.is_some());
     }
@@ -329,30 +334,33 @@ mod tests {
     #[test]
     fn test_literal_allows_safe_args() {
         let checker = LiteralChecker::new();
-        
+
         let result = checker.check("rm", &["/tmp/specific_file.txt".to_string()]);
         assert!(result.is_none());
-        
+
         let result = checker.check("rm", &["-rf".to_string(), "/tmp/file.txt".to_string()]);
         assert!(result.is_none());
-        
+
         let result = checker.check("mv", &["/tmp/a.txt".to_string(), "/tmp/b.txt".to_string()]);
         assert!(result.is_none());
-        
-        let result = checker.check("cp", &["/etc/config".to_string(), "/etc/config.bak".to_string()]);
+
+        let result = checker.check(
+            "cp",
+            &["/etc/config".to_string(), "/etc/config.bak".to_string()],
+        );
         assert!(result.is_none());
     }
 
     #[test]
     fn test_literal_passes_readonly() {
         let checker = LiteralChecker::new();
-        
+
         let result = checker.check("cat", &["$FILE".to_string()]);
         assert!(result.is_none());
-        
+
         let result = checker.check("ls", &["*.log".to_string()]);
         assert!(result.is_none());
-        
+
         let result = checker.check("grep", &["pattern".to_string(), "$FILE".to_string()]);
         assert!(result.is_none());
     }
@@ -360,11 +368,11 @@ mod tests {
     #[test]
     fn test_literal_allows_flag_with_question() {
         let checker = LiteralChecker::new();
-        
+
         // -? contains glob pattern, so it IS rejected
         let result = checker.check("rm", &["-?".to_string()]);
         assert!(result.is_some(), "-? should be rejected as glob pattern");
-        
+
         let result = checker.check("rm", &["--help".to_string()]);
         assert!(result.is_none());
     }
@@ -376,7 +384,7 @@ mod tests {
         assert!(LiteralChecker::is_destructive_command("chmod"));
         assert!(LiteralChecker::is_destructive_command("/bin/rm"));
         assert!(LiteralChecker::is_destructive_command("/usr/bin/dd"));
-        
+
         assert!(!LiteralChecker::is_destructive_command("cat"));
         assert!(!LiteralChecker::is_destructive_command("ls"));
         assert!(!LiteralChecker::is_destructive_command("echo"));
@@ -385,10 +393,10 @@ mod tests {
     #[test]
     fn test_checker_disabled() {
         let checker = LiteralChecker::with_enabled(false);
-        
+
         let result = checker.check("rm", &["$FILE".to_string()]);
         assert!(result.is_none());
-        
+
         let result = checker.check("rm", &["*.log".to_string()]);
         assert!(result.is_none());
     }
@@ -396,7 +404,7 @@ mod tests {
     #[test]
     fn test_all_destructive_commands() {
         let checker = LiteralChecker::new();
-        
+
         for cmd in DESTRUCTIVE_COMMANDS {
             let result = checker.check(cmd, &["$VAR".to_string()]);
             assert!(result.is_some());
@@ -406,10 +414,10 @@ mod tests {
     #[test]
     fn test_complex_patterns() {
         let checker = LiteralChecker::new();
-        
+
         let result = checker.check("rm", &["$DIR/*.log".to_string()]);
         assert!(result.is_some());
-        
+
         let result = checker.check("rm", &["$(echo ${FILE})".to_string()]);
         assert!(result.is_some());
     }
@@ -417,8 +425,10 @@ mod tests {
     #[test]
     fn test_feedback_content() {
         let checker = LiteralChecker::new();
-        let result = checker.check("rm", &["$HOME/file.txt".to_string()]).unwrap();
-        
+        let result = checker
+            .check("rm", &["$HOME/file.txt".to_string()])
+            .unwrap();
+
         assert!(result.reason.contains("rm"));
         assert!(result.reason.contains("Shell expansion"));
         assert!(result.what_would_be_needed.contains("literal"));

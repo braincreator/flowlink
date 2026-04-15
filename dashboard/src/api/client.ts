@@ -106,6 +106,32 @@ class ApiClient {
   // System
   getSystemInfo() { return this.request<SystemInfo>('GET', '/api/system/info'); }
 
+  // Billing
+  getBillingInfo() { return this.request<any>('GET', '/api/billing'); }
+  getUsage() { return this.request<any>('GET', '/api/billing/usage'); }
+  getPlans() { return this.request<any[]>('GET', '/api/plans'); }
+  getBillingPlans() { return this.request<any[]>('GET', '/api/billing/plans'); }
+  changePlan(planId: string) { return this.request<any>('POST', '/api/billing/change-plan', { plan_id: planId }); }
+  getInvoices() { return this.request<any[]>('GET', '/api/billing/invoices'); }
+  getInvoice(id: string) { return this.request<any>('GET', `/api/billing/invoices/${id}`); }
+  getPaymentMethods() { return this.request<any[]>('GET', '/api/billing/payments/methods'); }
+  getSubscriptions() { return this.request<any[]>('GET', '/api/billing/subscriptions'); }
+  createSubscription(data: any) { return this.request<any>('POST', '/api/billing/subscriptions', data); }
+  cancelSubscription(id: string) { return this.request<any>('POST', `/api/billing/subscriptions/${id}/cancel`); }
+  getOrders() { return this.request<any[]>('GET', '/api/billing/orders'); }
+  createOrder(data: any) { return this.request<any>('POST', '/api/billing/orders', data); }
+
+  // Control Plane — Agents/Servers
+  getControlPlaneAgents() { return this.request<any[]>('GET', '/api/v1/agents'); }
+  getControlPlaneAgent(id: string) { return this.request<any>('GET', `/api/v1/agents/${id}`); }
+  signupAgent(data: any) { return this.request<any>('POST', '/api/v1/signup', data); }
+  sendHeartbeat(data: any) { return this.request<any>('POST', '/api/v1/heartbeat', data); }
+
+  // Config
+  getConfig() { return this.request<any>('GET', '/api/config'); }
+  reloadConfig() { return this.request<any>('POST', '/api/config/reload'); }
+  pushConfig(agentId: string, config: any) { return this.request<any>('POST', `/api/config/push/${agentId}`, config); }
+
   // Metrics
   getMetrics() { return this.requestText('GET', '/metrics'); }
 

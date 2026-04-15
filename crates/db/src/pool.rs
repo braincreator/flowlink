@@ -5,9 +5,9 @@
 //! - `read_pool`: if replicas are configured, round-robins across them;
 //!   otherwise falls back to the write pool
 
+use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use sqlx::PgPool;
 
 /// Database pool wrapper with primary/replica support.
 pub struct DbPool {

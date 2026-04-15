@@ -1,5 +1,6 @@
 pub mod pool;
 pub mod auth;
+pub mod auth_api;
 pub mod handler;
 pub mod eventbus;
 pub mod approval;
@@ -17,10 +18,18 @@ pub mod metrics;
 pub mod billing_api;
 pub mod billing_persist;
 pub mod billing_middleware;
+pub mod email;
+pub mod email_auth;
+pub mod email_queue;
+pub mod preferences_api;
+pub mod dashboard;
 
 pub mod config_reload;
 pub mod e2ee;
 pub mod control_plane;
+
+#[cfg(feature = "tgbot")]
+pub mod tgbot;
 
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -65,6 +74,10 @@ impl Relay {
         let eventbus = Arc::new(EventBus::new());
         let approvals = Arc::new(ApprovalQueue::new());
 
+        // AuthEngine for JWT tokens (requires jwt_secret + database)
+        // Initialized after db setup — see below
+        let auth_engine: Option<Arc<crate::auth::AuthEngine>>;
+
         let data_dir = shellexpand::tilde(&self.config.registry.data_path).to_string();
         let registry = Arc::new(Registry::new(&data_dir)?);
 
@@ -101,6 +114,33 @@ impl Relay {
                 }
                 Err(e) => {
                     log::warn!("Database connection failed: {e}. Running without DB.");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Initialize AuthEngine now that db is available
+        let auth_engine = if !self.config.auth.jwt_secret.is_empty() {
+            match &db {
+                Some(db_pool) => {
+                    let engine = Arc::new(crate::auth::AuthEngine::new(
+                        crate::auth::AuthConfig {
+                            jwt_secret: self.config.auth.jwt_secret.clone(),
+                            access_token_ttl_min: self.config.auth.access_token_ttl_min,
+                            refresh_token_ttl_days: self.config.auth.refresh_token_ttl_days,
+                            vk: None,
+                            yandex: None,
+                            github: None,
+                        },
+                        db_pool.pool().clone(),
+                    ));
+                    log::info!("🔐 JWT auth engine initialized");
+                    Some(engine)
+                }
+                None => {
+                    log::warn!("JWT auth disabled: database not configured");
                     None
                 }
             }
@@ -149,9 +189,23 @@ impl Relay {
             )),
             metrics,
             billing: if self.config.billing.enabled {
-                let engine = Arc::new(flowlink_billing::BillingEngine::new(
-                    flowlink_billing::payment::PaymentConfig::default(),
-                ));
+                let payment_config = {
+                    let bc = &self.config.billing;
+                    let mut pc = flowlink_billing::payment::PaymentConfig::default();
+                    pc.enabled = bc.enabled;
+                    if let (Some(client_id), Some(secret_key)) = (&bc.tochka_client_id, &bc.tochka_webhook_secret) {
+                        pc.sbp = Some(flowlink_billing::payment::SbpConfig {
+                            terminal_key: client_id.clone(),
+                            secret_key: secret_key.clone(),
+                            payment_type_id: "SBP".to_string(),
+                            callback_url: "https://flowlink.flow-masters.ru/api/billing/webhook/tochka".to_string(),
+                            success_url: "https://flowlink.flow-masters.ru/billing/success".to_string(),
+                            fail_url: "https://flowlink.flow-masters.ru/billing/fail".to_string(),
+                        });
+                    }
+                    pc
+                };
+                let engine = Arc::new(flowlink_billing::BillingEngine::new(payment_config));
                 // Load plans from DB if available
                 if let Some(ref db_pool) = db {
                     engine.plans().load_from_db(db_pool).await;
@@ -161,12 +215,58 @@ impl Relay {
                 None
             },
             db,
+            tochka: if let (Some(client_id), Some(secret_key)) = (&self.config.billing.tochka_client_id, &self.config.billing.tochka_webhook_secret) {
+                Some(Arc::new(flowlink_billing::tochka::TochkaClient::new(
+                    flowlink_billing::payment::SbpConfig {
+                        terminal_key: client_id.clone(),
+                        secret_key: secret_key.clone(),
+                        payment_type_id: "SBP".to_string(),
+                        callback_url: "https://flowlink.flow-masters.ru/api/billing/webhook/tochka".to_string(),
+                        success_url: "https://flowlink.flow-masters.ru/billing/success".to_string(),
+                        fail_url: "https://flowlink.flow-masters.ru/billing/fail".to_string(),
+                    },
+                )))
+            } else {
+                None
+            },
+            auth: auth.clone(),
+            auth_engine: auth_engine,
+            email_service: if !self.config.smtp.host.is_empty() && !self.config.smtp.username.is_empty() {
+                match crate::email::EmailService::new(
+                    &self.config.smtp.host,
+                    self.config.smtp.port,
+                    &self.config.smtp.username,
+                    &self.config.smtp.password,
+                    &self.config.smtp.from,
+                ) {
+                    Ok(svc) => Some(Arc::new(svc)),
+                    Err(e) => {
+                        log::warn!("Failed to create email service: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            },
             config_reloader,
             e2ee: Arc::new(crate::e2ee::E2eeSessionManager::new()),
             usage_tracker: Arc::new(crate::billing_middleware::UsageTracker::new()),
             rate_limiter: Arc::new(ratelimit::RateLimiter::new(100, 10)),
             control_plane: crate::control_plane::ControlPlaneState::new(),
+            email_queue: std::sync::OnceLock::new(),
+            tg_bot: std::sync::OnceLock::new(),
         };
+
+        // Email queue worker (requires both email_service and db)
+        if let (Some(ref email_svc), Some(ref db_pool)) = (&state.email_service, &state.db) {
+            let queue = Arc::new(crate::email_queue::EmailQueue::new(
+                email_svc.clone(),
+                db_pool.pool().clone(),
+            ));
+            queue.clone().start_worker();
+            let _ = state.email_queue.set(queue);
+            log::info!("📧 Email queue initialized");
+        }
 
         let app = server::build_router(state.clone());
 
@@ -247,6 +347,25 @@ impl Relay {
                 }
             }
         });
+
+        // ── Telegram Bot (optional) ──
+        #[cfg(feature = "tgbot")]
+        if let Some(tg_token) = &self.config.tg_bot_token {
+            if !tg_token.is_empty() {
+                let bot_state = Arc::new(state.clone());
+                let token = tg_token.clone();
+                let bot_config = crate::tgbot::bot::BotConfig {
+                    mode: crate::tgbot::bot::BotMode::Polling,
+                    webhook_url: None,
+                    polling_interval: std::time::Duration::from_secs(5),
+                    auto_recovery_enabled: true,
+                };
+                // Store bot instance for notifications
+                let _ = bot_state.tg_bot.set(teloxide::Bot::new(&token));
+                crate::tgbot::start_tgbot(bot_state, token, bot_config).await;
+                info!("Telegram bot started");
+            }
+        }
 
         http_server.await?;
 

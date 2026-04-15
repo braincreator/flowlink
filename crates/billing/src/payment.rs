@@ -126,11 +126,11 @@ impl Default for PaymentConfig {
             enabled: false,
             sbp: None,
             bank_details: None,
-            payment_timeout_secs: 86400, // 24 hours
+            payment_timeout_secs: 86400,       // 24 hours
             overage_request_price_kopecks: 10, // 0.10 RUB per extra request
-            overage_token_price_kopecks: 50, // 0.50 RUB per 1K extra tokens
-            min_topup_kopecks: 10_000, // 100 RUB
-            max_topup_kopecks: 1_000_000, // 10,000 RUB
+            overage_token_price_kopecks: 50,   // 0.50 RUB per 1K extra tokens
+            min_topup_kopecks: 10_000,         // 100 RUB
+            max_topup_kopecks: 1_000_000,      // 10,000 RUB
         }
     }
 }
@@ -183,7 +183,10 @@ mod tests {
         assert_eq!(PaymentMethod::Sbp.as_str(), "sbp");
         assert_eq!(PaymentMethod::Sbp.display_name(), "СБП");
         assert_eq!(PaymentMethod::Card.display_name(), "Банковская карта");
-        assert_eq!(PaymentMethod::BankTransfer.display_name(), "Банковский перевод");
+        assert_eq!(
+            PaymentMethod::BankTransfer.display_name(),
+            "Банковский перевод"
+        );
     }
 
     #[test]

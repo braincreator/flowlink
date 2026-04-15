@@ -164,9 +164,7 @@ impl UsageTracker {
     /// Get usage for all accounts (admin endpoint)
     pub fn get_all_snapshots(&self) -> Vec<UsageSnapshot> {
         let accounts = self.accounts.read().unwrap();
-        accounts.keys()
-            .map(|id| self.get_snapshot(id))
-            .collect()
+        accounts.keys().map(|id| self.get_snapshot(id)).collect()
     }
 
     /// Clear all data for an account

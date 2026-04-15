@@ -1,13 +1,15 @@
-use flowlink_relay::registry::Registry;
 use flowlink_relay::auth::{AuthManager, Client};
 use flowlink_relay::ratelimit::RateLimiter;
+use flowlink_relay::registry::Registry;
 
 #[test]
 fn test_registry_client_crud() {
     let dir = tempfile::tempdir().unwrap();
     let reg = Registry::new(dir.path()).unwrap();
 
-    let client = reg.register_client("Test Corp".into(), "test@example.com".into()).unwrap();
+    let client = reg
+        .register_client("Test Corp".into(), "test@example.com".into())
+        .unwrap();
     assert_eq!(client.name, "Test Corp");
     assert!(client.active);
 
@@ -29,7 +31,9 @@ fn test_registry_agent_crud() {
     let reg = Registry::new(dir.path()).unwrap();
 
     let client = reg.register_client("Acme".into(), String::new()).unwrap();
-    let agent = reg.register_agent(&client.id, "server-01".into(), "agent-token-123".into()).unwrap();
+    let agent = reg
+        .register_agent(&client.id, "server-01".into(), "agent-token-123".into())
+        .unwrap();
     assert_eq!(agent.name, "server-01");
 
     reg.update_agent_heartbeat(&agent.id);
@@ -41,8 +45,11 @@ fn test_registry_persistence() {
     let dir = tempfile::tempdir().unwrap();
     {
         let reg = Registry::new(dir.path()).unwrap();
-        let client = reg.register_client("Persist Test".into(), String::new()).unwrap();
-        reg.register_agent(&client.id, "agent-p".into(), "token-p".into()).unwrap();
+        let client = reg
+            .register_client("Persist Test".into(), String::new())
+            .unwrap();
+        reg.register_agent(&client.id, "agent-p".into(), "token-p".into())
+            .unwrap();
         reg.save_clients_sync().unwrap();
         reg.save_agents_sync().unwrap();
     }
@@ -55,11 +62,16 @@ fn test_registry_persistence() {
 fn test_registry_agent_limit() {
     let dir = tempfile::tempdir().unwrap();
     let reg = Registry::new(dir.path()).unwrap();
-    let client = reg.register_client("Limited".into(), String::new()).unwrap();
+    let client = reg
+        .register_client("Limited".into(), String::new())
+        .unwrap();
     for i in 0..10 {
-        reg.register_agent(&client.id, format!("agent-{i}"), format!("token-{i}")).unwrap();
+        reg.register_agent(&client.id, format!("agent-{i}"), format!("token-{i}"))
+            .unwrap();
     }
-    assert!(reg.register_agent(&client.id, "agent-11".into(), "token-11".into()).is_err());
+    assert!(reg
+        .register_agent(&client.id, "agent-11".into(), "token-11".into())
+        .is_err());
 }
 
 #[test]

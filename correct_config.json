@@ -1,0 +1,5 @@
+{
+  "api_token": "test-secret-token-123",
+  "wss_addr": "0.0.0.0:8444",
+  "http_addr": "0.0.0.0:8081"
+}

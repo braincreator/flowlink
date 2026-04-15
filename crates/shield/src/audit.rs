@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use chrono::Utc;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -28,10 +28,7 @@ pub struct AuditLog {
 
 impl AuditLog {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
         Ok(Self { file })
     }
 
@@ -77,8 +74,14 @@ mod tests {
     fn create_entry_fields() {
         let log = AuditLog::open(Path::new("/dev/null")).unwrap();
         let entry = log.create_entry(
-            1234, 100, 1000, "alice".into(), "rm -rf /".into(),
-            "rm_rf".into(), "blocked".into(), "killed".into(),
+            1234,
+            100,
+            1000,
+            "alice".into(),
+            "rm -rf /".into(),
+            "rm_rf".into(),
+            "blocked".into(),
+            "killed".into(),
         );
         assert_eq!(entry.pid, 1234);
         assert_eq!(entry.uid, 1000);
@@ -92,7 +95,16 @@ mod tests {
     #[test]
     fn create_entry_timestamp_format() {
         let log = AuditLog::open(Path::new("/dev/null")).unwrap();
-        let entry = log.create_entry(1, 0, 0, "root".into(), "ls".into(), "".into(), "allowed".into(), "allowed".into());
+        let entry = log.create_entry(
+            1,
+            0,
+            0,
+            "root".into(),
+            "ls".into(),
+            "".into(),
+            "allowed".into(),
+            "allowed".into(),
+        );
         // ISO 8601 format
         assert!(entry.timestamp.contains('T'));
         assert!(entry.timestamp.ends_with('Z') || entry.timestamp.contains('+'));
@@ -103,8 +115,14 @@ mod tests {
         let tmp = NamedTempFile::new().unwrap();
         let mut log = AuditLog::open(tmp.path()).unwrap();
         let entry = log.create_entry(
-            42, 1, 1000, "bob".into(), "echo hello".into(),
-            "".into(), "allowed".into(), "allowed".into(),
+            42,
+            1,
+            1000,
+            "bob".into(),
+            "echo hello".into(),
+            "".into(),
+            "allowed".into(),
+            "allowed".into(),
         );
         log.log(entry.clone()).unwrap();
 
@@ -120,7 +138,16 @@ mod tests {
         let tmp = NamedTempFile::new().unwrap();
         let mut log = AuditLog::open(tmp.path()).unwrap();
         for i in 0..5 {
-            let entry = log.create_entry(i, 0, 0, "root".into(), format!("cmd {}", i), format!("rule {}", i), "allowed".into(), "allowed".into());
+            let entry = log.create_entry(
+                i,
+                0,
+                0,
+                "root".into(),
+                format!("cmd {}", i),
+                format!("rule {}", i),
+                "allowed".into(),
+                "allowed".into(),
+            );
             log.log(entry).unwrap();
         }
         let contents = std::fs::read_to_string(tmp.path()).unwrap();
@@ -132,7 +159,9 @@ mod tests {
     fn entry_serialization_roundtrip() {
         let entry = AuditEntry {
             timestamp: "2026-04-06T12:00:00Z".into(),
-            pid: 999, ppid: 1, uid: 1000,
+            pid: 999,
+            ppid: 1,
+            uid: 1000,
             username: "charlie".into(),
             command: "sudo rm -rf /".into(),
             rule_name: "rm_rf".into(),
@@ -152,7 +181,16 @@ mod tests {
         let path = dir.path().join("audit.jsonl");
         assert!(!path.exists());
         let mut log = AuditLog::open(&path).unwrap();
-        let entry = log.create_entry(1, 0, 0, "root".into(), "test".into(), "".into(), "allowed".into(), "allowed".into());
+        let entry = log.create_entry(
+            1,
+            0,
+            0,
+            "root".into(),
+            "test".into(),
+            "".into(),
+            "allowed".into(),
+            "allowed".into(),
+        );
         log.log(entry).unwrap();
         assert!(path.exists());
     }

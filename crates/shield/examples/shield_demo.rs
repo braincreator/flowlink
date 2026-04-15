@@ -1,11 +1,9 @@
 /// FlowLink Shield — Live Demo
 /// Demonstrates the 3-level command analysis engine + Policy DSL
 /// Run: cargo run -p flowlink-shield --example shield_demo
-
 use flowlink_shield::{
-    AnalysisEngine, Command, ThreatLevel, ShieldGuard, ShieldGuardConfig,
-    PolicyEngine, PolicyAction, EvalContext,
-    AuditLog, Notifier, SnapshotBackend, shield_router,
+    shield_router, AnalysisEngine, AuditLog, Command, EvalContext, Notifier, PolicyAction,
+    PolicyEngine, ShieldGuard, ShieldGuardConfig, SnapshotBackend, ThreatLevel,
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -28,7 +26,11 @@ fn parse_cmd(cmd: &str) -> Command {
     } else {
         vec![]
     };
-    Command { binary, args, raw: cmd.to_string() }
+    Command {
+        binary,
+        args,
+        raw: cmd.to_string(),
+    }
 }
 
 fn print_result(cmd: &str, result: &flowlink_shield::AnalysisResult) {
@@ -41,7 +43,10 @@ fn print_result(cmd: &str, result: &flowlink_shield::AnalysisResult) {
             ThreatLevel::Medium => "🟠",
             ThreatLevel::Low => "🟡",
         };
-        println!("  {} {:<52} → {} (L{})", icon, cmd, threat.level, result.level_used);
+        println!(
+            "  {} {:<52} → {} (L{})",
+            icon, cmd, threat.level, result.level_used
+        );
         println!("      ├─ threat: {}", threat.name);
         println!("      └─ detail: {}", threat.description);
     }
@@ -242,7 +247,10 @@ rules:
     let notifier = Notifier::new(None);
 
     let guard = Arc::new(ShieldGuard::new(
-        AnalysisEngine { enable_ast: true, enable_interpreter: true },
+        AnalysisEngine {
+            enable_ast: true,
+            enable_interpreter: true,
+        },
         SnapshotBackend::None,
         audit,
         notifier,
@@ -270,15 +278,27 @@ rules:
 
     let resp = client.get("http://localhost:9444/health").send().await?;
     let body = resp.text().await?;
-    println!("  GET /health → {}", body.replace("\n", " ").replace("  ", " "));
+    println!(
+        "  GET /health → {}",
+        body.replace("\n", " ").replace("  ", " ")
+    );
 
     let resp = client.get("http://localhost:9444/api/stats").send().await?;
     let body = resp.text().await?;
-    println!("  GET /api/stats → {}", body.replace("\n", " ").replace("  ", " "));
+    println!(
+        "  GET /api/stats → {}",
+        body.replace("\n", " ").replace("  ", " ")
+    );
 
-    let resp = client.get("http://localhost:9444/api/pending").send().await?;
+    let resp = client
+        .get("http://localhost:9444/api/pending")
+        .send()
+        .await?;
     let body = resp.text().await?;
-    println!("  GET /api/pending → {}", body.replace("\n", " ").replace("  ", " "));
+    println!(
+        "  GET /api/pending → {}",
+        body.replace("\n", " ").replace("  ", " ")
+    );
 
     print_header("Server Running — Press Ctrl+C to stop");
     println!("  Test with:");

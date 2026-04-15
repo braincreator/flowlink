@@ -67,8 +67,22 @@ mod tests {
         let path = tmp.path().join("queue.json");
 
         // Create two pending requests
-        let id1 = mgr.create_request("rm", &["-rf".to_string(), "/tmp/x".to_string()], ActionTier::Destructive, RiskLevel::High).await;
-        let id2 = mgr.create_request("apt", &["install".to_string(), "nginx".to_string()], ActionTier::Modify, RiskLevel::Medium).await;
+        let id1 = mgr
+            .create_request(
+                "rm",
+                &["-rf".to_string(), "/tmp/x".to_string()],
+                ActionTier::Destructive,
+                RiskLevel::High,
+            )
+            .await;
+        let id2 = mgr
+            .create_request(
+                "apt",
+                &["install".to_string(), "nginx".to_string()],
+                ActionTier::Modify,
+                RiskLevel::Medium,
+            )
+            .await;
 
         mgr.save_to_file(&path).await.unwrap();
 
@@ -100,7 +114,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("queue.json");
 
-        let id = mgr.create_request("rm", &["-rf".to_string()], ActionTier::Destructive, RiskLevel::High).await;
+        let id = mgr
+            .create_request(
+                "rm",
+                &["-rf".to_string()],
+                ActionTier::Destructive,
+                RiskLevel::High,
+            )
+            .await;
 
         // Approve one request — it should NOT be in the saved file
         mgr.approve(&id, make_identity()).await.unwrap();
@@ -108,7 +129,10 @@ mod tests {
         mgr.save_to_file(&path).await.unwrap();
         let contents = tokio::fs::read_to_string(&path).await.unwrap();
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&contents).unwrap();
-        assert!(parsed.is_empty(), "approved requests should not be saved as pending");
+        assert!(
+            parsed.is_empty(),
+            "approved requests should not be saved as pending"
+        );
     }
 
     #[tokio::test]
@@ -117,8 +141,17 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("queue.json");
 
-        let id = mgr.create_request("rm", &["-rf".to_string()], ActionTier::Destructive, RiskLevel::High).await;
-        mgr.reject(&id, make_identity(), "not allowed".to_string()).await.unwrap();
+        let id = mgr
+            .create_request(
+                "rm",
+                &["-rf".to_string()],
+                ActionTier::Destructive,
+                RiskLevel::High,
+            )
+            .await;
+        mgr.reject(&id, make_identity(), "not allowed".to_string())
+            .await
+            .unwrap();
 
         mgr.save_to_file(&path).await.unwrap();
         let contents = tokio::fs::read_to_string(&path).await.unwrap();
@@ -132,12 +165,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("queue.json");
 
-        let id = mgr.create_request(
-            "systemctl",
-            &["restart".to_string(), "nginx".to_string()],
-            ActionTier::Modify,
-            RiskLevel::Low,
-        ).await;
+        let id = mgr
+            .create_request(
+                "systemctl",
+                &["restart".to_string(), "nginx".to_string()],
+                ActionTier::Modify,
+                RiskLevel::Low,
+            )
+            .await;
 
         mgr.save_to_file(&path).await.unwrap();
 
@@ -159,13 +194,22 @@ mod tests {
 
         // First manager creates one request and saves
         let mgr1 = make_manager();
-        let id1 = mgr1.create_request("ls", &[], ActionTier::ReadOnly, RiskLevel::Safe).await;
+        let id1 = mgr1
+            .create_request("ls", &[], ActionTier::ReadOnly, RiskLevel::Safe)
+            .await;
         mgr1.save_to_file(&path).await.unwrap();
 
         // Second manager loads, then creates another and saves
         let mgr2 = make_manager();
         mgr2.load_from_file(&path).await.unwrap();
-        let id2 = mgr2.create_request("cat", &["/etc/passwd".to_string()], ActionTier::ReadOnly, RiskLevel::Low).await;
+        let id2 = mgr2
+            .create_request(
+                "cat",
+                &["/etc/passwd".to_string()],
+                ActionTier::ReadOnly,
+                RiskLevel::Low,
+            )
+            .await;
         mgr2.save_to_file(&path).await.unwrap();
 
         // Third manager loads and should see both

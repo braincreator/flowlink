@@ -1,9 +1,8 @@
 use anyhow::Result;
 use axum::{
-    Json,
     extract::State,
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use base64::Engine;
 use clap::Parser;
@@ -14,7 +13,9 @@ use tokio::signal;
 
 use flowlink_k8s::config::K8sConfig;
 use flowlink_k8s::operator::ShieldOperator;
-use flowlink_k8s::webhook::{AdmissionRequest, AdmissionResponse, AdmissionResponseStatus, AdmissionWebhook};
+use flowlink_k8s::webhook::{
+    AdmissionRequest, AdmissionResponse, AdmissionResponseStatus, AdmissionWebhook,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "flowlink-k8s", about = "FlowLink Shield Kubernetes Operator")]
@@ -184,7 +185,10 @@ async fn main() -> Result<()> {
         config.sidecar_image = img;
     }
 
-    log::info!("FlowLink K8s Operator starting in namespace {}", config.namespace);
+    log::info!(
+        "FlowLink K8s Operator starting in namespace {}",
+        config.namespace
+    );
 
     // Try to connect to Kubernetes — fall back to webhook-only mode if unavailable
     let k8s_client: Option<Client> = match Client::try_default().await {

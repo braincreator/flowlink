@@ -1,8 +1,8 @@
 //! Drift detection module
 
+pub mod auto_fix;
 pub mod event_driven;
 pub mod semantic_diff;
-pub mod auto_fix;
 
 use crate::types::*;
 use anyhow::Result;
@@ -32,7 +32,11 @@ impl DriftDetector {
     }
 
     /// Detect drift between current and desired state
-    pub async fn detect(&self, current: &ServerState, desired: &ServerState) -> Vec<ClassifiedDrift> {
+    pub async fn detect(
+        &self,
+        current: &ServerState,
+        desired: &ServerState,
+    ) -> Vec<ClassifiedDrift> {
         semantic_diff::diff_states(current, desired)
     }
 }

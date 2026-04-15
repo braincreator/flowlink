@@ -117,7 +117,11 @@ mod tests {
         Task {
             id: id.into(),
             description: format!("task {id}"),
-            steps: vec![TaskStep { command: "echo hi".into(), status: TaskStatus::Queued, output: None }],
+            steps: vec![TaskStep {
+                command: "echo hi".into(),
+                status: TaskStatus::Queued,
+                output: None,
+            }],
             status: TaskStatus::Queued,
             created_at: 1,
             progress: 0.0,

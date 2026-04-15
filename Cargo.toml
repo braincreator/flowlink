@@ -11,4 +11,7 @@ members = [
     "crates/gitops",
     "crates/billing",
     "crates/db",
+    "crates/mcp",
+    "crates/sentinel",
+    "crates/api",
 ]

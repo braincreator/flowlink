@@ -1,8 +1,8 @@
 //! Auto-restore engine — automatically rollback on health failure
 
-use crate::types::*;
 use crate::backup::BackupEngine;
 use crate::health::HealthChecker;
+use crate::types::*;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -53,7 +53,10 @@ impl AutoRestoreEngine {
     /// Returns `Ok(Some(result))` when a restore was performed,
     /// `Ok(None)` when the system is healthy or rate-limited,
     /// and `Err` when the restore itself fails.
-    pub async fn check_and_restore(&self, backup_id: &str) -> anyhow::Result<Option<RestoreResult>> {
+    pub async fn check_and_restore(
+        &self,
+        backup_id: &str,
+    ) -> anyhow::Result<Option<RestoreResult>> {
         let health = self.health_checker.run_checks().await;
 
         if HealthChecker::is_healthy(&health) {
@@ -61,7 +64,9 @@ impl AutoRestoreEngine {
         }
 
         if !self.can_restore().await {
-            tracing::warn!("Auto-restore rate limited, health check failed but no restore performed");
+            tracing::warn!(
+                "Auto-restore rate limited, health check failed but no restore performed"
+            );
             return Ok(None);
         }
 
@@ -72,7 +77,12 @@ impl AutoRestoreEngine {
 
         // Delegate to the backup engine's restore engine.
         // RestoreEngine::restore returns Result<RestoreResult>.
-        match self.backup_engine.restore_engine().restore(backup_id, None).await {
+        match self
+            .backup_engine
+            .restore_engine()
+            .restore(backup_id, None)
+            .await
+        {
             Ok(result) => {
                 // Only increment the counter on an actual restore attempt that succeeded
                 let mut count = self.restore_count.write().await;

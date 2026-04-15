@@ -1,39 +1,51 @@
-mod engine;
-mod interceptor;
-mod snapshot;
 mod audit;
-mod notifier;
-mod policy_dsl;
+mod engine;
 mod forensic;
+#[cfg(target_os = "linux")]
+mod forensic_linux;
 #[cfg(target_os = "macos")]
 mod forensic_macos;
+mod interceptor;
+mod notifier;
+mod policy_dsl;
+mod snapshot;
 
-use engine::{AnalysisEngine, Command};
+use audit::AuditLog;
 use clap::Parser;
+use engine::{AnalysisEngine, Command};
+use notifier::Notifier;
+use snapshot::SnapshotBackend;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use snapshot::SnapshotBackend;
-use audit::AuditLog;
-use notifier::Notifier;
 
 #[derive(Parser)]
 #[command(name = "flowlink-shield", version)]
 struct Args {
-    #[arg(short, long)] webhook: Option<String>,
-    #[arg(short, long, default_value = "./shield-audit.jsonl")] audit_log: PathBuf,
-    #[arg(short, long)] snapshot_dataset: Option<String>,
-    #[arg(long)] simulate: bool,
-    #[arg(long)] dry_run: bool,
-    #[arg(long)] no_ast: bool,
-    #[arg(long)] no_interpreter: bool,
+    #[arg(short, long)]
+    webhook: Option<String>,
+    #[arg(short, long, default_value = "./shield-audit.jsonl")]
+    audit_log: PathBuf,
+    #[arg(short, long)]
+    snapshot_dataset: Option<String>,
+    #[arg(long)]
+    simulate: bool,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    no_ast: bool,
+    #[arg(long)]
+    no_interpreter: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let engine = AnalysisEngine { enable_ast: !args.no_ast, enable_interpreter: !args.no_interpreter };
+    let engine = AnalysisEngine {
+        enable_ast: !args.no_ast,
+        enable_interpreter: !args.no_interpreter,
+    };
     let _snapshot_backend = SnapshotBackend::detect();
     let _audit = Arc::new(RwLock::new(AuditLog::open(&args.audit_log)?));
     let _notifier = Notifier::new(args.webhook.clone());
@@ -52,9 +64,13 @@ async fn main() -> anyhow::Result<()> {
     let mut line = String::new();
     loop {
         line.clear();
-        if stdin.read_line(&mut line).is_err() { break; }
+        if stdin.read_line(&mut line).is_err() {
+            break;
+        }
         let cmd = line.trim();
-        if cmd.is_empty() || cmd == "quit" || cmd == "exit" { break; }
+        if cmd.is_empty() || cmd == "quit" || cmd == "exit" {
+            break;
+        }
 
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         let shield_cmd = Command {
@@ -67,8 +83,16 @@ async fn main() -> anyhow::Result<()> {
         if result.safe {
             println!("✅ ALLOW");
         } else if let Some(ref t) = result.threat {
-            let lvl = match result.level_used { 1 => "L1", 2 => "L2", 3 => "L3", _ => "?" };
-            println!("{} [{}] → {} | {} | snap={} timeout={}s", t.level, lvl, t.name, t.description, t.snapshot, t.timeout_secs);
+            let lvl = match result.level_used {
+                1 => "L1",
+                2 => "L2",
+                3 => "L3",
+                _ => "?",
+            };
+            println!(
+                "{} [{}] → {} | {} | snap={} timeout={}s",
+                t.level, lvl, t.name, t.description, t.snapshot, t.timeout_secs
+            );
         }
     }
 

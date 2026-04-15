@@ -10,7 +10,7 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 /// A skill with files, metadata, and instructions.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -81,7 +81,8 @@ impl SkillManager {
             if let Some(parent) = file_path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            let decoded = STANDARD.decode(&file.content)
+            let decoded = STANDARD
+                .decode(&file.content)
                 .with_context(|| format!("Failed to decode file {}", file.path))?;
             fs::write(&file_path, &decoded)?;
             if file.executable {
@@ -89,7 +90,10 @@ impl SkillManager {
                 {
                     use std::os::unix::fs::PermissionsExt;
                     let perms = fs::metadata(&file_path)?.permissions();
-                    fs::set_permissions(&file_path, fs::Permissions::from_mode(perms.mode() | 0o111))?;
+                    fs::set_permissions(
+                        &file_path,
+                        fs::Permissions::from_mode(perms.mode() | 0o111),
+                    )?;
                 }
             }
         }
@@ -99,7 +103,11 @@ impl SkillManager {
         let data = serde_json::to_string_pretty(skill)?;
         fs::write(&meta_path, data)?;
 
-        info!("Installed skill: {} ({} files)", skill.name, skill.files.len());
+        info!(
+            "Installed skill: {} ({} files)",
+            skill.name,
+            skill.files.len()
+        );
         Ok(())
     }
 
@@ -119,7 +127,10 @@ impl SkillManager {
             match fs::read_to_string(&meta_path) {
                 Ok(data) => match serde_json::from_str::<Skill>(&data) {
                     Ok(skill) => skills.push(skill),
-                    Err(e) => warn!("Skipping corrupted skill in {}: {e}", entry.path().display()),
+                    Err(e) => warn!(
+                        "Skipping corrupted skill in {}: {e}",
+                        entry.path().display()
+                    ),
                 },
                 Err(e) => warn!("Cannot read skill in {}: {e}", entry.path().display()),
             }
@@ -143,8 +154,8 @@ impl SkillManager {
     /// Get a single skill by name/id.
     pub fn get(&self, name: &str) -> Result<Skill> {
         let meta_path = self.skill_path(name).join("skill.json");
-        let data = fs::read_to_string(&meta_path)
-            .with_context(|| format!("Skill not found: {name}"))?;
+        let data =
+            fs::read_to_string(&meta_path).with_context(|| format!("Skill not found: {name}"))?;
         let skill: Skill = serde_json::from_str(&data)?;
         Ok(skill)
     }
@@ -167,7 +178,8 @@ impl SkillManager {
     pub fn search(&self, query: &str) -> Result<Vec<Skill>> {
         let query = query.to_lowercase();
         let all = self.list()?;
-        Ok(all.into_iter()
+        Ok(all
+            .into_iter()
             .filter(|s| {
                 s.name.to_lowercase().contains(&query)
                     || s.description.to_lowercase().contains(&query)

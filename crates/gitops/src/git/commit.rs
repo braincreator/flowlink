@@ -1,5 +1,5 @@
 use anyhow::Result;
-use git2::{Repository, Signature, Oid};
+use git2::{Oid, Repository, Signature};
 
 pub struct CommitManager {
     repo: Repository,
@@ -18,16 +18,11 @@ impl CommitManager {
         parents: &[&git2::Commit],
     ) -> Result<Oid> {
         let tree = self.repo.find_tree(tree_id)?;
-        
-        let commit_id = self.repo.commit(
-            Some("HEAD"),
-            signature,
-            signature,
-            message,
-            &tree,
-            parents,
-        )?;
-        
+
+        let commit_id =
+            self.repo
+                .commit(Some("HEAD"), signature, signature, message, &tree, parents)?;
+
         Ok(commit_id)
     }
 }
@@ -59,7 +54,15 @@ mod tests {
             let tree_id = index.write_tree().unwrap();
             tree_id
         };
-        repo.commit(Some("HEAD"), &sig, &sig, "initial", &repo.find_tree(tree_id).unwrap(), &[]).unwrap()
+        repo.commit(
+            Some("HEAD"),
+            &sig,
+            &sig,
+            "initial",
+            &repo.find_tree(tree_id).unwrap(),
+            &[],
+        )
+        .unwrap()
     }
 
     #[test]
@@ -75,7 +78,9 @@ mod tests {
         };
         let tree = mgr.repo.find_tree(tree_id).unwrap();
 
-        let oid = mgr.create_commit("initial commit", &sig, tree_id, &[]).unwrap();
+        let oid = mgr
+            .create_commit("initial commit", &sig, tree_id, &[])
+            .unwrap();
         assert!(!oid.is_zero());
 
         // Verify the commit was created
@@ -99,7 +104,9 @@ mod tests {
 
         // Look up the parent commit from the same repo handle
         let initial_commit = mgr.repo.find_commit(initial_oid).unwrap();
-        let oid = mgr.create_commit("second commit", &sig, tree_id, &[&initial_commit]).unwrap();
+        let oid = mgr
+            .create_commit("second commit", &sig, tree_id, &[&initial_commit])
+            .unwrap();
         let commit = mgr.repo.find_commit(oid).unwrap();
         assert_eq!(commit.message().unwrap(), "second commit");
         assert_eq!(commit.parent_count(), 1);
@@ -140,12 +147,16 @@ mod tests {
             let mut index = repo.index().unwrap();
             index.write_tree().unwrap()
         };
-        let second_oid = repo.commit(
-            Some("refs/heads/feature"),
-            &sig, &sig, "feature commit",
-            &repo.find_tree(tree_id).unwrap(),
-            &[],
-        ).unwrap();
+        let second_oid = repo
+            .commit(
+                Some("refs/heads/feature"),
+                &sig,
+                &sig,
+                "feature commit",
+                &repo.find_tree(tree_id).unwrap(),
+                &[],
+            )
+            .unwrap();
 
         // Use the same repo handle to avoid cross-handle commit issues
         let mgr = CommitManager::new(repo);
@@ -154,12 +165,14 @@ mod tests {
         let first_commit = mgr.repo.find_commit(first_oid).unwrap();
         let second_commit = mgr.repo.find_commit(second_oid).unwrap();
 
-        let merge_oid = mgr.create_commit(
-            "merge commit",
-            &sig,
-            tree_id,
-            &[&first_commit, &second_commit],
-        ).unwrap();
+        let merge_oid = mgr
+            .create_commit(
+                "merge commit",
+                &sig,
+                tree_id,
+                &[&first_commit, &second_commit],
+            )
+            .unwrap();
 
         let merge_commit = mgr.repo.find_commit(merge_oid).unwrap();
         assert_eq!(merge_commit.parent_count(), 2);
@@ -176,7 +189,9 @@ mod tests {
             index.write_tree().unwrap()
         };
 
-        let oid = mgr.create_commit("test author", &sig, tree_id, &[]).unwrap();
+        let oid = mgr
+            .create_commit("test author", &sig, tree_id, &[])
+            .unwrap();
         let commit = repo.find_commit(oid).unwrap();
         assert_eq!(commit.author().name().unwrap(), "Test User");
         assert_eq!(commit.author().email().unwrap(), "test@test.com");

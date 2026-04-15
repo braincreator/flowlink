@@ -4,14 +4,19 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::forensic::{PlatformProcessInfo, ProcessOrigin, ProcessTreeNode, SshInfo, ContainerInfo};
+use crate::forensic::{
+    ContainerInfo, PlatformProcessInfo, ProcessOrigin, ProcessTreeNode, SshInfo,
+};
 
 pub fn collect_process_info(pid: u32) -> Result<PlatformProcessInfo> {
     let proc_dir = PathBuf::from(format!("/proc/{pid}"));
 
     let stat = fs::read_to_string(proc_dir.join("stat")).unwrap_or_default();
     let status = fs::read_to_string(proc_dir.join("status")).unwrap_or_default();
-    let comm = fs::read_to_string(proc_dir.join("comm")).unwrap_or_default().trim().to_string();
+    let comm = fs::read_to_string(proc_dir.join("comm"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     let exe = fs::read_link(proc_dir.join("exe"))
         .map(|p| p.display().to_string())
         .unwrap_or_default();
@@ -56,7 +61,11 @@ pub fn walk_process_tree(pid: u32, max_depth: usize) -> Vec<ProcessTreeNode> {
         let stat = fs::read_to_string(proc_dir.join("stat")).unwrap_or_default();
         let ppid = parse_ppid_from_stat(&stat);
 
-        tree.push(ProcessTreeNode { pid: current_pid, name: comm, exe });
+        tree.push(ProcessTreeNode {
+            pid: current_pid,
+            name: comm,
+            exe,
+        });
 
         if ppid == 0 || ppid == current_pid {
             break;
@@ -96,7 +105,9 @@ pub fn detect_origin(pid: u32, tree: &[ProcessTreeNode]) -> ProcessOrigin {
                 };
             }
             "systemd" | "init" => {
-                return ProcessOrigin::Systemd { unit: "unknown".into() };
+                return ProcessOrigin::Systemd {
+                    unit: "unknown".into(),
+                };
             }
             _ => {}
         }
@@ -158,7 +169,8 @@ pub fn get_cwd(pid: u32) -> Result<String> {
 }
 
 pub fn get_boot_offset_ms() -> Option<u64> {
-    let btime = fs::read_to_string("/proc/stat").ok()?
+    let btime = fs::read_to_string("/proc/stat")
+        .ok()?
         .lines()
         .find(|l| l.starts_with("btime"))?
         .split_whitespace()
@@ -174,9 +186,12 @@ pub fn get_session_duration_ms(pid: u32) -> Option<u64> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let ticks = parse_process_starttime_ticks(&stat)?;
     let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) } as u64;
-    if hz == 0 { return None; }
+    if hz == 0 {
+        return None;
+    }
 
-    let btime = fs::read_to_string("/proc/stat").ok()?
+    let btime = fs::read_to_string("/proc/stat")
+        .ok()?
         .lines()
         .find(|l| l.starts_with("btime"))?
         .split_whitespace()
@@ -205,7 +220,11 @@ fn parse_ppid_from_stat(stat: &str) -> u32 {
 fn parse_field_from_status(status: &str, field: &str) -> u32 {
     for line in status.lines() {
         if line.starts_with(&format!("{field}:")) {
-            return line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+            return line
+                .split_whitespace()
+                .nth(1)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
         }
     }
     0
@@ -292,14 +311,23 @@ fn extract_hex_id(line: &str, marker: &str) -> Option<String> {
     let pos = line.find(marker)?;
     let rest = &line[pos + marker.len()..];
     let id: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
-    if id.len() >= 12 { Some(id) } else { None }
+    if id.len() >= 12 {
+        Some(id)
+    } else {
+        None
+    }
 }
 
 fn detect_runtime(cgroup: &str) -> String {
-    if cgroup.contains("/docker/") { "docker".into() }
-    else if cgroup.contains("/kubepods/") { "containerd".into() }
-    else if cgroup.contains("/libpod") { "podman".into() }
-    else { "unknown".into() }
+    if cgroup.contains("/docker/") {
+        "docker".into()
+    } else if cgroup.contains("/kubepods/") {
+        "containerd".into()
+    } else if cgroup.contains("/libpod") {
+        "podman".into()
+    } else {
+        "unknown".into()
+    }
 }
 
 #[cfg(test)]
@@ -385,15 +413,26 @@ mod tests {
 
     #[test]
     fn test_extract_hex_id() {
-        assert_eq!(extract_hex_id("some/path/docker/abc123def456789abc/rest", "/docker/"), Some("abc123def456789abc".into()));
+        assert_eq!(
+            extract_hex_id("some/path/docker/abc123def456789abc/rest", "/docker/"),
+            Some("abc123def456789abc".into())
+        );
         assert_eq!(extract_hex_id("no marker here", "/docker/"), None);
     }
 
     #[test]
     fn test_origin_detection_ssh() {
         let tree = vec![
-            ProcessTreeNode { pid: 1, name: "sshd".into(), exe: "/usr/sbin/sshd".into() },
-            ProcessTreeNode { pid: 100, name: "bash".into(), exe: "/usr/bin/bash".into() },
+            ProcessTreeNode {
+                pid: 1,
+                name: "sshd".into(),
+                exe: "/usr/sbin/sshd".into(),
+            },
+            ProcessTreeNode {
+                pid: 100,
+                name: "bash".into(),
+                exe: "/usr/bin/bash".into(),
+            },
         ];
         let origin = detect_origin(100, &tree);
         assert!(matches!(origin, ProcessOrigin::Ssh { .. }));
@@ -401,9 +440,11 @@ mod tests {
 
     #[test]
     fn test_origin_detection_cron() {
-        let tree = vec![
-            ProcessTreeNode { pid: 1, name: "cron".into(), exe: "/usr/sbin/cron".into() },
-        ];
+        let tree = vec![ProcessTreeNode {
+            pid: 1,
+            name: "cron".into(),
+            exe: "/usr/sbin/cron".into(),
+        }];
         let origin = detect_origin(1, &tree);
         assert!(matches!(origin, ProcessOrigin::Cron { .. }));
     }

@@ -29,8 +29,7 @@ fn test_connect_message_roundtrip() {
     assert_eq!(decoded.msg_type, MessageType::Connect);
     assert_eq!(decoded.agent_id.as_deref(), Some("test-agent-001"));
 
-    let decoded_payload: ConnectPayload =
-        serde_json::from_value(decoded.payload.unwrap()).unwrap();
+    let decoded_payload: ConnectPayload = serde_json::from_value(decoded.payload.unwrap()).unwrap();
     assert_eq!(decoded_payload.agent_id, "test-agent-001");
     assert_eq!(decoded_payload.hostname, "testbox");
 }
@@ -105,17 +104,10 @@ fn test_e2ee_encrypt_decrypt() {
     let plaintext = b"Hello, FlowLink! This is a secret message.";
 
     // Alice encrypts for Bob
-    let envelope = flowlink_crypto::encrypt(
-        &alice,
-        &bob.public_key,
-        plaintext,
-    ).unwrap();
+    let envelope = flowlink_crypto::encrypt(&alice, &bob.public_key, plaintext).unwrap();
 
     // Bob decrypts
-    let decrypted = flowlink_crypto::decrypt(
-        &bob,
-        &envelope,
-    ).unwrap();
+    let decrypted = flowlink_crypto::decrypt(&bob, &envelope).unwrap();
 
     assert_eq!(decrypted, plaintext);
 }
@@ -128,11 +120,7 @@ fn test_e2ee_wrong_key_fails() {
 
     let plaintext = b"Secret data";
 
-    let envelope = flowlink_crypto::encrypt(
-        &alice,
-        &bob.public_key,
-        plaintext,
-    ).unwrap();
+    let envelope = flowlink_crypto::encrypt(&alice, &bob.public_key, plaintext).unwrap();
 
     // Eve tries to decrypt — should fail
     let result = flowlink_crypto::decrypt(&eve, &envelope);
@@ -203,12 +191,7 @@ fn test_readonly_mode() {
 
     let engine = PolicyEngine::new(true, false); // read-only mode
 
-    let blocked_in_readonly = vec![
-        "rm file.txt",
-        "mkdir newdir",
-        "cp src dst",
-        "mv old new",
-    ];
+    let blocked_in_readonly = vec!["rm file.txt", "mkdir newdir", "cp src dst", "mv old new"];
 
     for cmd in &blocked_in_readonly {
         let payload = ExecRequestPayload {

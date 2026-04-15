@@ -95,7 +95,7 @@ impl AuditRepo {
             "INSERT INTO audit_log (level, category, agent_id, account_id, action,
              target, result, metadata, hmac_hash, source_ip)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-             RETURNING id"
+             RETURNING id",
         )
         .bind(level)
         .bind(category)
@@ -118,16 +118,30 @@ impl AuditRepo {
 
         let sql = format!(
             "SELECT * FROM audit_log {} ORDER BY timestamp DESC LIMIT ${} OFFSET ${}",
-            where_clause, bind_idx + 1, bind_idx + 2
+            where_clause,
+            bind_idx + 1,
+            bind_idx + 2
         );
 
         let mut query = sqlx::query_as::<_, AuditRow>(&sql);
-        if let Some(level) = &filter.level { query = query.bind(level); }
-        if let Some(cat) = &filter.category { query = query.bind(cat); }
-        if let Some(agent) = &filter.agent_id { query = query.bind(agent); }
-        if let Some(acc) = &filter.account_id { query = query.bind(acc); }
-        if let Some(from) = filter.from { query = query.bind(from); }
-        if let Some(to) = filter.to { query = query.bind(to); }
+        if let Some(level) = &filter.level {
+            query = query.bind(level);
+        }
+        if let Some(cat) = &filter.category {
+            query = query.bind(cat);
+        }
+        if let Some(agent) = &filter.agent_id {
+            query = query.bind(agent);
+        }
+        if let Some(acc) = &filter.account_id {
+            query = query.bind(acc);
+        }
+        if let Some(from) = filter.from {
+            query = query.bind(from);
+        }
+        if let Some(to) = filter.to {
+            query = query.bind(to);
+        }
         query = query.bind(filter.limit);
         query = query.bind(filter.offset);
 
@@ -138,7 +152,7 @@ impl AuditRepo {
     /// Count entries by level (for stats)
     pub async fn count_by_level(pool: &PgPool) -> Result<Vec<(String, i64)>> {
         let rows = sqlx::query_as::<_, (String, i64)>(
-            "SELECT level, COUNT(*) FROM audit_log GROUP BY level"
+            "SELECT level, COUNT(*) FROM audit_log GROUP BY level",
         )
         .fetch_all(pool)
         .await?;
@@ -281,7 +295,11 @@ mod tests {
             "DELETE FROM audit_log WHERE timestamp < $1",
         ];
         for q in &queries {
-            assert!(q.contains("audit_log"), "Query missing 'audit_log' table: {}", q);
+            assert!(
+                q.contains("audit_log"),
+                "Query missing 'audit_log' table: {}",
+                q
+            );
         }
     }
 
@@ -306,7 +324,9 @@ mod tests {
         let (where_clause, bind_idx) = build_where_clause(&filter);
         let sql = format!(
             "SELECT * FROM audit_log {} ORDER BY timestamp DESC LIMIT ${} OFFSET ${}",
-            where_clause, bind_idx + 1, bind_idx + 2
+            where_clause,
+            bind_idx + 1,
+            bind_idx + 2
         );
         assert!(sql.contains("ORDER BY timestamp DESC"));
         assert!(sql.contains("LIMIT $1"));

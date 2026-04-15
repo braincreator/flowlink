@@ -1,8 +1,8 @@
 //! Plan engine — dry-run preview of command execution
 
-use crate::types::*;
 use crate::pipeline::classifier::{ActionClassifier, ClassificationResult};
-use serde::{Serialize, Deserialize};
+use crate::types::*;
+use serde::{Deserialize, Serialize};
 
 /// Plan engine — generates execution plan without running anything
 pub struct PlanEngine {
@@ -38,13 +38,20 @@ impl PlanEngine {
 
     /// Generate execution plan without running anything
     pub fn plan(&self, command: &str, args: &[String]) -> ExecutionPlan {
-        let result = self.classifier.classify(command, args).unwrap_or_else(|_| ClassificationResult {
-            tier: ActionTier::Unclassified,
-            verdict: None,
-            rule_name: None,
-        });
+        let result =
+            self.classifier
+                .classify(command, args)
+                .unwrap_or_else(|_| ClassificationResult {
+                    tier: ActionTier::Unclassified,
+                    verdict: None,
+                    rule_name: None,
+                });
         let tier = result.tier;
-        let _risk = result.verdict.as_ref().map(|_| RiskLevel::Medium).unwrap_or(RiskLevel::Safe);
+        let _risk = result
+            .verdict
+            .as_ref()
+            .map(|_| RiskLevel::Medium)
+            .unwrap_or(RiskLevel::Safe);
 
         let (verdict, files, risk_level) = match tier {
             ActionTier::ReadOnly => (PlanVerdict::WillAllow, vec![], RiskLevel::Safe),

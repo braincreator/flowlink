@@ -25,13 +25,9 @@ pub enum RuleAction {
     /// Allow the command
     Allow,
     /// Block the command with a reason
-    Block {
-        reason: String,
-    },
+    Block { reason: String },
     /// Modify the command with replacements
-    Modify {
-        rewrite: RewriteConfig,
-    },
+    Modify { rewrite: RewriteConfig },
 }
 
 /// Configuration for command rewriting

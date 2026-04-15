@@ -1,10 +1,11 @@
 use axum::{
     extract::{Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message as AxumMsg}},
+    http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Json,
     },
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -21,7 +22,8 @@ use crate::eventbus::EventBus;
 use crate::handler::RelayHandler;
 use crate::llm::{LlmProxy, LlmRequest};
 use crate::metrics::Metrics;
-use crate::middleware::{auth_middleware_simple, rate_limit_layer, request_id_middleware, logging_middleware, cors_layer};
+use axum::middleware;
+use crate::middleware::{jwt_auth, rate_limit_layer, request_id_middleware, logging_middleware, cors_layer};
 use crate::ratelimit::RateLimiter;
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
@@ -51,6 +53,12 @@ pub struct AppState {
     pub usage_tracker: Arc<crate::billing_middleware::UsageTracker>,
     pub rate_limiter: Arc<RateLimiter>,
     pub control_plane: crate::control_plane::ControlPlaneState,
+    pub tochka: Option<Arc<flowlink_billing::tochka::TochkaClient>>,
+    pub auth: Arc<crate::auth::AuthManager>,
+    pub auth_engine: Option<Arc<crate::auth::AuthEngine>>,
+    pub email_service: Option<Arc<crate::email::EmailService>>,
+    pub email_queue: std::sync::OnceLock<Arc<crate::email_queue::EmailQueue>>,
+    pub tg_bot: std::sync::OnceLock<teloxide::Bot>,
 }
 
 // ═══════════════════════════════════════════════
@@ -206,6 +214,49 @@ async fn healthz() -> Json<serde_json::Value> {
 
 async fn list_agents(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
     Json(state.pool.list())
+}
+
+/// GET /api/account/info — Returns current account info
+async fn account_info(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    // TODO: read from DB when auth middleware provides account_id
+    (StatusCode::OK, Json(serde_json::json!({
+        "active": true,
+        "plan_name": "free",
+        "plan_id": "free",
+        "servers_count": 0,
+        "user": {
+            "id": "",
+            "name": "",
+            "email": ""
+        },
+        "created_at": 0,
+        "last_login": 0
+    }))).into_response()
+}
+
+/// GET /api/account/settings
+async fn account_get_settings(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    (StatusCode::OK, Json(serde_json::json!({
+        "name": "",
+        "email": "",
+        "notifications": {
+            "push_enabled": true,
+            "email_frequency": "immediate"
+        }
+    }))).into_response()
+}
+
+/// PUT /api/account/settings
+async fn account_update_settings(
+    State(state): State<AppState>,
+    Json(_body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    // TODO: persist to DB
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
 }
 
 async fn list_approvals(
@@ -396,6 +447,16 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
         capabilities: vec![],
     });
 
+    // Notify via Telegram
+    if let Some(tg_bot) = state.tg_bot.get() {
+        let state_arc = Arc::new(state.clone());
+        let agent_id_clone = agent_id.clone();
+        let bot = tg_bot.clone();
+        tokio::spawn(async move {
+            crate::tgbot::notifications::agent_connected(&bot, &state_arc, &agent_id_clone, "unknown").await;
+        });
+    }
+
     // Send Connected ack with relay's E2EE public key
     let connected = flowlink_core::Message::new(flowlink_core::MessageType::Connected)
         .with_agent_id(&agent_id)
@@ -531,6 +592,15 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
     pool.unregister(&aid);
     state.handler.remove_sender(&aid);
     state.e2ee.remove_agent_key(&aid).await;
+    // Notify via Telegram
+    if let Some(tg_bot) = state.tg_bot.get() {
+        let state_arc = Arc::new(state.clone());
+        let agent_id_clone = aid.clone();
+        let bot = tg_bot.clone();
+        tokio::spawn(async move {
+            crate::tgbot::notifications::agent_disconnected(&bot, &state_arc, &agent_id_clone, "unknown").await;
+        });
+    }
     // Release billing usage counter for this host
     if let Some(billing_engine) = &state.billing {
         billing_engine.usage().release_agent(&client_id);
@@ -849,46 +919,76 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
 
 pub fn build_router(state: AppState) -> Router {
     let rate_limiter = state.rate_limiter.clone();
-    Router::new()
+
+    // ── Public routes (no JWT auth required) ──
+    let public_routes = Router::new()
         .route("/healthz", get(healthz))
         .route("/health", get(health))
+        // Auth endpoints
+        .route("/api/auth/email/send-code", axum::routing::post(crate::email_auth::send_code))
+        .route("/api/auth/email/verify", axum::routing::post(crate::email_auth::verify_code))
+        // OAuth callbacks
+        .route("/api/auth/vk/callback", axum::routing::get(crate::auth_api::vk_callback))
+        .route("/api/auth/yandex/callback", axum::routing::get(crate::auth_api::yandex_callback))
+        .route("/api/auth/github/callback", axum::routing::get(crate::auth_api::github_callback))
+        .route("/api/auth/refresh", axum::routing::post(crate::auth_api::refresh_token))
+        // Auth providers listing
+        .route("/api/auth/providers", axum::routing::get(crate::auth_api::list_providers))
+        // Public plans
+        .route("/api/plans", axum::routing::get(crate::billing_api::public_plans))
+        // Billing webhook (external, needs no auth)
+        .route("/api/billing/webhook/tochka", axum::routing::post(crate::billing_api::tochka_webhook))
+        // Shield ingest (external agent reporting)
+        .route("/api/shield/ingest", post(shield_ingest_alert))
+        // Audit ingest (external)
+        .route("/api/audit/event", post(audit_ingest))
+        .route("/api/shield/canary", post(canary_alert_handler))
+        // Control Plane
+        .route("/api/v1/signup", axum::routing::post(crate::control_plane::signup))
+        .route("/api/v1/heartbeat", axum::routing::post(crate::control_plane::heartbeat))
+        // Metrics
+        .route("/metrics", axum::routing::get(crate::metrics::metrics_handler))
+        // WS (has its own token validation)
+        .route("/ws", get(ws_upgrade))
+        // MCP (has its own validation)
+        .route("/mcp", axum::routing::post(crate::mcp::handle_mcp))
+        // SSE (has its own token validation)
+        .route("/api/events", get(sse_events));
+
+    // ── Protected routes (require JWT auth) ──
+    let protected_routes = Router::new()
+        // Agents
         .route("/api/agents", get(list_agents))
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/{id}/approve", post(approve_approval))
         .route("/api/approvals/{id}/reject", post(reject_approval))
         .route("/api/clients", get(list_clients))
         .route("/api/exec/{agent_id}", post(exec_agent))
-        .route("/api/events", get(sse_events))
-        .route("/ws", get(ws_upgrade))
-        .route("/mcp", axum::routing::post(crate::mcp::handle_mcp))
+        // Devices
         .route("/api/devices/pair", axum::routing::post(crate::devices::pair_device))
         .route("/api/devices/confirm", axum::routing::post(crate::devices::confirm_pairing))
         .route("/api/devices", axum::routing::get(crate::devices::list_devices))
         .route("/api/devices/{id}", axum::routing::delete(crate::devices::remove_device))
         .route("/api/devices/{id}/trust", axum::routing::get(crate::devices::get_device_trust))
+        // LLM
         .route("/api/llm", post(llm_chat))
         .route("/api/llm/backends", get(llm_backends))
         .route("/api/llm/health", get(llm_health))
-        // Shield alert routes
+        // Shield alerts (list/approve/reject/stats/resolve)
         .route("/api/shield/alerts", get(shield_list_alerts))
         .route("/api/shield/approve/{pid}", post(shield_approve))
         .route("/api/shield/reject/{pid}", post(shield_reject))
         .route("/api/shield/stats", get(shield_stats))
-        .route("/api/shield/ingest", post(shield_ingest_alert))
         .route("/api/shield/resolve", post(shield_resolve))
-        // Audit channel routes
+        // Audit query/stats/export
         .route("/api/audit", get(audit_query))
         .route("/api/audit/stats", get(audit_stats_handler))
         .route("/api/audit/export", get(audit_export))
-        .route("/api/audit/event", post(audit_ingest))
-        .route("/api/shield/canary", post(canary_alert_handler))
-        // Config hot-reload routes
+        // Config
         .route("/api/config/reload", post(config_reload))
         .route("/api/config", get(config_get))
         .route("/api/config/push/{agent_id}", post(config_push_agent))
-        // Public plans endpoint (no auth, for website)
-        .route("/api/plans", axum::routing::get(crate::billing_api::public_plans))
-        // Billing routes
+        // Billing (except webhook and public plans)
         .route("/api/billing", axum::routing::get(crate::billing_api::get_billing_info))
         .route("/api/billing/usage", axum::routing::get(crate::billing_api::get_usage))
         .route("/api/billing/plans", axum::routing::get(crate::billing_api::list_plans))
@@ -896,16 +996,34 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/billing/invoices", axum::routing::get(crate::billing_api::list_invoices))
         .route("/api/billing/invoices/{id}", axum::routing::get(crate::billing_api::get_invoice))
         .route("/api/billing/payments/methods", axum::routing::get(crate::billing_api::list_payment_methods))
-        .route("/api/billing/subscriptions", axum::routing::get(crate::billing_api::list_subscriptions).post(crate::billing_api::create_subscription))
+        .route("/api/billing/subscribe", axum::routing::post(crate::billing_api::subscribe))
+        .route("/api/billing/subscription", axum::routing::get(crate::billing_api::get_subscription))
+        .route("/api/billing/subscription/pause", axum::routing::post(crate::billing_api::pause_subscription))
+        .route("/api/billing/subscription/resume", axum::routing::post(crate::billing_api::resume_subscription))
+        .route("/api/billing/subscription", axum::routing::delete(crate::billing_api::cancel_tochka_subscription))
+        .route("/api/billing/subscription/change-plan", axum::routing::post(crate::billing_api::change_subscription_plan))
+        .route("/api/billing/subscriptions", axum::routing::get(crate::billing_api::list_subscriptions))
         .route("/api/billing/subscriptions/{id}/cancel", axum::routing::post(crate::billing_api::cancel_subscription))
         .route("/api/billing/orders", axum::routing::get(crate::billing_api::list_orders).post(crate::billing_api::create_order))
-        .route("/api/billing/webhook/tochka", axum::routing::post(crate::billing_api::tochka_webhook))
-        .route("/metrics", axum::routing::get(crate::metrics::metrics_handler))
-        // Control Plane API
-        .route("/api/v1/signup", axum::routing::post(crate::control_plane::signup))
-        .route("/api/v1/heartbeat", axum::routing::post(crate::control_plane::heartbeat))
+        // Control Plane (agents listing)
         .route("/api/v1/agents", axum::routing::get(crate::control_plane::list_agents))
         .route("/api/v1/agents/{id}", axum::routing::get(crate::control_plane::get_agent))
+        // Account
+        .route("/api/account/info", axum::routing::get(account_info))
+        .route("/api/account/settings", axum::routing::get(account_get_settings))
+        .route("/api/account/settings", axum::routing::put(account_update_settings))
+        .route("/api/account/notifications", axum::routing::get(crate::preferences_api::get_notifications))
+        .route("/api/account/notifications/{id}/read", axum::routing::post(crate::preferences_api::mark_notification_read))
+        // Auth (me, logout, account)
+        .route("/api/auth/me", axum::routing::get(crate::auth_api::auth_me))
+        .route("/api/auth/logout", axum::routing::post(crate::auth_api::logout))
+        .route("/api/auth/account", axum::routing::get(crate::auth_api::account_info))
+        // Apply JWT auth + rate limiting to protected routes
+        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
+
+    Router::new()
+        .merge(public_routes)
+        .merge(protected_routes)
         .with_state(state)
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))
@@ -915,7 +1033,6 @@ pub fn build_router(state: AppState) -> Router {
             vec!["/healthz".to_string(), "/ws".to_string()],
         )))
         .layer(cors_layer(vec!["*".to_string()]))
-        .layer(axum::middleware::from_fn(auth_middleware_simple))
 }
 
 #[cfg(test)]
@@ -951,6 +1068,9 @@ mod tests {
             usage_tracker: Arc::new(crate::billing_middleware::UsageTracker::new()),
             rate_limiter: Arc::new(RateLimiter::new(100, 10)),
             control_plane: crate::control_plane::ControlPlaneState::new(),
+            email_queue: std::sync::OnceLock::new(),
+            tg_bot: std::sync::OnceLock::new(),
+            auth_engine: None,
         }
     }
 

@@ -45,7 +45,10 @@ impl ProcessMonitor for SimulatedMonitor {
         let cb = callback;
 
         let handle = std::thread::spawn(move || {
-            info!("🔍 SimulatedMonitor started (poll interval: {}ms)", interval);
+            info!(
+                "🔍 SimulatedMonitor started (poll interval: {}ms)",
+                interval
+            );
             let mut seen: HashSet<u32> = HashSet::new();
 
             // Seed
@@ -272,12 +275,14 @@ mod real_ebpf {
                     // Load embedded BPF program
                     // This requires the BPF ELF to be compiled and included at build time.
                     // If the file doesn't exist at compile time, this will fail.
-                    Bpf::load(include_bytes!("../../../bpf/monitor.bpf.o"))
-                        .map_err(|e| anyhow::anyhow!(
+                    Bpf::load(include_bytes!("../../../bpf/monitor.bpf.o")).map_err(|e| {
+                        anyhow::anyhow!(
                             "Failed to load embedded BPF program. Compile it first: \
                              clang -target bpf -g -O2 -c bpf/monitor.bpf.c -o bpf/monitor.bpf.o. \
-                             Error: {}", e
-                        ))?
+                             Error: {}",
+                            e
+                        )
+                    })?
                 }
             };
 
@@ -321,8 +326,9 @@ mod real_ebpf {
                 self.load()?;
             }
 
-            let ring_buf = self.ring_buf.take()
-                .ok_or_else(|| anyhow::anyhow!("Ring buffer not initialized. Call load() first."))?;
+            let ring_buf = self.ring_buf.take().ok_or_else(|| {
+                anyhow::anyhow!("Ring buffer not initialized. Call load() first.")
+            })?;
 
             self.running = true;
 
@@ -342,15 +348,20 @@ mod real_ebpf {
                                 warn!("Received undersized eBPF event: {} bytes", data.len());
                                 return -1;
                             }
-                            let event: ExecEvent = unsafe { std::ptr::read_unaligned(data.as_ptr() as *const ExecEvent) };
+                            let event: ExecEvent = unsafe {
+                                std::ptr::read_unaligned(data.as_ptr() as *const ExecEvent)
+                            };
                             let comm = std::str::from_utf8(&event.comm)
                                 .unwrap_or("<unknown>")
                                 .trim_end_matches('\0')
                                 .to_string();
-                            info!("eBPF event: pid={} ppid={} comm={}", event.pid, event.ppid, comm);
+                            info!(
+                                "eBPF event: pid={} ppid={} comm={}",
+                                event.pid, event.ppid, comm
+                            );
                             local_cb(event.pid);
                             0 // continue reading
-                        }
+                        },
                     );
 
                     match result {

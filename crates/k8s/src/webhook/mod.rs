@@ -51,10 +51,7 @@ impl AdmissionWebhook {
 
             if !errors.is_empty() {
                 let msg: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
-                return (
-                    self.deny_response(&req.uid, &msg.join("; ")),
-                    None,
-                );
+                return (self.deny_response(&req.uid, &msg.join("; ")), None);
             }
         }
 
@@ -195,7 +192,14 @@ mod tests {
         let req = make_request(pod, "default");
         let (resp, _) = wh.handle_review(&req);
         assert!(!resp.allowed);
-        assert!(resp.status.as_ref().unwrap().message.as_ref().unwrap().contains("privileged"));
+        assert!(resp
+            .status
+            .as_ref()
+            .unwrap()
+            .message
+            .as_ref()
+            .unwrap()
+            .contains("privileged"));
     }
 
     #[test]
@@ -395,7 +399,12 @@ mod tests {
         let req = make_request(pod, "default");
         let (resp, _) = wh.handle_review(&req);
         assert!(!resp.allowed);
-        assert!(resp.status.unwrap().message.unwrap().contains("allowPrivilegeEscalation"));
+        assert!(resp
+            .status
+            .unwrap()
+            .message
+            .unwrap()
+            .contains("allowPrivilegeEscalation"));
     }
 
     #[test]
@@ -463,7 +472,12 @@ mod tests {
         let req = make_request(pod, "default");
         let (resp, _) = wh.handle_review(&req);
         assert!(!resp.allowed);
-        assert!(resp.status.unwrap().message.unwrap().contains("/var/run/docker.sock"));
+        assert!(resp
+            .status
+            .unwrap()
+            .message
+            .unwrap()
+            .contains("/var/run/docker.sock"));
     }
 
     #[test]
@@ -561,10 +575,8 @@ mod tests {
     #[test]
     fn test_exempt_label_with_config() {
         let mut cfg = default_config();
-        cfg.exempt_labels.insert(
-            "shield.flowlink.ai/exempt".into(),
-            "true".into(),
-        );
+        cfg.exempt_labels
+            .insert("shield.flowlink.ai/exempt".into(), "true".into());
         let wh = AdmissionWebhook::new(cfg, vec![]);
         let pod = json!({
             "apiVersion": "v1",
@@ -686,7 +698,9 @@ mod tests {
         let patch = patch.unwrap();
 
         // Check shareProcessNamespace
-        let spn = patch.iter().find(|p| p["path"] == "/spec/shareProcessNamespace");
+        let spn = patch
+            .iter()
+            .find(|p| p["path"] == "/spec/shareProcessNamespace");
         assert!(spn.is_some());
         assert_eq!(spn.unwrap()["value"], true);
 
@@ -702,9 +716,15 @@ mod tests {
         assert_eq!(container.unwrap()["value"]["name"], "flowlink-shield");
 
         // Check volumes added
-        let volumes: Vec<_> = patch.iter().filter(|p| p["path"] == "/spec/volumes/-").collect();
+        let volumes: Vec<_> = patch
+            .iter()
+            .filter(|p| p["path"] == "/spec/volumes/-")
+            .collect();
         assert_eq!(volumes.len(), 2);
-        let vol_names: Vec<_> = volumes.iter().map(|v| v["value"]["name"].as_str().unwrap()).collect();
+        let vol_names: Vec<_> = volumes
+            .iter()
+            .map(|v| v["value"]["name"].as_str().unwrap())
+            .collect();
         assert!(vol_names.contains(&"flowlink-shared"));
         assert!(vol_names.contains(&"flowlink-shield-data"));
     }
@@ -719,7 +739,10 @@ mod tests {
         let patch = patch.unwrap();
 
         // Find the sidecar container
-        let container = patch.iter().find(|p| p["path"] == "/spec/containers/-").unwrap();
+        let container = patch
+            .iter()
+            .find(|p| p["path"] == "/spec/containers/-")
+            .unwrap();
         assert_eq!(container["value"]["image"], "custom/shield:v2");
 
         // Check resource limits exist

@@ -73,13 +73,11 @@ impl SubscriptionRepo {
 
     /// Обновить статус подписки
     pub async fn update_status(pool: &PgPool, id: &str, status: &str) -> Result<()> {
-        sqlx::query(
-            "UPDATE subscriptions SET status = $1, updated_at = NOW() WHERE id = $2",
-        )
-        .bind(status)
-        .bind(id)
-        .execute(pool)
-        .await?;
+        sqlx::query("UPDATE subscriptions SET status = $1, updated_at = NOW() WHERE id = $2")
+            .bind(status)
+            .bind(id)
+            .execute(pool)
+            .await?;
         Ok(())
     }
 

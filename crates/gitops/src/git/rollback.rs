@@ -110,7 +110,9 @@ impl RollbackEngine {
         index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)?;
         index.write()?;
 
-        let sig = repo.signature().or_else(|_| git2::Signature::now("FlowLink", "flowlink@local"))?;
+        let sig = repo
+            .signature()
+            .or_else(|_| git2::Signature::now("FlowLink", "flowlink@local"))?;
 
         let oid = repo
             .stash_save(&sig, "Auto-stash before rollback", None)
@@ -247,9 +249,7 @@ impl RollbackEngine {
         let head = Self::head_commit(&repo)?;
         let _head_oid = head.id().to_string();
 
-        let mut revwalk = repo
-            .revwalk()
-            .context("Failed to create revwalk")?;
+        let mut revwalk = repo.revwalk().context("Failed to create revwalk")?;
         revwalk.push_head()?;
         revwalk.simplify_first_parent()?;
 
@@ -310,7 +310,10 @@ impl RollbackEngine {
 
         // If revert_index is empty, no changes were made (already reverted or empty diff)
         if revert_index.is_empty() {
-            info!("Revert of {} produced no changes (already reverted or empty)", commit_hash);
+            info!(
+                "Revert of {} produced no changes (already reverted or empty)",
+                commit_hash
+            );
             return Ok(RollbackResult {
                 from_commit: commit_hash.to_string(),
                 to_commit: from_hex,
@@ -327,10 +330,19 @@ impl RollbackEngine {
             .find_tree(tree_oid)
             .context("Failed to find reverted tree")?;
 
-        let sig = repo.signature().or_else(|_| git2::Signature::now("FlowLink", "flowlink@local"))?;
+        let sig = repo
+            .signature()
+            .or_else(|_| git2::Signature::now("FlowLink", "flowlink@local"))?;
         let revert_msg = format!("Revert {}", commit_hash);
         let new_oid = repo
-            .commit(Some("HEAD"), &sig, &sig, &revert_msg, &tree, &[&Self::head_commit(&repo)?])
+            .commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                &revert_msg,
+                &tree,
+                &[&Self::head_commit(&repo)?],
+            )
             .context("Failed to create revert commit")?;
 
         // Get the files changed by the revert
@@ -437,7 +449,10 @@ mod tests {
         assert!(commits[0].is_head, "First commit should be HEAD");
         assert!(!commits[1].is_head);
         assert!(commits[0].hash.len() == 40, "Full hash should be 40 chars");
-        assert!(commits[0].short_hash.len() == 8, "Short hash should be 8 chars");
+        assert!(
+            commits[0].short_hash.len() == 8,
+            "Short hash should be 8 chars"
+        );
     }
 
     #[tokio::test]
@@ -539,7 +554,10 @@ mod tests {
         // Revert should create a new commit undoing the last
         let result = engine.revert_commit(&last_hash).await.unwrap();
         assert!(result.success);
-        assert_ne!(result.from_commit, result.to_commit, "Revert should create a new commit");
+        assert_ne!(
+            result.from_commit, result.to_commit,
+            "Revert should create a new commit"
+        );
     }
 
     #[tokio::test]

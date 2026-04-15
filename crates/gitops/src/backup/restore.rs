@@ -63,21 +63,14 @@ impl RestoreEngine {
         // Determine extraction target
         let target_dir = extract_to
             .or_else(|| self.extract_to.clone())
-            .unwrap_or_else(|| {
-                PathBuf::from(format!("/tmp/flowlink-restore-{}", backup_id))
-            });
+            .unwrap_or_else(|| PathBuf::from(format!("/tmp/flowlink-restore-{}", backup_id)));
 
         // Create pre-restore backup
         let pre_restore_backup_id = self.create_pre_restore_backup().await?;
-        debug!(
-            "Pre-restore backup {} created",
-            pre_restore_backup_id
-        );
+        debug!("Pre-restore backup {} created", pre_restore_backup_id);
 
         // Extract and verify files
-        let files_restored = self
-            .extract_and_verify(&backup_path, &target_dir)
-            .await?;
+        let files_restored = self.extract_and_verify(&backup_path, &target_dir).await?;
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
 
@@ -93,9 +86,7 @@ impl RestoreEngine {
 
         info!(
             "Restore completed: {} files restored to {:?} in {}ms",
-            files_restored,
-            target_dir,
-            duration_ms
+            files_restored, target_dir, duration_ms
         );
 
         Ok(result)
@@ -136,8 +127,7 @@ impl RestoreEngine {
         let backup_id = format!("pre-restore-{}", chrono::Utc::now().timestamp_millis());
 
         // Store a marker in the vault
-        let marker_path = std::env::temp_dir()
-            .join(&backup_id);
+        let marker_path = std::env::temp_dir().join(&backup_id);
 
         let _: () = fs::write(&marker_path, b"pre-restore marker")
             .await
@@ -150,15 +140,10 @@ impl RestoreEngine {
     ///
     /// Actually writes files to disk under `target_dir`, with path traversal
     /// protection that rejects any entry whose path contains `..` components.
-    async fn extract_and_verify(
-        &self,
-        backup_path: &Path,
-        target_dir: &Path,
-    ) -> Result<u32> {
+    async fn extract_and_verify(&self, backup_path: &Path, target_dir: &Path) -> Result<u32> {
         debug!(
             "Extracting and verifying backup from {:?} to {:?}",
-            backup_path,
-            target_dir
+            backup_path, target_dir
         );
 
         let backup_path = backup_path.to_path_buf();
@@ -169,8 +154,7 @@ impl RestoreEngine {
             std::fs::create_dir_all(&target_dir)
                 .context("Failed to create extraction target directory")?;
 
-            let file = std::fs::File::open(&backup_path)
-                .context("Failed to open backup file")?;
+            let file = std::fs::File::open(&backup_path).context("Failed to open backup file")?;
             let decoder = GzDecoder::new(file);
             let mut archive = Archive::new(decoder);
 
@@ -194,10 +178,9 @@ impl RestoreEngine {
                         // Path traversal protection:
                         // 1. Strip leading '/' from entry path (tar may store absolute paths)
                         // 2. Reject entries containing ".." components
-                        let relative_path = entry_path
-                            .strip_prefix("/")
-                            .unwrap_or(&entry_path);
-                        if relative_path.components()
+                        let relative_path = entry_path.strip_prefix("/").unwrap_or(&entry_path);
+                        if relative_path
+                            .components()
                             .any(|c| matches!(c, std::path::Component::ParentDir))
                         {
                             let msg = format!(
@@ -211,15 +194,18 @@ impl RestoreEngine {
 
                         // Verify the resolved path stays within target_dir
                         let full_path = target_dir.join(relative_path);
-                        let canonical_target = target_dir.canonicalize()
+                        let canonical_target = target_dir
+                            .canonicalize()
                             .unwrap_or_else(|_| target_dir.clone());
                         // For not-yet-existing files, check via parent directory canonicalization
                         let is_safe = if full_path.exists() {
-                            full_path.canonicalize()
+                            full_path
+                                .canonicalize()
                                 .map(|p| p.starts_with(&canonical_target))
                                 .unwrap_or(false)
                         } else {
-                            full_path.parent()
+                            full_path
+                                .parent()
                                 .and_then(|p| p.canonicalize().ok())
                                 .map(|parent| {
                                     let file_name = full_path.file_name();
@@ -296,8 +282,8 @@ impl RestoreEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::VaultConfig;
     use crate::backup::file_backup::FileBackupEngine;
+    use crate::config::VaultConfig;
     use tempfile::tempdir;
 
     fn make_vault_config(temp_dir: &std::path::Path) -> VaultConfig {
@@ -344,7 +330,7 @@ mod tests {
 
         let engine = RestoreEngine::new(vault);
         let backup_id = engine.create_pre_restore_backup().await.unwrap();
-        
+
         assert!(backup_id.starts_with("pre-restore-"));
     }
 
@@ -375,9 +361,7 @@ mod tests {
         tokio::fs::write(&file_a, b"Hello, FlowLink!")
             .await
             .unwrap();
-        tokio::fs::write(&file_b, b"key: value\n")
-            .await
-            .unwrap();
+        tokio::fs::write(&file_b, b"key: value\n").await.unwrap();
 
         // --- Create a backup in the vault ---
         let vault_dir = tempdir().unwrap();
@@ -387,10 +371,7 @@ mod tests {
 
         let engine = FileBackupEngine::new(500);
         let manifest = engine
-            .create_snapshot(
-                &[file_a.clone(), file_b.clone()],
-                &vault,
-            )
+            .create_snapshot(&[file_a.clone(), file_b.clone()], &vault)
             .await
             .expect("snapshot should succeed");
 
@@ -428,9 +409,7 @@ mod tests {
         // --- Setup: create a source file and back it up ---
         let source_dir = tempdir().unwrap();
         let file = source_dir.path().join("data.txt");
-        tokio::fs::write(&file, b"important data")
-            .await
-            .unwrap();
+        tokio::fs::write(&file, b"important data").await.unwrap();
 
         let vault_dir = tempdir().unwrap();
         let vault_config = make_vault_config(vault_dir.path());
@@ -453,10 +432,16 @@ mod tests {
             .expect("restore should succeed");
 
         let fallback_dir = PathBuf::from(format!("/tmp/flowlink-restore-{}", backup_id));
-        assert!(fallback_dir.exists(), "default fallback directory should be created");
+        assert!(
+            fallback_dir.exists(),
+            "default fallback directory should be created"
+        );
 
         let restored_file = fallback_dir.join("data.txt");
-        assert!(restored_file.exists(), "data.txt should exist in fallback dir");
+        assert!(
+            restored_file.exists(),
+            "data.txt should exist in fallback dir"
+        );
 
         let content = tokio::fs::read_to_string(&restored_file).await.unwrap();
         assert_eq!(content, "important data");

@@ -9,7 +9,7 @@
 //!
 //! API docs: https://enter.tochka.com/doc/api/v2/
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -242,6 +242,10 @@ pub struct SbpPaymentRequest {
     pub description: String,
     #[serde(rename = "paymentType")]
     pub payment_type: String,
+    /// Customer email for 54-FZ receipt (required)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_email: Option<String>,
+    /// Customer phone for 54-FZ receipt (alternative to email)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_phone: Option<String>,
 }
@@ -277,7 +281,9 @@ pub struct CardPaymentRequest {
 }
 
 #[allow(dead_code)]
-fn default_ru() -> String { "ru".to_string() }
+fn default_ru() -> String {
+    "ru".to_string()
+}
 
 /// Card payment response
 #[derive(Debug, Deserialize)]
@@ -345,7 +351,10 @@ pub struct ReqwestBackend {
 #[cfg(feature = "tochka-live")]
 impl ReqwestBackend {
     pub fn new(base_url: String) -> Self {
-        Self { client: reqwest::Client::new(), base_url }
+        Self {
+            client: reqwest::Client::new(),
+            base_url,
+        }
     }
 }
 
@@ -354,10 +363,13 @@ impl ReqwestBackend {
 impl TochkaHttp for ReqwestBackend {
     async fn post(&self, path: &str, body: &str) -> Result<String> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Content-Type", "application/json")
             .body(body.to_string())
-            .send().await?;
+            .send()
+            .await?;
         Ok(resp.text().await?)
     }
 
@@ -410,9 +422,13 @@ fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
 }
 
 fn constant_time_compare(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() { return false; }
+    if a.len() != b.len() {
+        return false;
+    }
     let mut result: u8 = 0;
-    for (x, y) in a.iter().zip(b) { result |= x ^ y; }
+    for (x, y) in a.iter().zip(b) {
+        result |= x ^ y;
+    }
     result == 0
 }
 
@@ -432,7 +448,7 @@ impl TochkaClient {
     pub fn new(config: SbpConfig) -> Self {
         Self {
             http: Box::new(ReqwestBackend::new(
-                "https://enter.tochka.com/api/v2".to_string()
+                "https://enter.tochka.com/api/v2".to_string(),
             )),
             config,
         }
@@ -442,7 +458,9 @@ impl TochkaClient {
         Self { config, http }
     }
 
-    pub fn config(&self) -> &SbpConfig { &self.config }
+    pub fn config(&self) -> &SbpConfig {
+        &self.config
+    }
 
     // ---- Signing / verification ----
 
@@ -483,8 +501,11 @@ impl TochkaClient {
         let sub: SubscriptionResponse = serde_json::from_str(&resp)?;
 
         if let Some(err) = &sub.error_code {
-            bail!("Tochka subscription error {}: {}",
-                err, sub.error_description.as_deref().unwrap_or(""));
+            bail!(
+                "Tochka subscription error {}: {}",
+                err,
+                sub.error_description.as_deref().unwrap_or("")
+            );
         }
         Ok(sub)
     }
@@ -497,7 +518,10 @@ impl TochkaClient {
     }
 
     /// Get subscription by customer ID (our account_id)
-    pub async fn get_subscription_by_customer(&self, customer_id: &str) -> Result<SubscriptionResponse> {
+    pub async fn get_subscription_by_customer(
+        &self,
+        customer_id: &str,
+    ) -> Result<SubscriptionResponse> {
         let path = format!("/subscriptions?customer={}", customer_id);
         let resp = self.http.get(&path).await?;
         Ok(serde_json::from_str(&resp)?)
@@ -562,26 +586,36 @@ impl TochkaClient {
     // ACQUIRING API — разовые платежи (доп.услуги, top-up)
     // =========================================================================
 
-    /// Create SBP payment (one-time)
+    /// Create SBP payment (one-time). Requires customer_email or customer_phone for 54-FZ.
     pub async fn create_sbp_payment(
         &self,
         invoice_id: &str,
         amount_kopecks: u64,
         description: &str,
+        customer_email: Option<&str>,
+        customer_phone: Option<&str>,
     ) -> Result<SbpPaymentResponse> {
+        if customer_email.is_none() && customer_phone.is_none() {
+            bail!("54-FZ compliance: customer_email or customer_phone is required for receipt");
+        }
         let body = SbpPaymentRequest {
             amount: amount_kopecks,
             order: invoice_id.to_string(),
             description: description.to_string(),
             payment_type: self.config.payment_type_id.clone(),
-            customer_phone: None,
+            customer_email: customer_email.map(|s| s.to_string()),
+            customer_phone: customer_phone.map(|s| s.to_string()),
         };
         let json = serde_json::to_string(&body)?;
         let resp = self.http.post("/acquiring/sbp", &json).await?;
         let payment: SbpPaymentResponse = serde_json::from_str(&resp)?;
 
         if let Some(err) = &payment.error_code {
-            bail!("Tochka SBP error {}: {}", err, payment.error_description.as_deref().unwrap_or(""));
+            bail!(
+                "Tochka SBP error {}: {}",
+                err,
+                payment.error_description.as_deref().unwrap_or("")
+            );
         }
         Ok(payment)
     }
@@ -606,7 +640,11 @@ impl TochkaClient {
         let payment: CardPaymentResponse = serde_json::from_str(&resp)?;
 
         if let Some(err) = &payment.error_code {
-            bail!("Tochka card error {}: {}", err, payment.error_description.as_deref().unwrap_or(""));
+            bail!(
+                "Tochka card error {}: {}",
+                err,
+                payment.error_description.as_deref().unwrap_or("")
+            );
         }
         Ok(payment)
     }
@@ -629,7 +667,11 @@ impl TochkaClient {
         let refund: RefundResponse = serde_json::from_str(&resp)?;
 
         if let Some(err) = &refund.error_code {
-            bail!("Tochka refund error {}: {}", err, refund.error_description.as_deref().unwrap_or(""));
+            bail!(
+                "Tochka refund error {}: {}",
+                err,
+                refund.error_description.as_deref().unwrap_or("")
+            );
         }
         Ok(refund)
     }
@@ -647,24 +689,35 @@ mod tests {
         responses: std::collections::HashMap<String, String>,
     }
     impl MockHttp {
-        fn new() -> Self { Self { responses: std::collections::HashMap::new() } }
+        fn new() -> Self {
+            Self {
+                responses: std::collections::HashMap::new(),
+            }
+        }
         fn with(mut self, path: &str, body: &str) -> Self {
-            self.responses.insert(path.to_string(), body.to_string()); self
+            self.responses.insert(path.to_string(), body.to_string());
+            self
         }
     }
 
     #[async_trait::async_trait]
     impl TochkaHttp for MockHttp {
         async fn post(&self, path: &str, _body: &str) -> Result<String> {
-            self.responses.get(path).cloned()
+            self.responses
+                .get(path)
+                .cloned()
                 .ok_or_else(|| anyhow::anyhow!("No mock: {}", path))
         }
         async fn get(&self, path: &str) -> Result<String> {
-            self.responses.get(path).cloned()
+            self.responses
+                .get(path)
+                .cloned()
                 .ok_or_else(|| anyhow::anyhow!("No mock: {}", path))
         }
         async fn delete(&self, path: &str) -> Result<String> {
-            self.responses.get(path).cloned()
+            self.responses
+                .get(path)
+                .cloned()
                 .ok_or_else(|| anyhow::anyhow!("No mock: {}", path))
         }
     }
@@ -682,7 +735,9 @@ mod tests {
 
     fn client() -> TochkaClient {
         let mock = MockHttp::new()
-            .with("/subscriptions", r#"{
+            .with(
+                "/subscriptions",
+                r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
                 "plan_id": "starter",
@@ -692,50 +747,69 @@ mod tests {
                 "next_billing_date": "2026-05-08T22:00:00Z",
                 "current_period_start": "2026-04-08T22:00:00Z",
                 "current_period_end": "2026-05-08T22:00:00Z"
-            }"#)
-            .with("/subscriptions/sub_abc123", r#"{
+            }"#,
+            )
+            .with(
+                "/subscriptions/sub_abc123",
+                r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
                 "plan_id": "starter",
                 "status": "paused",
                 "period": "month",
                 "amount": 29990
-            }"#)
-            .with("/subscriptions/sub_abc123/pause", r#"{
+            }"#,
+            )
+            .with(
+                "/subscriptions/sub_abc123/pause",
+                r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
                 "plan_id": "starter",
                 "status": "paused",
                 "period": "month",
                 "amount": 29990
-            }"#)
-            .with("/subscriptions/sub_abc123/resume", r#"{
+            }"#,
+            )
+            .with(
+                "/subscriptions/sub_abc123/resume",
+                r#"{
                 "subscription_id": "sub_abc123",
                 "customer_id": "acc-1",
                 "plan_id": "starter",
                 "status": "active",
                 "period": "month",
                 "amount": 29990
-            }"#)
-            .with("/acquiring/sbp", r#"{
+            }"#,
+            )
+            .with(
+                "/acquiring/sbp",
+                r#"{
                 "payment_id": "pay_123",
                 "order": "INV-0001",
                 "status": "created",
                 "payment_url": "https://pay.tochka.com/sbp/abc123",
                 "qr_code": "https://qr.nspk.ru/AS1000..."
-            }"#)
-            .with("/acquiring/payment", r#"{
+            }"#,
+            )
+            .with(
+                "/acquiring/payment",
+                r#"{
                 "payment_id": "card_789",
                 "order": "INV-0002",
                 "status": "created",
                 "payment_url": "https://pay.tochka.com/checkout/card_789"
-            }"#)
-            .with("/payments/pay_123", r#"{
+            }"#,
+            )
+            .with(
+                "/payments/pay_123",
+                r#"{
                 "payment_id": "pay_123",
                 "order": "INV-0001",
                 "status": "completed",
                 "amount": 29990
-            }"#);
+            }"#,
+            );
         TochkaClient::with_http(cfg(), Box::new(mock))
     }
 
@@ -756,8 +830,14 @@ mod tests {
 
     #[test]
     fn test_billing_period_parse() {
-        assert_eq!(BillingPeriod::from_str_opt("month"), Some(BillingPeriod::Month));
-        assert_eq!(BillingPeriod::from_str_opt("annual"), Some(BillingPeriod::Year));
+        assert_eq!(
+            BillingPeriod::from_str_opt("month"),
+            Some(BillingPeriod::Month)
+        );
+        assert_eq!(
+            BillingPeriod::from_str_opt("annual"),
+            Some(BillingPeriod::Year)
+        );
         assert_eq!(BillingPeriod::from_str_opt("weekly"), None);
     }
 
@@ -805,7 +885,9 @@ mod tests {
             plan_id: "starter".into(),
             period: BillingPeriod::Month,
             amount: 29990,
-            payment_method: SubscriptionPaymentMethod::Sbp { phone: "+79001234567".into() },
+            payment_method: SubscriptionPaymentMethod::Sbp {
+                phone: "+79001234567".into(),
+            },
             description: "FlowLink Individual".into(),
             start_date: None,
             trial_days: 0,
@@ -834,7 +916,16 @@ mod tests {
     #[tokio::test]
     async fn test_create_sbp_payment() {
         let c = client();
-        let p = c.create_sbp_payment("INV-0001", 299000, "Starter подписка").await.unwrap();
+        let p = c
+            .create_sbp_payment(
+                "INV-0001",
+                299000,
+                "Starter подписка",
+                Some("test@example.com"),
+                None,
+            )
+            .await
+            .unwrap();
         assert_eq!(p.payment_id, "pay_123");
         assert!(p.payment_url.is_some());
     }
@@ -842,7 +933,10 @@ mod tests {
     #[tokio::test]
     async fn test_create_card_payment() {
         let c = client();
-        let p = c.create_card_payment("INV-0002", 299000, "Starter подписка").await.unwrap();
+        let p = c
+            .create_card_payment("INV-0002", 299000, "Starter подписка")
+            .await
+            .unwrap();
         assert_eq!(p.payment_id, "card_789");
         assert!(p.payment_url.is_some());
     }
@@ -876,8 +970,17 @@ mod tests {
 
     #[test]
     fn test_map_payment_status() {
-        assert_eq!(TochkaClient::map_payment_status("completed"), PaymentStatus::Completed);
-        assert_eq!(TochkaClient::map_payment_status("failed"), PaymentStatus::Failed);
-        assert_eq!(TochkaClient::map_payment_status("expired"), PaymentStatus::Expired);
+        assert_eq!(
+            TochkaClient::map_payment_status("completed"),
+            PaymentStatus::Completed
+        );
+        assert_eq!(
+            TochkaClient::map_payment_status("failed"),
+            PaymentStatus::Failed
+        );
+        assert_eq!(
+            TochkaClient::map_payment_status("expired"),
+            PaymentStatus::Expired
+        );
     }
 }

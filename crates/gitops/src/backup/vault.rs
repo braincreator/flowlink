@@ -24,10 +24,7 @@ impl VaultManager {
     /// Create a new vault manager
     pub fn new(config: VaultConfig) -> Self {
         let vault_path = PathBuf::from(&config.path);
-        Self {
-            vault_path,
-            config,
-        }
+        Self { vault_path, config }
     }
 
     /// Initialize the vault directory structure
@@ -48,9 +45,12 @@ impl VaultManager {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&self.vault_path, PermissionsExt::from_mode(self.config.permissions))
-                .await
-                .context("Failed to set vault permissions")?;
+            fs::set_permissions(
+                &self.vault_path,
+                PermissionsExt::from_mode(self.config.permissions),
+            )
+            .await
+            .context("Failed to set vault permissions")?;
         }
 
         info!("Vault initialized successfully");
@@ -65,15 +65,12 @@ impl VaultManager {
     ///
     /// # Returns
     /// Path to the stored backup file in the vault
-    pub async fn store(
-        &self,
-        source_path: &Path,
-        metadata: &BackupManifest,
-    ) -> Result<PathBuf> {
+    pub async fn store(&self, source_path: &Path, metadata: &BackupManifest) -> Result<PathBuf> {
         debug!("Storing backup {} in vault", metadata.id);
 
         // Create unique filename in tmp first
-        let tmp_path = self.vault_path
+        let tmp_path = self
+            .vault_path
             .join("tmp")
             .join(format!("{}.tmp", metadata.id));
 
@@ -85,13 +82,16 @@ impl VaultManager {
 
         // Verify checksum matches (log warning but don't fail)
         if checksum != metadata.checksum {
-            tracing::warn!("Checksum mismatch for backup {}: expected {}, got {}", metadata.id, metadata.checksum, checksum);
+            tracing::warn!(
+                "Checksum mismatch for backup {}: expected {}, got {}",
+                metadata.id,
+                metadata.checksum,
+                checksum
+            );
         }
 
         // Move to final location
-        let final_path = self.vault_path
-            .join("backups")
-            .join(&metadata.id);
+        let final_path = self.vault_path.join("backups").join(&metadata.id);
 
         fs::rename(&tmp_path, &final_path)
             .await
@@ -114,9 +114,7 @@ impl VaultManager {
     pub async fn retrieve(&self, backup_id: &str) -> Result<PathBuf> {
         debug!("Retrieving backup {}", backup_id);
 
-        let backup_path = self.vault_path
-            .join("backups")
-            .join(backup_id);
+        let backup_path = self.vault_path.join("backups").join(backup_id);
 
         // Check if backup exists
         if !fs::try_exists(&backup_path).await? {
@@ -172,11 +170,10 @@ impl VaultManager {
     pub async fn remove(&self, backup_id: &str) -> Result<()> {
         info!("Removing backup {}", backup_id);
 
-        let backup_path = self.vault_path
-            .join("backups")
-            .join(backup_id);
+        let backup_path = self.vault_path.join("backups").join(backup_id);
 
-        let manifest_path = self.vault_path
+        let manifest_path = self
+            .vault_path
             .join("manifests")
             .join(format!("{}.json", backup_id));
 
@@ -285,12 +282,13 @@ impl VaultManager {
 
     /// Write a manifest to the vault
     async fn write_manifest(&self, manifest: &BackupManifest) -> Result<()> {
-        let manifest_path = self.vault_path
+        let manifest_path = self
+            .vault_path
             .join("manifests")
             .join(format!("{}.json", manifest.id));
 
-        let content = serde_json::to_string_pretty(manifest)
-            .context("Failed to serialize manifest")?;
+        let content =
+            serde_json::to_string_pretty(manifest).context("Failed to serialize manifest")?;
 
         fs::write(&manifest_path, &content)
             .await
@@ -302,7 +300,8 @@ impl VaultManager {
 
     /// Read a manifest from the vault
     async fn read_manifest(&self, backup_id: &str) -> Result<BackupManifest> {
-        let manifest_path = self.vault_path
+        let manifest_path = self
+            .vault_path
             .join("manifests")
             .join(format!("{}.json", backup_id));
 
@@ -310,8 +309,8 @@ impl VaultManager {
             .await
             .context("Failed to read manifest file")?;
 
-        let manifest: BackupManifest = serde_json::from_str(&content)
-            .context("Failed to parse manifest")?;
+        let manifest: BackupManifest =
+            serde_json::from_str(&content).context("Failed to parse manifest")?;
 
         Ok(manifest)
     }
@@ -355,9 +354,7 @@ mod tests {
 
         // Create a test file
         let test_file = temp_dir.path().join("test.txt");
-        tokio::fs::write(&test_file, b"test content")
-            .await
-            .unwrap();
+        tokio::fs::write(&test_file, b"test content").await.unwrap();
 
         let manifest = BackupManifest {
             id: "test-backup-1".to_string(),
@@ -371,7 +368,8 @@ mod tests {
                 include_hashes: true,
             },
             size_bytes: 12,
-            checksum: "6ae8a75555209fd6c44157c0aed8016e763ff435a19cf186f76863140143ff72".to_string(),
+            checksum: "6ae8a75555209fd6c44157c0aed8016e763ff435a19cf186f76863140143ff72"
+                .to_string(),
             files_count: 1,
             databases: vec![],
             containers: vec![],

@@ -15,14 +15,15 @@
 //! devices          -- paired devices
 //! ```
 
-pub mod pool;
 pub mod accounts;
-pub mod usage;
-pub mod invoices;
 pub mod audit;
-pub mod subscriptions;
+pub mod email_verification;
+pub mod invoices;
+pub mod migrations;
 pub mod orders;
 pub mod plans;
-pub mod migrations;
+pub mod pool;
+pub mod subscriptions;
+pub mod usage;
 
 pub use pool::DbPool;

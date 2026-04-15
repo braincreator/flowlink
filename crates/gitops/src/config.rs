@@ -6,9 +6,17 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub enum ConfigError {
     /// A file path is empty or cannot be created.
-    InvalidPath { field: String, path: String, reason: String },
+    InvalidPath {
+        field: String,
+        path: String,
+        reason: String,
+    },
     /// A numeric or enum value is out of the acceptable range.
-    InvalidValue { field: String, value: String, reason: String },
+    InvalidValue {
+        field: String,
+        value: String,
+        reason: String,
+    },
     /// A required field is missing or empty.
     MissingField { field: String },
     /// Two or more settings conflict with each other.
@@ -20,10 +28,18 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::InvalidPath { field, path, reason } => {
+            ConfigError::InvalidPath {
+                field,
+                path,
+                reason,
+            } => {
                 write!(f, "invalid path for '{}': '{}' ({})", field, path, reason)
             }
-            ConfigError::InvalidValue { field, value, reason } => {
+            ConfigError::InvalidValue {
+                field,
+                value,
+                reason,
+            } => {
                 write!(f, "invalid value for '{}': '{}' ({})", field, value, reason)
             }
             ConfigError::MissingField { field } => {
@@ -33,7 +49,12 @@ impl fmt::Display for ConfigError {
                 write!(f, "conflicting settings: {}", message)
             }
             ConfigError::Multiple(errors) => {
-                write!(f, "multiple validation errors ({}):\n  - {}", errors.len(), errors.join("\n  - "))
+                write!(
+                    f,
+                    "multiple validation errors ({}):\n  - {}",
+                    errors.len(),
+                    errors.join("\n  - ")
+                )
             }
         }
     }
@@ -48,7 +69,7 @@ impl std::error::Error for ConfigError {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GitOpsConfig {
     pub enabled: bool,
-    
+
     pub git: GitConfig,
     pub state: StateConfig,
     pub backup: BackupConfig,
@@ -135,8 +156,13 @@ impl Default for GitConfig {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum SyncStrategy {
     Realtime,
-    Batched { interval_secs: u64, max_batch_size: usize },
-    Scheduled { cron: String },
+    Batched {
+        interval_secs: u64,
+        max_batch_size: usize,
+    },
+    Scheduled {
+        cron: String,
+    },
     Manual,
 }
 
@@ -247,48 +273,72 @@ pub struct RateLimitConfig {
 impl Default for RateLimitConfig {
     fn default() -> Self {
         let mut per_tool_limits = std::collections::HashMap::new();
-        per_tool_limits.insert("rm".to_string(), ToolRateLimit {
-            max_calls: 10,
-            window_seconds: 60,
-            on_exceed: ExceedAction::Deny,
-        });
-        per_tool_limits.insert("docker".to_string(), ToolRateLimit {
-            max_calls: 20,
-            window_seconds: 60,
-            on_exceed: ExceedAction::Escalate,
-        });
-        per_tool_limits.insert("apt".to_string(), ToolRateLimit {
-            max_calls: 5,
-            window_seconds: 300,
-            on_exceed: ExceedAction::Escalate,
-        });
-        per_tool_limits.insert("systemctl".to_string(), ToolRateLimit {
-            max_calls: 15,
-            window_seconds: 60,
-            on_exceed: ExceedAction::Escalate,
-        });
-        per_tool_limits.insert("cat".to_string(), ToolRateLimit {
-            max_calls: 200,
-            window_seconds: 60,
-            on_exceed: ExceedAction::ReadOnly,
-        });
+        per_tool_limits.insert(
+            "rm".to_string(),
+            ToolRateLimit {
+                max_calls: 10,
+                window_seconds: 60,
+                on_exceed: ExceedAction::Deny,
+            },
+        );
+        per_tool_limits.insert(
+            "docker".to_string(),
+            ToolRateLimit {
+                max_calls: 20,
+                window_seconds: 60,
+                on_exceed: ExceedAction::Escalate,
+            },
+        );
+        per_tool_limits.insert(
+            "apt".to_string(),
+            ToolRateLimit {
+                max_calls: 5,
+                window_seconds: 300,
+                on_exceed: ExceedAction::Escalate,
+            },
+        );
+        per_tool_limits.insert(
+            "systemctl".to_string(),
+            ToolRateLimit {
+                max_calls: 15,
+                window_seconds: 60,
+                on_exceed: ExceedAction::Escalate,
+            },
+        );
+        per_tool_limits.insert(
+            "cat".to_string(),
+            ToolRateLimit {
+                max_calls: 200,
+                window_seconds: 60,
+                on_exceed: ExceedAction::ReadOnly,
+            },
+        );
 
         let mut per_tier_defaults = std::collections::HashMap::new();
-        per_tier_defaults.insert(ActionTier::ReadOnly, ToolRateLimit {
-            max_calls: 200,
-            window_seconds: 60,
-            on_exceed: ExceedAction::ReadOnly,
-        });
-        per_tier_defaults.insert(ActionTier::Destructive, ToolRateLimit {
-            max_calls: 30,
-            window_seconds: 60,
-            on_exceed: ExceedAction::Deny,
-        });
-        per_tier_defaults.insert(ActionTier::Network, ToolRateLimit {
-            max_calls: 10,
-            window_seconds: 60,
-            on_exceed: ExceedAction::Escalate,
-        });
+        per_tier_defaults.insert(
+            ActionTier::ReadOnly,
+            ToolRateLimit {
+                max_calls: 200,
+                window_seconds: 60,
+                on_exceed: ExceedAction::ReadOnly,
+            },
+        );
+        per_tier_defaults.insert(
+            ActionTier::Destructive,
+            ToolRateLimit {
+                max_calls: 30,
+                window_seconds: 60,
+                on_exceed: ExceedAction::Deny,
+            },
+        );
+        per_tier_defaults.insert(
+            ActionTier::Network,
+            ToolRateLimit {
+                max_calls: 10,
+                window_seconds: 60,
+                on_exceed: ExceedAction::Escalate,
+            },
+        );
 
         Self {
             enabled: true,
@@ -379,7 +429,10 @@ impl Default for HealthConfig {
             auto_restore: true,
             max_auto_restores_per_hour: 3,
             checks: vec![
-                HealthCheck::DiskUsage { path: "/".to_string(), max_percent: 90 },
+                HealthCheck::DiskUsage {
+                    path: "/".to_string(),
+                    max_percent: 90,
+                },
                 HealthCheck::MemoryUsage { max_percent: 95 },
             ],
         }
@@ -457,11 +510,11 @@ impl GitOpsConfig {
         self.vault.path = shellexpand::tilde(&self.vault.path).to_string();
         self.audit.storage_path = shellexpand::tilde(&self.audit.storage_path).to_string();
         self.drift.rules_path = shellexpand::tilde(&self.drift.rules_path).to_string();
-        
+
         for path in &mut self.state.tracked_paths {
             *path = shellexpand::tilde(path).to_string();
         }
-        
+
         Ok(())
     }
 
@@ -520,16 +573,12 @@ impl GitOpsConfig {
         if let Some(ref pipeline) = self.pipeline {
             if let Some(max_concurrent) = pipeline.max_concurrent_commands {
                 if max_concurrent == 0 {
-                    errors.push(
-                        "pipeline.max_concurrent_commands must be > 0".into()
-                    );
+                    errors.push("pipeline.max_concurrent_commands must be > 0".into());
                 }
             }
             if let Some(timeout) = pipeline.command_timeout_secs {
                 if timeout == 0 {
-                    errors.push(
-                        "pipeline.command_timeout_secs must be > 0".into()
-                    );
+                    errors.push("pipeline.command_timeout_secs must be > 0".into());
                 }
             }
         }
@@ -549,30 +598,33 @@ impl GitOpsConfig {
         // --- Conflicting settings ---
         match &self.git.sync_strategy {
             SyncStrategy::Realtime => {
-                if self.git.remote_url.as_ref().map_or(true, |u| u.trim().is_empty()) {
+                if self
+                    .git
+                    .remote_url
+                    .as_ref()
+                    .map_or(true, |u| u.trim().is_empty())
+                {
                     errors.push(
                         "sync_strategy is Realtime but git.remote_url is not set; \
-                         realtime sync requires a remote to push/pull from".into()
+                         realtime sync requires a remote to push/pull from"
+                            .into(),
                     );
                 }
             }
             SyncStrategy::Scheduled { cron } => {
                 if cron.trim().is_empty() {
-                    errors.push(
-                        "sync_strategy is Scheduled but cron expression is empty".into()
-                    );
+                    errors.push("sync_strategy is Scheduled but cron expression is empty".into());
                 }
             }
-            SyncStrategy::Batched { interval_secs, max_batch_size } => {
+            SyncStrategy::Batched {
+                interval_secs,
+                max_batch_size,
+            } => {
                 if *interval_secs == 0 {
-                    errors.push(
-                        "sync_strategy Batched interval_secs must be > 0".into()
-                    );
+                    errors.push("sync_strategy Batched interval_secs must be > 0".into());
                 }
                 if *max_batch_size == 0 {
-                    errors.push(
-                        "sync_strategy Batched max_batch_size must be > 0".into()
-                    );
+                    errors.push("sync_strategy Batched max_batch_size must be > 0".into());
                 }
             }
             SyncStrategy::Manual => {}
@@ -615,7 +667,7 @@ mod tests {
         let config = GitOpsConfig::default();
         let yaml = serde_yaml::to_string(&config).unwrap();
         let deserialized: GitOpsConfig = serde_yaml::from_str(&yaml).unwrap();
-        
+
         assert_eq!(config.enabled, deserialized.enabled);
         assert_eq!(config.git.branch, deserialized.git.branch);
         assert_eq!(config.tempo.enabled, deserialized.tempo.enabled);
@@ -626,7 +678,7 @@ mod tests {
         let mut config = GitOpsConfig::default();
         config.git.repo_path = "~/test/repo".to_string();
         config.expand_paths().unwrap();
-        
+
         assert!(!config.git.repo_path.starts_with('~'));
     }
 
@@ -669,7 +721,9 @@ mod tests {
         let mut config = GitOpsConfig::default();
         config.git.repo_path = String::new();
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("repo_path") && e.contains("empty")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("repo_path") && e.contains("empty")));
     }
 
     #[test]
@@ -677,7 +731,9 @@ mod tests {
         let mut config = GitOpsConfig::default();
         config.git.branch = String::new();
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("branch") && e.contains("empty")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("branch") && e.contains("empty")));
     }
 
     #[test]
@@ -685,7 +741,9 @@ mod tests {
         let mut config = GitOpsConfig::default();
         config.vault.path = String::new();
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("vault.path") && e.contains("empty")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("vault.path") && e.contains("empty")));
     }
 
     #[test]
@@ -694,7 +752,9 @@ mod tests {
         config.git.sync_strategy = SyncStrategy::Realtime;
         config.git.remote_url = None;
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("Realtime") && e.contains("remote_url")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("Realtime") && e.contains("remote_url")));
     }
 
     #[test]
@@ -703,7 +763,9 @@ mod tests {
         config.git.sync_strategy = SyncStrategy::Realtime;
         config.git.remote_url = Some(String::new());
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("Realtime") && e.contains("remote_url")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("Realtime") && e.contains("remote_url")));
     }
 
     #[test]
@@ -717,9 +779,13 @@ mod tests {
     #[test]
     fn test_validate_scheduled_with_empty_cron() {
         let mut config = GitOpsConfig::default();
-        config.git.sync_strategy = SyncStrategy::Scheduled { cron: String::new() };
+        config.git.sync_strategy = SyncStrategy::Scheduled {
+            cron: String::new(),
+        };
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("Scheduled") && e.contains("cron")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("Scheduled") && e.contains("cron")));
     }
 
     #[test]
@@ -769,7 +835,9 @@ mod tests {
             command_timeout_secs: None,
         });
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("max_concurrent_commands") && e.contains("> 0")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("max_concurrent_commands") && e.contains("> 0")));
     }
 
     #[test]
@@ -780,7 +848,9 @@ mod tests {
             command_timeout_secs: Some(0),
         });
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("command_timeout_secs") && e.contains("> 0")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("command_timeout_secs") && e.contains("> 0")));
     }
 
     #[test]
@@ -800,7 +870,9 @@ mod tests {
             state_collect_interval_secs: Some(30),
         });
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("state_collect_interval_secs") && e.contains(">= 60")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("state_collect_interval_secs") && e.contains(">= 60")));
     }
 
     #[test]
@@ -825,7 +897,11 @@ mod tests {
         config.git.branch = String::new();
         config.vault.path = String::new();
         let errs = config.validate().unwrap_err();
-        assert!(errs.len() >= 3, "expected at least 3 errors, got {}", errs.len());
+        assert!(
+            errs.len() >= 3,
+            "expected at least 3 errors, got {}",
+            errs.len()
+        );
     }
 
     #[test]
@@ -914,6 +990,8 @@ mod tests {
         let mut config = GitOpsConfig::default();
         config.git.repo_path = "   ".to_string();
         let errs = config.validate().unwrap_err();
-        assert!(errs.iter().any(|e| e.contains("repo_path") && e.contains("empty")));
+        assert!(errs
+            .iter()
+            .any(|e| e.contains("repo_path") && e.contains("empty")));
     }
 }

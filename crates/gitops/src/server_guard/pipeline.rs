@@ -51,9 +51,15 @@ pub struct PipelineConfig {
     pub auto_fix_rules: Vec<AutoFixPattern>,
 }
 
-fn default_debounce_secs() -> u64 { 5 }
-fn default_self_change_cooldown() -> u64 { 10 }
-fn default_max_events_per_sec() -> u32 { 100 }
+fn default_debounce_secs() -> u64 {
+    5
+}
+fn default_self_change_cooldown() -> u64 {
+    10
+}
+fn default_max_events_per_sec() -> u32 {
+    100
+}
 fn default_dangerous_paths() -> Vec<String> {
     vec![
         "/root/.ssh/authorized_keys".into(),
@@ -97,7 +103,9 @@ pub struct AutoFixPattern {
     pub notify: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 // ---------------------------------------------------------------------------
 // Debouncer
@@ -193,7 +201,8 @@ impl SelfChangeFilter {
     /// Clean up expired entries
     fn cleanup(&mut self) {
         let now = tokio::time::Instant::now();
-        self.changes.retain(|_, instant| now.duration_since(*instant) < self.cooldown);
+        self.changes
+            .retain(|_, instant| now.duration_since(*instant) < self.cooldown);
     }
 }
 
@@ -209,29 +218,62 @@ struct Classifier {
 
 impl Classifier {
     fn new(safe_paths: Vec<String>, dangerous_paths: Vec<String>) -> Self {
-        Self { safe_paths, dangerous_paths }
+        Self {
+            safe_paths,
+            dangerous_paths,
+        }
     }
 
     /// Classify a guard event — sets severity and action tier
     fn classify(&self, event: &mut GuardEvent) {
         // Take detail out temporarily to avoid borrow conflicts
-        let detail = std::mem::replace(&mut event.detail, EventDetail::StateDrift {
-            component: String::new(),
-            description: String::new(),
-            diff: std::collections::HashMap::new(),
-        });
+        let detail = std::mem::replace(
+            &mut event.detail,
+            EventDetail::StateDrift {
+                component: String::new(),
+                description: String::new(),
+                diff: std::collections::HashMap::new(),
+            },
+        );
 
         match &detail {
-            EventDetail::ProcessCaught { pid, uid, comm, args, already_frozen } => {
+            EventDetail::ProcessCaught {
+                pid,
+                uid,
+                comm,
+                args,
+                already_frozen,
+            } => {
                 self.classify_process(event, *pid, *uid, comm, args, *already_frozen);
             }
-            EventDetail::FileChange { path, kind, current_hash, baseline_hash } => {
-                self.classify_file(event, path, kind, current_hash.is_some(), baseline_hash.is_some());
+            EventDetail::FileChange {
+                path,
+                kind,
+                current_hash,
+                baseline_hash,
+            } => {
+                self.classify_file(
+                    event,
+                    path,
+                    kind,
+                    current_hash.is_some(),
+                    baseline_hash.is_some(),
+                );
             }
-            EventDetail::DockerEvent { action, container_name, .. } => {
-                self.classify_docker(event, action, container_name.as_deref().unwrap_or("unknown"));
+            EventDetail::DockerEvent {
+                action,
+                container_name,
+                ..
+            } => {
+                self.classify_docker(
+                    event,
+                    action,
+                    container_name.as_deref().unwrap_or("unknown"),
+                );
             }
-            EventDetail::CanaryTriggered { accessor_uid, risk, .. } => {
+            EventDetail::CanaryTriggered {
+                accessor_uid, risk, ..
+            } => {
                 self.classify_canary(event, *accessor_uid, risk);
             }
             EventDetail::StateDrift { component, .. } => {
@@ -243,9 +285,20 @@ impl Classifier {
         event.detail = detail;
     }
 
-    fn classify_process(&self, event: &mut GuardEvent, _pid: u32, uid: u32, comm: &str, _args: &str, already_frozen: bool) {
+    fn classify_process(
+        &self,
+        event: &mut GuardEvent,
+        _pid: u32,
+        uid: u32,
+        comm: &str,
+        _args: &str,
+        already_frozen: bool,
+    ) {
         // Root running dangerous commands = Critical
-        let dangerous_binaries = ["rm", "shred", "mkfs", "dd", "chmod", "chown", "iptables", "useradd", "userdel", "passwd"];
+        let dangerous_binaries = [
+            "rm", "shred", "mkfs", "dd", "chmod", "chown", "iptables", "useradd", "userdel",
+            "passwd",
+        ];
 
         let is_dangerous = dangerous_binaries.iter().any(|b| *b == comm);
         let is_root = uid == 0;
@@ -264,10 +317,21 @@ impl Classifier {
 
         // Non-root, non-dangerous: info
         event.severity = Severity::Low;
-        event.action = if already_frozen { ActionTier::AutoFix } else { ActionTier::Silent };
+        event.action = if already_frozen {
+            ActionTier::AutoFix
+        } else {
+            ActionTier::Silent
+        };
     }
 
-    fn classify_file(&self, event: &mut GuardEvent, path: &PathBuf, kind: &str, exists: bool, has_baseline: bool) {
+    fn classify_file(
+        &self,
+        event: &mut GuardEvent,
+        path: &PathBuf,
+        kind: &str,
+        exists: bool,
+        has_baseline: bool,
+    ) {
         let path_str = path.to_string_lossy();
 
         // Check dangerous paths
@@ -296,7 +360,9 @@ impl Classifier {
         }
 
         // Known config file modified
-        let is_config = path_str.contains("/etc/") || path_str.contains("/nginx/") || path_str.contains("/docker/");
+        let is_config = path_str.contains("/etc/")
+            || path_str.contains("/nginx/")
+            || path_str.contains("/docker/");
         if is_config && kind == "modify" {
             event.severity = Severity::Medium;
             event.action = ActionTier::AutoFix;
@@ -411,13 +477,9 @@ impl Pipeline {
         alert_callback: Arc<dyn Fn(GuardAlert) + Send + Sync>,
     ) -> Self {
         let debouncer = Debouncer::new(Duration::from_secs(config.debounce_secs));
-        let self_change_filter = SelfChangeFilter::new(
-            Duration::from_secs(config.self_change_cooldown_secs),
-        );
-        let classifier = Classifier::new(
-            config.safe_paths.clone(),
-            config.dangerous_paths.clone(),
-        );
+        let self_change_filter =
+            SelfChangeFilter::new(Duration::from_secs(config.self_change_cooldown_secs));
+        let classifier = Classifier::new(config.safe_paths.clone(), config.dangerous_paths.clone());
 
         Self {
             config,
@@ -436,8 +498,13 @@ impl Pipeline {
     pub async fn process(&mut self, event: GuardEvent) -> PipelineOutcome {
         // Step 0: Killswitch check
         if self.killswitch.is_emergency() {
-            debug!("Pipeline: emergency mode, dropping event: {}", event.summary());
-            return PipelineOutcome::Dropped { reason: "emergency mode".into() };
+            debug!(
+                "Pipeline: emergency mode, dropping event: {}",
+                event.summary()
+            );
+            return PipelineOutcome::Dropped {
+                reason: "emergency mode".into(),
+            };
         }
 
         // Step 1: Debounce
@@ -457,7 +524,9 @@ impl Pipeline {
             let path_str = path.to_string_lossy().to_string();
             if self.self_change_filter.is_self_change(&path_str) {
                 debug!("Pipeline: self-change ignored: {}", path_str);
-                return PipelineOutcome::Dropped { reason: "self-change".into() };
+                return PipelineOutcome::Dropped {
+                    reason: "self-change".into(),
+                };
             }
         }
 
@@ -473,7 +542,9 @@ impl Pipeline {
         // Step 4: Killswitch check for non-emergency
         if self.killswitch.is_paused() && event.action != ActionTier::Escalate {
             debug!("Pipeline: paused, dropping non-escalate event");
-            return PipelineOutcome::Dropped { reason: "paused".into() };
+            return PipelineOutcome::Dropped {
+                reason: "paused".into(),
+            };
         }
 
         // Step 5: Act
@@ -482,12 +553,8 @@ impl Pipeline {
                 debug!("Pipeline: silent — logging only");
                 PipelineOutcome::Logged
             }
-            ActionTier::AutoFix => {
-                self.handle_auto_fix(event).await
-            }
-            ActionTier::Escalate => {
-                self.handle_escalate(event).await
-            }
+            ActionTier::AutoFix => self.handle_auto_fix(event).await,
+            ActionTier::Escalate => self.handle_escalate(event).await,
         };
 
         // Step 6: Cleanup expired self-change entries
@@ -523,7 +590,8 @@ impl Pipeline {
 
                     // Mark path as self-change to avoid re-trigger
                     if let EventDetail::FileChange { path, .. } = &event.detail {
-                        self.self_change_filter.mark(path.to_string_lossy().to_string());
+                        self.self_change_filter
+                            .mark(path.to_string_lossy().to_string());
                     }
 
                     if rule.notify {
@@ -549,7 +617,10 @@ impl Pipeline {
         }
 
         // No matching auto-fix rule — just log
-        info!("Pipeline: no auto-fix rule for {}, logging", event.summary());
+        info!(
+            "Pipeline: no auto-fix rule for {}, logging",
+            event.summary()
+        );
         PipelineOutcome::Logged
     }
 
@@ -558,13 +629,21 @@ impl Pipeline {
         warn!("🚨 Pipeline: ESCALATE — {}", event.summary());
 
         // Freeze dangerous processes
-        if let EventDetail::ProcessCaught { pid, already_frozen, .. } = &event.detail {
+        if let EventDetail::ProcessCaught {
+            pid,
+            already_frozen,
+            ..
+        } = &event.detail
+        {
             if !already_frozen {
                 let result = self.command_runner.freeze_process(*pid).await;
                 if result.success {
                     info!("🚨 Pipeline: froze process pid={}", pid);
                 } else {
-                    warn!("🚨 Pipeline: failed to freeze pid={} — {}", pid, result.stderr);
+                    warn!(
+                        "🚨 Pipeline: failed to freeze pid={} — {}",
+                        pid, result.stderr
+                    );
                 }
             }
         }
@@ -575,7 +654,9 @@ impl Pipeline {
                 self.killswitch.emergency(&event.summary());
             }
             Severity::High => {
-                self.killswitch.pause_with_timeout(&event.summary(), Duration::from_secs(300)); // 5 min auto-resume
+                self.killswitch
+                    .pause_with_timeout(&event.summary(), Duration::from_secs(300));
+                // 5 min auto-resume
             }
             _ => {
                 self.killswitch.pause(&event.summary());
@@ -652,7 +733,10 @@ pub enum PipelineOutcome {
     /// Event was auto-fixed
     AutoFixed { command: String, success: bool },
     /// Event was escalated to human
-    Escalated { severity: Severity, killswitch_mode: super::guard_mode::GuardMode },
+    Escalated {
+        severity: Severity,
+        killswitch_mode: super::guard_mode::GuardMode,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -732,14 +816,21 @@ mod tests {
 
         let outcome = pipeline.process(event).await;
         // No auto-fix rule configured, so just logged
-        assert!(matches!(outcome, PipelineOutcome::Logged | PipelineOutcome::Debounced));
+        assert!(matches!(
+            outcome,
+            PipelineOutcome::Logged | PipelineOutcome::Debounced
+        ));
     }
 
     #[tokio::test]
     async fn test_canary_non_root() {
         let mut pipeline = test_pipeline();
         let event = GuardEvent::canary_triggered(
-            "/etc/shadow.bak".into(), "hacker".into(), 1001, "read".into(), "high".into(),
+            "/etc/shadow.bak".into(),
+            "hacker".into(),
+            1001,
+            "read".into(),
+            "high".into(),
         );
 
         let outcome = pipeline.process(event).await;
@@ -778,7 +869,9 @@ mod tests {
         let mut pipeline = Pipeline::new(config, ks, cr, cb);
 
         // Mark a path as self-change
-        pipeline.self_change_filter.mark("/etc/nginx/nginx.conf".into());
+        pipeline
+            .self_change_filter
+            .mark("/etc/nginx/nginx.conf".into());
 
         let event = GuardEvent::file_change(
             PathBuf::from("/etc/nginx/nginx.conf"),

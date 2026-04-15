@@ -1,10 +1,10 @@
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use flowlink_relay::pool::{AgentPool, AgentInfo};
-use flowlink_relay::auth::AuthManager;
-use flowlink_relay::ratelimit::RateLimiter;
-use flowlink_relay::eventbus::EventBus;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use flowlink_relay::approval::ApprovalQueue;
+use flowlink_relay::auth::AuthManager;
 use flowlink_relay::devices::DeviceManager;
+use flowlink_relay::eventbus::EventBus;
+use flowlink_relay::pool::{AgentInfo, AgentPool};
+use flowlink_relay::ratelimit::RateLimiter;
 use std::sync::Arc;
 use std::thread;
 
@@ -31,9 +31,7 @@ fn bench_pool_register(c: &mut Criterion) {
 fn bench_pool_lookup(c: &mut Criterion) {
     let pool = AgentPool::new();
     pool.register(test_agent("bench-agent"));
-    c.bench_function("relay/pool_lookup", |b| {
-        b.iter(|| pool.get("bench-agent"))
-    });
+    c.bench_function("relay/pool_lookup", |b| b.iter(|| pool.get("bench-agent")));
 }
 
 fn bench_eventbus(c: &mut Criterion) {
@@ -43,7 +41,9 @@ fn bench_eventbus(c: &mut Criterion) {
         let bus = EventBus::new();
         let _rx = bus.subscribe("bench-ch");
         b.iter(|| {
-            for _ in 0..1000 { bus.publish("bench-ch", "benchmark-event"); }
+            for _ in 0..1000 {
+                bus.publish("bench-ch", "benchmark-event");
+            }
         })
     });
 
@@ -51,7 +51,9 @@ fn bench_eventbus(c: &mut Criterion) {
         let bus = EventBus::new();
         let _rx = bus.subscribe("bench-ch");
         b.iter(|| {
-            for _ in 0..10000 { bus.publish("bench-ch", "benchmark-event"); }
+            for _ in 0..10000 {
+                bus.publish("bench-ch", "benchmark-event");
+            }
         })
     });
 
@@ -63,14 +65,20 @@ fn bench_approval_queue(c: &mut Criterion) {
         let queue = ApprovalQueue::new();
         b.iter(|| {
             let (tx, mut rx) = tokio::sync::oneshot::channel();
-            queue.enqueue(flowlink_relay::approval::ApprovalRequest {
-                id: uuid::Uuid::new_v4().to_string(),
-                agent_id: "bench-agent".into(),
-                command: "ls /tmp".into(),
-                risk_level: "low".into(),
-                created_at: 1000,
-            }, tx);
-            queue.resolve("nonexistent", flowlink_relay::approval::ApprovalDecision::Approved);
+            queue.enqueue(
+                flowlink_relay::approval::ApprovalRequest {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    agent_id: "bench-agent".into(),
+                    command: "ls /tmp".into(),
+                    risk_level: "low".into(),
+                    created_at: 1000,
+                },
+                tx,
+            );
+            queue.resolve(
+                "nonexistent",
+                flowlink_relay::approval::ApprovalDecision::Approved,
+            );
             let _ = rx.try_recv();
         })
     });
@@ -80,7 +88,9 @@ fn bench_ratelimit(c: &mut Criterion) {
     c.bench_function("relay/ratelimit_1000_requests", |b| {
         let rl = RateLimiter::new(1000, 1);
         b.iter(|| {
-            for _ in 0..1000 { rl.allow("bench-key"); }
+            for _ in 0..1000 {
+                rl.allow("bench-key");
+            }
         })
     });
 }
@@ -108,5 +118,14 @@ fn bench_device_pairing(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_pool_register, bench_pool_lookup, bench_eventbus, bench_approval_queue, bench_ratelimit, bench_mcp_parsing, bench_device_pairing);
+criterion_group!(
+    benches,
+    bench_pool_register,
+    bench_pool_lookup,
+    bench_eventbus,
+    bench_approval_queue,
+    bench_ratelimit,
+    bench_mcp_parsing,
+    bench_device_pairing
+);
 criterion_main!(benches);

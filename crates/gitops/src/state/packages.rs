@@ -42,11 +42,15 @@ impl PackageCollector {
     }
 
     fn detect_package_manager() -> PackageManager {
-        if std::path::Path::new("/usr/bin/dpkg").exists() || std::path::Path::new("/usr/bin/apt").exists() {
+        if std::path::Path::new("/usr/bin/dpkg").exists()
+            || std::path::Path::new("/usr/bin/apt").exists()
+        {
             PackageManager::Dpkg
         } else if std::path::Path::new("/usr/bin/rpm").exists() {
             PackageManager::Rpm
-        } else if std::path::Path::new("/sbin/apk").exists() || std::path::Path::new("/usr/sbin/apk").exists() {
+        } else if std::path::Path::new("/sbin/apk").exists()
+            || std::path::Path::new("/usr/sbin/apk").exists()
+        {
             PackageManager::Apk
         } else {
             PackageManager::Unknown
@@ -93,7 +97,11 @@ impl PackageCollector {
 
     async fn collect_rpm(&self) -> Result<Vec<PackageInfo>> {
         let output = Command::new("rpm")
-            .args(["-qa", "--queryformat", "%{NAME}\t%{VERSION}-%{RELEASE}\t%{ARCH}\n"])
+            .args([
+                "-qa",
+                "--queryformat",
+                "%{NAME}\t%{VERSION}-%{RELEASE}\t%{ARCH}\n",
+            ])
             .stdout(Stdio::piped())
             .output()
             .await
@@ -157,7 +165,7 @@ impl PackageCollector {
     fn compute_checksum(packages: &[PackageInfo]) -> String {
         let mut sorted: Vec<_> = packages.iter().collect();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
-        
+
         let mut data = Vec::new();
         for pkg in sorted {
             data.extend_from_slice(pkg.name.as_bytes());
@@ -357,10 +365,7 @@ impl PackageCollector {
         let mut failed = Vec::new();
 
         for name in package_names {
-            let result = Command::new("apk")
-                .args(["del", name])
-                .output()
-                .await;
+            let result = Command::new("apk").args(["del", name]).output().await;
 
             match result {
                 Ok(output) if output.status.success() => {
@@ -446,7 +451,7 @@ impl StateCollector for PackageCollector {
             .iter()
             .map(|p| (p.name.clone(), p))
             .collect();
-        
+
         let desired_map: HashMap<String, &PackageInfo> = desired_state
             .packages
             .iter()
@@ -479,11 +484,9 @@ impl StateCollector for PackageCollector {
                 PackageManager::Dpkg => self.install_packages_dpkg(&to_install).await?,
                 PackageManager::Rpm => self.install_packages_rpm(&to_install).await?,
                 PackageManager::Apk => self.install_packages_apk(&to_install).await?,
-                PackageManager::Unknown => {
-                    ApplyResult::Failed {
-                        reason: "No supported package manager".to_string(),
-                    }
-                }
+                PackageManager::Unknown => ApplyResult::Failed {
+                    reason: "No supported package manager".to_string(),
+                },
             };
             results.push(install_result);
         }
@@ -493,11 +496,9 @@ impl StateCollector for PackageCollector {
                 PackageManager::Dpkg => self.remove_packages_dpkg(&to_remove).await?,
                 PackageManager::Rpm => self.remove_packages_rpm(&to_remove).await?,
                 PackageManager::Apk => self.remove_packages_apk(&to_remove).await?,
-                PackageManager::Unknown => {
-                    ApplyResult::Failed {
-                        reason: "No supported package manager".to_string(),
-                    }
-                }
+                PackageManager::Unknown => ApplyResult::Failed {
+                    reason: "No supported package manager".to_string(),
+                },
             };
             results.push(remove_result);
         }
@@ -507,7 +508,9 @@ impl StateCollector for PackageCollector {
         } else if results.iter().all(|r| matches!(r, ApplyResult::Success)) {
             Ok(ApplyResult::Success)
         } else {
-            let all_failed = results.iter().all(|r| matches!(r, ApplyResult::Failed { .. }));
+            let all_failed = results
+                .iter()
+                .all(|r| matches!(r, ApplyResult::Failed { .. }));
             if all_failed {
                 Ok(ApplyResult::Failed {
                     reason: "All operations failed".to_string(),
@@ -522,12 +525,14 @@ impl StateCollector for PackageCollector {
                     })
                     .flatten()
                     .collect();
-                
+
                 let failed = results
                     .iter()
                     .filter_map(|r| match r {
                         ApplyResult::PartialSuccess { failed, .. } => Some(failed.clone()),
-                        ApplyResult::Failed { reason } => Some(vec![("all".to_string(), reason.clone())]),
+                        ApplyResult::Failed { reason } => {
+                            Some(vec![("all".to_string(), reason.clone())])
+                        }
                         _ => None,
                     })
                     .flatten()
@@ -551,7 +556,7 @@ impl StateCollector for PackageCollector {
             .iter()
             .map(|p| (p.name.clone(), p))
             .collect();
-        
+
         let desired_map: HashMap<String, &PackageInfo> = desired_state
             .packages
             .iter()
@@ -562,7 +567,9 @@ impl StateCollector for PackageCollector {
 
         for (name, pkg) in &desired_map {
             if let Some(current_pkg) = current_map.get(name) {
-                if current_pkg.version != pkg.version || current_pkg.architecture != pkg.architecture {
+                if current_pkg.version != pkg.version
+                    || current_pkg.architecture != pkg.architecture
+                {
                     drifts.push(SemanticDrift {
                         path: format!("packages/{}", name),
                         expected: serde_json::to_value(pkg)?,
@@ -606,10 +613,10 @@ mod tests {
             version: "1.18.0".to_string(),
             architecture: "amd64".to_string(),
         };
-        
+
         let json = serde_json::to_string(&pkg).unwrap();
         let deserialized: PackageInfo = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(pkg.name, deserialized.name);
         assert_eq!(pkg.version, deserialized.version);
     }
@@ -631,7 +638,7 @@ mod tests {
 
         let checksum1 = PackageCollector::compute_checksum(&packages);
         let checksum2 = PackageCollector::compute_checksum(&packages);
-        
+
         assert_eq!(checksum1, checksum2);
     }
 
@@ -665,7 +672,7 @@ mod tests {
 
         let checksum1 = PackageCollector::compute_checksum(&packages1);
         let checksum2 = PackageCollector::compute_checksum(&packages2);
-        
+
         assert_eq!(checksum1, checksum2);
     }
 

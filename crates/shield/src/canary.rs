@@ -2,9 +2,9 @@
 // Honeypot file system: detect unauthorized access to decoy files
 #![allow(dead_code)]
 
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde::{Serialize, Deserialize};
 
 use flowlink_core::channels::{AlertThreshold, CanaryToken};
 
@@ -20,7 +20,10 @@ pub struct CanaryWatcher {
 impl CanaryWatcher {
     pub fn new(tokens: Vec<CanaryToken>) -> Self {
         let watched_paths = tokens.iter().map(|t| PathBuf::from(&t.path)).collect();
-        Self { tokens, watched_paths }
+        Self {
+            tokens,
+            watched_paths,
+        }
     }
 
     /// Create decoy honeypot files on disk
@@ -28,7 +31,9 @@ impl CanaryWatcher {
         let mut created = Vec::new();
         for token in &self.tokens {
             let path = PathBuf::from(&token.path);
-            if path.exists() { continue; }
+            if path.exists() {
+                continue;
+            }
 
             // Create parent dirs
             if let Some(parent) = path.parent() {
@@ -63,16 +68,27 @@ impl CanaryWatcher {
     }
 
     /// Check if a file access should trigger an alert
-    pub fn check_access(&self, path: &str, accessor_name: &str, accessor_uid: u32) -> Option<CanaryAlert> {
+    pub fn check_access(
+        &self,
+        path: &str,
+        accessor_name: &str,
+        accessor_uid: u32,
+    ) -> Option<CanaryAlert> {
         let token = self.tokens.iter().find(|t| t.path == path)?;
 
         let should_alert = match &token.alert_threshold {
             AlertThreshold::Any => true,
-            AlertThreshold::UnknownUser => !token.expected_readers.contains(&accessor_name.to_string()),
-            AlertThreshold::NonAdmin => !is_admin(accessor_name, accessor_uid, &token.expected_readers),
+            AlertThreshold::UnknownUser => {
+                !token.expected_readers.contains(&accessor_name.to_string())
+            }
+            AlertThreshold::NonAdmin => {
+                !is_admin(accessor_name, accessor_uid, &token.expected_readers)
+            }
         };
 
-        if !should_alert { return None; }
+        if !should_alert {
+            return None;
+        }
 
         let now = chrono::Utc::now();
         Some(CanaryAlert {
@@ -81,7 +97,11 @@ impl CanaryWatcher {
             accessor_uid,
             access_type: "read".to_string(),
             timestamp_nanos: now.timestamp_nanos_opt().unwrap_or(0) as u64,
-            risk: if token.alert_threshold == AlertThreshold::Any { "high".to_string() } else { "medium".to_string() },
+            risk: if token.alert_threshold == AlertThreshold::Any {
+                "high".to_string()
+            } else {
+                "medium".to_string()
+            },
         })
     }
 
@@ -261,13 +281,17 @@ mod tests {
     fn test_config_loading() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("canary.yaml");
-        std::fs::write(&config_path, r#"
+        std::fs::write(
+            &config_path,
+            r#"
 tokens:
   - path: "/tmp/test1"
     description: "test"
     expected_readers: ["root"]
     alert_threshold: Any
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         let config = CanaryConfig::load_from_file(&config_path).unwrap();
         assert_eq!(config.tokens.len(), 1);
         assert_eq!(config.tokens[0].path, "/tmp/test1");

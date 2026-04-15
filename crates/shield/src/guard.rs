@@ -1,22 +1,22 @@
 // FlowLink Shield — Core guard pipeline
 // Intercept → Snapshot → GitOps L3 → Notify → Approve/Kill
 
-use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc, oneshot};
-use dashmap::DashMap;
 use anyhow::Result;
-use log::{info, warn, error};
+use dashmap::DashMap;
+use log::{error, info, warn};
+use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot, RwLock};
 
+use crate::audit::{AuditEntry, AuditLog};
 use crate::engine::{AnalysisEngine, Command, ThreatLevel};
-use crate::policy_dsl::PolicyEngine;
-use crate::interceptor::{ProcessInfo, sigstop, sigcont, sigkill};
 use crate::forensic::ForensicContext;
-use crate::snapshot::{SnapshotBackend, create_snapshot};
-use crate::audit::{AuditLog, AuditEntry};
-use crate::notifier::Notifier;
-use crate::relay_client::RelayClient;
 #[cfg(feature = "gitops")]
 use crate::gitops_integration::GitOpsLayer;
+use crate::interceptor::{sigcont, sigkill, sigstop, ProcessInfo};
+use crate::notifier::Notifier;
+use crate::policy_dsl::PolicyEngine;
+use crate::relay_client::RelayClient;
+use crate::snapshot::{create_snapshot, SnapshotBackend};
 
 /// Guard configuration
 #[derive(Debug, Clone)]
@@ -85,8 +85,16 @@ pub struct ApprovalResponse {
 #[derive(Debug, Clone, serde::Serialize)]
 pub enum InterceptResult {
     Allowed,
-    Intercepted { pid: u32, threat: String, forensic: Option<ForensicContext> },
-    Blocked { pid: u32, reason: String, forensic: Option<ForensicContext> },
+    Intercepted {
+        pid: u32,
+        threat: String,
+        forensic: Option<ForensicContext>,
+    },
+    Blocked {
+        pid: u32,
+        reason: String,
+        forensic: Option<ForensicContext>,
+    },
 }
 
 /// Running statistics
@@ -140,7 +148,10 @@ impl ShieldGuard {
         let (tx, rx) = mpsc::channel(256);
         let policy_engine = config.policy_file.as_ref().and_then(|path| {
             PolicyEngine::load_from_file(std::path::Path::new(path))
-                .map_err(|e| { warn!("Failed to load policy file {}: {}", path, e); e })
+                .map_err(|e| {
+                    warn!("Failed to load policy file {}: {}", path, e);
+                    e
+                })
                 .ok()
         });
         if policy_engine.is_some() {
@@ -193,7 +204,8 @@ impl ShieldGuard {
         // Check UID exemption
         if self.config.allowed_uids.contains(&proc_info.uid) {
             if self.config.audit_all {
-                self.audit_log(&proc_info, "allowed", "uid_exempt", None, "allowed").await;
+                self.audit_log(&proc_info, "allowed", "uid_exempt", None, "allowed")
+                    .await;
             }
             return InterceptResult::Allowed;
         }
@@ -201,7 +213,12 @@ impl ShieldGuard {
         // Check monitored binaries filter
         if !self.config.monitored_binaries.is_empty() {
             let binary_name = proc_info.comm.clone();
-            if !self.config.monitored_binaries.iter().any(|b| binary_name == *b || proc_info.exe.contains(b)) {
+            if !self
+                .config
+                .monitored_binaries
+                .iter()
+                .any(|b| binary_name == *b || proc_info.exe.contains(b))
+            {
                 return InterceptResult::Allowed;
             }
         }
@@ -209,7 +226,12 @@ impl ShieldGuard {
         // Build command for analysis
         let cmd = Command {
             binary: proc_info.exe.clone(),
-            args: proc_info.cmdline.split_whitespace().skip(1).map(String::from).collect(),
+            args: proc_info
+                .cmdline
+                .split_whitespace()
+                .skip(1)
+                .map(String::from)
+                .collect(),
             raw: proc_info.full_command(),
         };
 
@@ -223,7 +245,8 @@ impl ShieldGuard {
 
         if result.safe {
             if self.config.audit_all {
-                self.audit_log(&proc_info, "allowed", "clean", None, "allowed").await;
+                self.audit_log(&proc_info, "allowed", "clean", None, "allowed")
+                    .await;
             }
             {
                 let mut stats = self.stats.write().await;
@@ -238,14 +261,20 @@ impl ShieldGuard {
 
         // Step 1: SIGSTOP
         if let Err(e) = sigstop(pid) {
-            warn!("SIGSTOP failed for pid {}: {} — process may have exited", pid, e);
+            warn!(
+                "SIGSTOP failed for pid {}: {} — process may have exited",
+                pid, e
+            );
             return InterceptResult::Blocked {
                 pid,
                 reason: format!("SIGSTOP failed: {}", e),
                 forensic: None,
             };
         }
-        info!("🛑 Intercepted PID {} — threat: {} ({:?})", pid, threat.name, threat.level);
+        info!(
+            "🛑 Intercepted PID {} — threat: {} ({:?})",
+            pid, threat.name, threat.level
+        );
 
         // Step 2: Snapshot
         let snapshot = if self.config.snapshot_on_intercept && threat.snapshot {
@@ -282,20 +311,29 @@ impl ShieldGuard {
             });
 
         // Step 3: Audit
-        self.audit_log(&proc_info, "intercepted", &threat.name, snapshot.clone(), "pending").await;
+        self.audit_log(
+            &proc_info,
+            "intercepted",
+            &threat.name,
+            snapshot.clone(),
+            "pending",
+        )
+        .await;
 
         // Step 4: Notify
         if self.config.notify_on_intercept {
-            self.notifier.alert(
-                pid,
-                proc_info.uid,
-                &proc_info.username(),
-                &proc_info.full_command(),
-                &threat.name,
-                "intercepted",
-                snapshot.as_deref(),
-                forensic.as_ref(),
-            ).await;
+            self.notifier
+                .alert(
+                    pid,
+                    proc_info.uid,
+                    &proc_info.username(),
+                    &proc_info.full_command(),
+                    &threat.name,
+                    "intercepted",
+                    snapshot.as_deref(),
+                    forensic.as_ref(),
+                )
+                .await;
         }
 
         // Step 4b: Report to relay (non-blocking)
@@ -307,35 +345,49 @@ impl ShieldGuard {
             let snap = snapshot.clone();
             let relay = relay.clone();
             tokio::spawn(async move {
-                let _ = relay.report_interception(
-                    &alert_id, pid, proc_info.uid,
-                    &username, &cmd, &rule, "intercepted",
-                    snap.as_deref(),
-                ).await;
+                let _ = relay
+                    .report_interception(
+                        &alert_id,
+                        pid,
+                        proc_info.uid,
+                        &username,
+                        &cmd,
+                        &rule,
+                        "intercepted",
+                        snap.as_deref(),
+                    )
+                    .await;
             });
         }
 
         // Step 4c: GitOps L3 pipeline evaluation (if enabled)
         #[cfg(feature = "gitops")]
         if let Some(ref gitops) = self.gitops_layer {
-            let gitops_verdict = gitops.evaluate(
-                &cmd.binary,
-                &cmd.args,
-                Some(&threat),
-            ).await;
+            let gitops_verdict = gitops.evaluate(&cmd.binary, &cmd.args, Some(&threat)).await;
 
             info!(
                 "🔍 GitOps L3 verdict for PID {}: allowed={}, tier={}, reason={}",
-                pid, gitops_verdict.allowed,
+                pid,
+                gitops_verdict.allowed,
                 gitops_verdict.tier.as_deref().unwrap_or("N/A"),
                 gitops_verdict.reason
             );
 
             // GitOps says block → immediate kill with GitOps reason
             if !gitops_verdict.allowed {
-                info!("🚫 GitOps L3 blocked PID {} — {}", pid, gitops_verdict.reason);
+                info!(
+                    "🚫 GitOps L3 blocked PID {} — {}",
+                    pid, gitops_verdict.reason
+                );
                 let _ = sigkill(pid);
-                self.audit_log(&proc_info, "blocked", &threat.name, snapshot.clone(), "gitops_blocked").await;
+                self.audit_log(
+                    &proc_info,
+                    "blocked",
+                    &threat.name,
+                    snapshot.clone(),
+                    "gitops_blocked",
+                )
+                .await;
                 {
                     let mut stats = self.stats.write().await;
                     stats.blocked += 1;
@@ -346,11 +398,18 @@ impl ShieldGuard {
                     let relay = relay.clone();
                     let audit_id = gitops_verdict.audit_id.clone();
                     tokio::spawn(async move {
-                        let _ = relay.report_interception(
-                            &audit_id.unwrap_or_default(), pid, 0,
-                            "gitops", &reason, "gitops_blocked",
-                            "blocked", None,
-                        ).await;
+                        let _ = relay
+                            .report_interception(
+                                &audit_id.unwrap_or_default(),
+                                pid,
+                                0,
+                                "gitops",
+                                &reason,
+                                "gitops_blocked",
+                                "blocked",
+                                None,
+                            )
+                            .await;
                     });
                 }
                 return InterceptResult::Blocked {
@@ -362,8 +421,11 @@ impl ShieldGuard {
 
             // GitOps allowed but wants backup → log it
             if gitops_verdict.backup_id.is_some() {
-                info!("📦 GitOps L3 backup created for PID {}: backup_id={}",
-                    pid, gitops_verdict.backup_id.as_deref().unwrap_or(""));
+                info!(
+                    "📦 GitOps L3 backup created for PID {}: backup_id={}",
+                    pid,
+                    gitops_verdict.backup_id.as_deref().unwrap_or("")
+                );
             }
         }
 
@@ -371,7 +433,14 @@ impl ShieldGuard {
         if self.config.auto_kill_critical && matches!(threat.level, ThreatLevel::Critical) {
             info!("💀 Auto-killing critical threat PID {}", pid);
             let _ = sigkill(pid);
-            self.audit_log(&proc_info, "blocked", &threat.name, snapshot.clone(), "auto_killed").await;
+            self.audit_log(
+                &proc_info,
+                "blocked",
+                &threat.name,
+                snapshot.clone(),
+                "auto_killed",
+            )
+            .await;
             {
                 let mut stats = self.stats.write().await;
                 stats.blocked += 1;
@@ -401,7 +470,11 @@ impl ShieldGuard {
         self.pending.insert(pid, pending);
 
         // Start timeout timer
-        let timeout_secs = if threat.timeout_secs > 0 { threat.timeout_secs } else { self.config.auto_kill_timeout_secs };
+        let timeout_secs = if threat.timeout_secs > 0 {
+            threat.timeout_secs
+        } else {
+            self.config.auto_kill_timeout_secs
+        };
         let pending_ref = self.pending.clone();
         let timeout_handle = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)).await;
@@ -439,7 +512,14 @@ impl ShieldGuard {
             if approved {
                 info!("✅ Approved PID {} — resuming", pid);
                 let _ = sigcont(pid);
-                self.audit_log(&entry.process_info, "released", &entry.threat.name, entry.snapshot.clone(), "released").await;
+                self.audit_log(
+                    &entry.process_info,
+                    "released",
+                    &entry.threat.name,
+                    entry.snapshot.clone(),
+                    "released",
+                )
+                .await;
                 {
                     let mut stats = self.stats.write().await;
                     stats.released += 1;
@@ -447,7 +527,14 @@ impl ShieldGuard {
             } else {
                 info!("❌ Rejected PID {} — killing", pid);
                 let _ = sigkill(pid);
-                self.audit_log(&entry.process_info, "blocked", &entry.threat.name, entry.snapshot.clone(), "rejected").await;
+                self.audit_log(
+                    &entry.process_info,
+                    "blocked",
+                    &entry.threat.name,
+                    entry.snapshot.clone(),
+                    "rejected",
+                )
+                .await;
                 {
                     let mut stats = self.stats.write().await;
                     stats.blocked += 1;
@@ -477,10 +564,13 @@ impl ShieldGuard {
 
     /// List all pending interceptions
     pub fn list_pending(&self) -> Vec<(u32, String, String)> {
-        self.pending.iter().map(|entry| {
-            let a = &entry.value();
-            (a.pid, a.threat.name.clone(), a.process_info.full_command())
-        }).collect()
+        self.pending
+            .iter()
+            .map(|entry| {
+                let a = &entry.value();
+                (a.pid, a.threat.name.clone(), a.process_info.full_command())
+            })
+            .collect()
     }
 
     /// Force-kill a pending process
@@ -504,7 +594,14 @@ impl ShieldGuard {
         self.policy_engine.as_ref()
     }
 
-    async fn audit_log(&self, proc_info: &ProcessInfo, action: &str, rule: &str, snapshot: Option<String>, result: &str) {
+    async fn audit_log(
+        &self,
+        proc_info: &ProcessInfo,
+        action: &str,
+        rule: &str,
+        snapshot: Option<String>,
+        result: &str,
+    ) {
         let mut audit = self.audit.write().await;
         let entry = AuditEntry {
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -551,7 +648,10 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn test_engine() -> AnalysisEngine {
-        AnalysisEngine { enable_ast: false, enable_interpreter: false }
+        AnalysisEngine {
+            enable_ast: false,
+            enable_interpreter: false,
+        }
     }
 
     fn make_guard() -> ShieldGuard {
@@ -656,7 +756,11 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("Allowed"));
 
-        let r2 = InterceptResult::Blocked { pid: 1, reason: "test".into(), forensic: None };
+        let r2 = InterceptResult::Blocked {
+            pid: 1,
+            reason: "test".into(),
+            forensic: None,
+        };
         let json2 = serde_json::to_string(&r2).unwrap();
         assert!(json2.contains("Blocked"));
     }
@@ -726,13 +830,7 @@ mod tests {
             allowed_uids: vec![], // Don't exempt any UID
             ..ShieldGuardConfig::default()
         };
-        let guard = ShieldGuard::new(
-            test_engine(),
-            SnapshotBackend::None,
-            audit,
-            notifier,
-            cfg,
-        );
+        let guard = ShieldGuard::new(test_engine(), SnapshotBackend::None, audit, notifier, cfg);
         // Own process is not "rm", so should be allowed
         let result = guard.intercept(std::process::id()).await;
         assert!(matches!(result, InterceptResult::Allowed));
@@ -929,7 +1027,10 @@ mod tests {
             policy_file: Some("/etc/flowlink/policy.yaml".into()),
             ..ShieldGuardConfig::default()
         };
-        assert_eq!(cfg.policy_file.as_deref(), Some("/etc/flowlink/policy.yaml"));
+        assert_eq!(
+            cfg.policy_file.as_deref(),
+            Some("/etc/flowlink/policy.yaml")
+        );
     }
 
     #[test]

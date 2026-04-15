@@ -167,7 +167,10 @@ mod tests {
         let cmd = init["command"].as_array().unwrap();
         assert_eq!(cmd[0], "/bin/sh");
         assert_eq!(cmd[1], "-c");
-        assert!(cmd[2].as_str().unwrap().contains("cp /usr/local/bin/flowlink-shield"));
+        assert!(cmd[2]
+            .as_str()
+            .unwrap()
+            .contains("cp /usr/local/bin/flowlink-shield"));
     }
 
     #[test]
@@ -183,7 +186,10 @@ mod tests {
         let sc = default_sidecar();
         let container = sc.container_json("policy");
         let env = container["env"].as_array().unwrap();
-        let b64_env = env.iter().find(|e| e["name"] == "FLOWLINK_POLICY_B64").unwrap();
+        let b64_env = env
+            .iter()
+            .find(|e| e["name"] == "FLOWLINK_POLICY_B64")
+            .unwrap();
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(b64_env["value"].as_str().unwrap())
             .unwrap();
