@@ -6,10 +6,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    env:
-      OPENSSL_NO_VENDOR: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -19,55 +17,24 @@ jobs:
             libssl-dev pkg-config libclang-dev
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release binary
+        env:
+          OPENSSL_NO_VENDOR: "1"
         run: cargo build --release --bin flowlink
 
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: flowlink-binary
-          path: target/release/flowlink
-          retention-days: 1
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download binary
-        uses: actions/download-artifact@v4
-        with:
-          name: flowlink-binary
-
-      - name: Make binary executable
-        run: chmod +x flowlink
-
-      - name: Deploy to VPS via SSH
+      - name: Stop service on VPS
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            set -euo pipefail
-
-            # Backup
-            cp /opt/flowlink/bin/flowlink /opt/flowlink/bin/flowlink.bak 2>/dev/null || true
-
-            # Stop
             systemctl stop flowlink-relay || true
             sleep 2
-
-            # Wait for process to die
-            for i in $(seq 1 10); do
-              pgrep -f "flowlink relay" > /dev/null 2>&1 || break
-              kill -9 $(pgrep -f "flowlink relay") 2>/dev/null || true
-              sleep 1
-            done
+            kill -9 $(pgrep -f "flowlink relay") 2>/dev/null || true
 
       - name: Upload binary to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -75,23 +42,17 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: "flowlink"
-          target: "/opt/flowlink/bin/flowlink"
-          strip_components: 0
+          source: "target/release/flowlink"
+          target: "/opt/flowlink/bin/"
 
-      - name: Start & verify
+      - name: Start service & verify
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          command_timeout: 30s
           script: |
             chmod +x /opt/flowlink/bin/flowlink
             systemctl start flowlink-relay
             sleep 3
-            systemctl is-active flowlink-relay && echo "✅ Deploy successful!" || {
-              echo "❌ Service failed to start!"
-              journalctl -u flowlink-relay --no-pager -n 10
-              exit 1
-            }
+            systemctl is-active flowlink-relay && echo "Deploy successful!" || exit 1
