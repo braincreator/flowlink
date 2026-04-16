@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl python3 libssl3 \
+    ca-certificates curl python3 libssl3 libelf1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY target/release/flowlink /usr/local/bin/flowlink

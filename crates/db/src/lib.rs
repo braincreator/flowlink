@@ -20,6 +20,7 @@ pub mod audit;
 pub mod email_verification;
 pub mod invoices;
 pub mod migrations;
+pub mod notification_channels;
 pub mod orders;
 pub mod plans;
 pub mod pool;

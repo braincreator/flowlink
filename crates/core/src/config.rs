@@ -647,6 +647,68 @@ impl RelayConfig {
         }
         anyhow::bail!("Cannot parse RelayConfig: file has neither flat RelayConfig fields nor a 'relay_config' key")
     }
+
+    /// Apply environment variable overrides.
+    ///
+    /// Environment variables take precedence over config file values.
+    /// Prefix: `FLOWLINK_` — e.g. `FLOWLINK_API_TOKEN`, `FLOWLINK_JWT_SECRET`.
+    /// Nested fields use `__` as separator: `FLOWLINK_SMTP__HOST`, `FLOWLINK_AUTH__JWT_SECRET`.
+    ///
+    /// Call this after `load()` to allow Docker/K8s/env-based secrets.
+    pub fn apply_env_overrides(&mut self) {
+        // ── Top-level fields ──
+        if let Ok(v) = std::env::var("FLOWLINK_API_TOKEN") { self.api_token = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_CLIENT_NAME") { self.client_name = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_CLIENT_EMAIL") { self.client_email = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_HTTP_ADDR") {
+            if let Ok(addr) = v.parse() { self.http_addr = addr; }
+        }
+        if let Ok(v) = std::env::var("FLOWLINK_WSS_ADDR") {
+            if let Ok(addr) = v.parse() { self.wss_addr = addr; }
+        }
+        if let Ok(v) = std::env::var("FLOWLINK_TG_BOT_TOKEN") { self.tg_bot_token = Some(v); }
+
+        // ── SMTP ──
+        if let Ok(v) = std::env::var("FLOWLINK_SMTP__HOST") { self.smtp.host = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_SMTP__PORT") {
+            if let Ok(p) = v.parse() { self.smtp.port = p; }
+        }
+        if let Ok(v) = std::env::var("FLOWLINK_SMTP__USERNAME") { self.smtp.username = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_SMTP__PASSWORD") { self.smtp.password = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_SMTP__FROM") { self.smtp.from = v; }
+
+        // ── Auth ──
+        if let Ok(v) = std::env::var("FLOWLINK_AUTH__JWT_SECRET") { self.auth.jwt_secret = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_JWT_SECRET") { self.auth.jwt_secret = v; }
+
+        // ── Database ──
+        if let Ok(v) = std::env::var("FLOWLINK_DATABASE__URL") { self.database.primary = Some(v); }
+        if let Ok(v) = std::env::var("FLOWLINK_DATABASE_URL") { self.database.primary = Some(v); }
+        if let Ok(v) = std::env::var("FLOWLINK_DATABASE__POOL_SIZE") {
+            if let Ok(n) = v.parse() { self.database.pool_size = n; }
+        }
+
+        // ── OAuth providers ──
+        if let Ok(v) = std::env::var("FLOWLINK_OAUTH__VK__APP_ID") { self.oauth.vk.app_id = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_OAUTH__VK__APP_SECRET") { self.oauth.vk.app_secret = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_OAUTH__VK__SERVICE_TOKEN") { self.oauth.vk.service_token = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_OAUTH__YANDEX__CLIENT_ID") { self.oauth.yandex.client_id = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_OAUTH__YANDEX__CLIENT_SECRET") { self.oauth.yandex.client_secret = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_OAUTH__GITHUB__CLIENT_ID") { self.oauth.github.client_id = v; }
+        if let Ok(v) = std::env::var("FLOWLINK_OAUTH__GITHUB__CLIENT_SECRET") { self.oauth.github.client_secret = v; }
+
+        // ── Billing ──
+        if let Ok(v) = std::env::var("FLOWLINK_BILLING__TOCHKA_CLIENT_ID") {
+            self.billing.tochka_client_id = Some(v);
+        }
+        if let Ok(v) = std::env::var("FLOWLINK_BILLING__TOCHKA_WEBHOOK_SECRET") {
+            self.billing.tochka_webhook_secret = Some(v);
+        }
+
+        // ── TLS ──
+        if let Ok(v) = std::env::var("FLOWLINK_WSS_TLS__CERT_PATH") { self.wss_tls.cert_path = Some(v); }
+        if let Ok(v) = std::env::var("FLOWLINK_WSS_TLS__KEY_PATH") { self.wss_tls.key_path = Some(v); }
+    }
 }
 
 #[cfg(test)]
@@ -749,6 +811,10 @@ mod tests {
             registry: RegistryConfig::default(),
             database: DatabaseConfig::default(),
             wss_tls: WssTlsConfig::default(),
+            tg_bot_token: None,
+            smtp: SmtpConfig::default(),
+            auth: AuthConfig::default(),
+            oauth: OAuthConfig::default(),
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: RelayConfig = serde_json::from_str(&json).unwrap();

@@ -65,6 +65,15 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         usage_tracker: Arc::new(flowlink_relay::billing_middleware::UsageTracker::new()),
         rate_limiter: Arc::new(flowlink_relay::ratelimit::RateLimiter::new(100, 10)),
         control_plane: ControlPlaneState::new(),
+        email_queue: std::sync::OnceLock::new(),
+        tg_bot: std::sync::OnceLock::new(),
+        auth_engine: None,
+        email_service: None,
+        auth: Arc::new(flowlink_relay::auth::AuthManager::new()),
+        tochka: None,
+        notification_store: None,
+            rbac: std::sync::Arc::new(flowlink_relay::rbac_manager::RbacManager::new()),
+            notification_router: std::sync::OnceLock::new(),
     };
     (state, tmp)
 }
@@ -291,7 +300,7 @@ async fn shield_alert_ingest_and_sse() {
 
     // Verify via stats endpoint
     let stats: serde_json::Value = client
-        .get(&format!("{url}/api/shield/stats"))
+        .get(&format!("{url}/api/admin/shield/stats"))
         .send()
         .await
         .unwrap()
@@ -314,7 +323,7 @@ async fn shield_alert_ingest_and_sse() {
 
     // Now pending should be 0
     let stats: serde_json::Value = client
-        .get(&format!("{url}/api/shield/stats"))
+        .get(&format!("{url}/api/admin/shield/stats"))
         .send()
         .await
         .unwrap()

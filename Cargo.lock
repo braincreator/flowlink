@@ -1261,6 +1261,7 @@ dependencies = [
  "hostname",
  "log",
  "rand 0.8.5",
+ "reqwest",
  "rustls",
  "serde",
  "serde_json",
@@ -1515,10 +1516,10 @@ name = "flowlink-sentinel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "aya",
  "bytes",
  "crossbeam-channel",
  "endpointsecurity",
+ "libbpf-sys",
  "libc",
  "serde",
  "serde_json",
@@ -2723,6 +2724,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libbpf-sys"
+version = "1.7.0+v1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a109478760b2900aa2a6f2087e9d0de1d9c535b1758602af2845d5d2ccfaed7c"
+dependencies = [
+ "cc",
+ "nix",
+ "pkg-config",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.184"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2904,6 +2916,18 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "nix"
+version = "0.31.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
+dependencies = [
+ "bitflags 2.11.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]

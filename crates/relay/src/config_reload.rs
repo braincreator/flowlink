@@ -153,8 +153,9 @@ impl ConfigReloader {
 
     /// Reload the config from disk and broadcast to all connected agents.
     pub async fn reload(&self) -> Result<ReloadResult> {
-        let new_config = RelayConfig::load(self.config_path.to_str().unwrap())
+        let mut new_config = RelayConfig::load(self.config_path.to_str().unwrap())
             .context("failed to load config from disk")?;
+        new_config.apply_env_overrides();
 
         let reload_num = self.reload_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         info!("Config reload #{reload_num}: reloading from {}", self.config_path.display());

@@ -24,6 +24,67 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
+/// Kernel-level blocker (LSM BPF on Linux, stub otherwise)
+#[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+pub struct KernelBlocker(pub std::sync::Mutex<flowlink_sentinel::LsmBlocker>);
+#[cfg(not(all(target_os = "linux", feature = "linux-ebpf")))]
+pub struct KernelBlocker;
+
+impl KernelBlocker {
+    #[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+    pub fn try_load(config: &SentinelConfig) -> Option<Self> {
+        match flowlink_sentinel::LsmBlocker::load() {
+            Ok(mut blocker) => {
+                if let Err(e) = blocker.load_config(config) {
+                    tracing::warn!("LSM config load failed: {}", e);
+                } else {
+                    tracing::info!(
+                        "🔒 LSM BPF active: {} commands, {} paths",
+                        blocker.blocked_commands().len(),
+                        blocker.protected_paths().len()
+                    );
+                }
+                Some(KernelBlocker(std::sync::Mutex::new(blocker)))
+            }
+            Err(e) => {
+                tracing::warn!("LSM BPF unavailable (userspace-only): {}", e);
+                None
+            }
+        }
+    }
+
+    #[cfg(not(all(target_os = "linux", feature = "linux-ebpf")))]
+    pub fn try_load(_config: &SentinelConfig) -> Option<Self> { None }
+
+    #[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+    pub fn block_cmd(&self, cmd: &str) -> anyhow::Result<()> {
+        self.0.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?.block_command(cmd)
+    }
+    #[cfg(not(all(target_os = "linux", feature = "linux-ebpf")))]
+    pub fn block_cmd(&self, _cmd: &str) -> anyhow::Result<()> { Ok(()) }
+
+    #[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+    pub fn unblock_cmd(&self, cmd: &str) -> anyhow::Result<()> {
+        self.0.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?.unblock_command(cmd)
+    }
+    #[cfg(not(all(target_os = "linux", feature = "linux-ebpf")))]
+    pub fn unblock_cmd(&self, _cmd: &str) -> anyhow::Result<()> { Ok(()) }
+
+    #[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+    pub fn protect_path(&self, path: &str) -> anyhow::Result<()> {
+        self.0.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?.protect_path(path)
+    }
+    #[cfg(not(all(target_os = "linux", feature = "linux-ebpf")))]
+    pub fn protect_path(&self, _path: &str) -> anyhow::Result<()> { Ok(()) }
+
+    #[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+    pub fn unprotect_path(&self, path: &str) -> anyhow::Result<()> {
+        self.0.lock().map_err(|e| anyhow::anyhow!("lock: {}", e))?.unprotect_path(path)
+    }
+    #[cfg(not(all(target_os = "linux", feature = "linux-ebpf")))]
+    pub fn unprotect_path(&self, _path: &str) -> anyhow::Result<()> { Ok(()) }
+}
+
 /// Shared application state
 pub struct AppState {
     pub engine: AnalysisEngine,
@@ -34,6 +95,8 @@ pub struct AppState {
     pub whitelisted_pids: Mutex<Vec<u32>>,
     /// Pending approval requests from AI agents
     pub approvals: Mutex<Vec<ApprovalRequest>>,
+    /// Kernel-level BPF LSM blocker
+    pub kernel: Option<KernelBlocker>,
 }
 
 /// Approval request from an agent
@@ -191,16 +254,28 @@ pub async fn block_item(
 
     // Direct API call (from Dashboard/Telegram) — apply immediately
     let item = BlockedItem { value: req.value.clone(), reason: reason.clone(), blocked_at: now };
+    let mut kernel_status = "userspace";
     match req.kind {
-        BlockKind::command => { state.blocked_commands.lock().await.push(item); }
-        BlockKind::path => { state.protected_paths.lock().await.push(item); }
+        BlockKind::command => {
+            state.blocked_commands.lock().await.push(item);
+            if let Some(ref kb) = state.kernel {
+                if kb.block_cmd(&req.value).is_ok() { kernel_status = "kernel"; }
+            }
+        }
+        BlockKind::path => {
+            state.protected_paths.lock().await.push(item);
+            if let Some(ref kb) = state.kernel {
+                if kb.protect_path(&req.value).is_ok() { kernel_status = "kernel"; }
+            }
+        }
         BlockKind::pid => { state.blocked_pids.lock().await.push(item); }
     }
 
     Json(serde_json::json!({
         "status": "applied",
         "action": format!("{:?}", action),
-        "value": req.value
+        "value": req.value,
+        "enforcement": kernel_status
     }))
 }
 
@@ -208,14 +283,21 @@ pub async fn unblock_item(
     State(state): State<Arc<AppState>>,
     Json(req): Json<UnblockRequest>,
 ) -> Json<serde_json::Value> {
+    let mut kernel_status = "userspace";
     match req.kind {
         BlockKind::command => {
             let mut list = state.blocked_commands.lock().await;
             list.retain(|i| i.value != req.value);
+            if let Some(ref kb) = state.kernel {
+                if kb.unblock_cmd(&req.value).is_ok() { kernel_status = "kernel"; }
+            }
         }
         BlockKind::path => {
             let mut list = state.protected_paths.lock().await;
             list.retain(|i| i.value != req.value);
+            if let Some(ref kb) = state.kernel {
+                if kb.unprotect_path(&req.value).is_ok() { kernel_status = "kernel"; }
+            }
         }
         BlockKind::pid => {
             let mut list = state.blocked_pids.lock().await;
@@ -225,7 +307,8 @@ pub async fn unblock_item(
     Json(serde_json::json!({
         "status": "unblocked",
         "kind": format!("{:?}", req.kind),
-        "value": req.value
+        "value": req.value,
+        "enforcement": kernel_status
     }))
 }
 

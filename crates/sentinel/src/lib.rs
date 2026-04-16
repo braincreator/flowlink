@@ -11,6 +11,7 @@ pub mod lsm_blocker;
 pub mod sentinel;
 
 pub use event::{EventKind, KernelEvent};
+pub use lsm_blocker::LsmBlocker;
 pub use sentinel::Sentinel;
 
 /// Result of evaluating a kernel event against policy

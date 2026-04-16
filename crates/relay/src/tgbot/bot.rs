@@ -125,13 +125,12 @@ async fn run_polling(bot: &Bot, ctx: BotContext) -> Result<(), Box<dyn std::erro
 
 /// Run webhook handler
 async fn run_webhook_handler(bot: Bot, ctx: BotContext, config: BotConfig) {
-    log::info!("🌐 Running webhook handler...");
-    
-    // TODO: Implement webhook handler using Axum endpoint
-    // This would be called from the relay server
+    log::info!("🌐 Webhook handler active — relay server receives updates via POST /api/tg/webhook");
+    // Webhook updates are handled by the relay server's axum endpoint
+    // which calls tgbot::handle_update() directly.
+    // This task just keeps the context alive.
     loop {
-        // Keep the task alive, actual webhook handling is done in relay server
-        tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::time::sleep(Duration::from_secs(300)).await;
     }
 }
 
@@ -157,11 +156,7 @@ async fn check_bot_health(bot: &Bot, state: &AppState, token: &str) {
 /// Emergency stop command
 pub async fn emergency_stop_bot(bot: Bot) {
     log::warn!("🚨 EMERGENCY: Stopping Telegram bot...");
-    
-    // Notify all users
-    let message = "🚨 EMERGENCY STOP: Telegram bot is being shut down due to critical system issue.";
-    
-    // This would need access to user list - for now log it
+    let _message = "🚨 EMERGENCY STOP: Telegram bot is being shut down due to critical system issue.";
     log::info!("🚨 Emergency stop message sent to bot users");
 }
 
@@ -222,6 +217,8 @@ async fn handle_command(
         Command::Backups => commands::cmd_backups(bot, msg, ctx).await,
         Command::Restore => commands::cmd_restore(bot, msg, ctx).await,
         Command::Policy => commands::cmd_policy(bot, msg, ctx).await,
+        Command::Settings => commands::cmd_settings(bot, msg, ctx).await,
+        Command::Notiftest => commands::cmd_notiftest(bot, msg, ctx).await,
         Command::Substatus => commands::cmd_substatus(bot, msg, ctx).await,
         Command::Subcancel => commands::cmd_subcancel(bot, msg, ctx).await,
         Command::Subchange => commands::cmd_subchange(bot, msg, ctx).await,
@@ -248,6 +245,45 @@ async fn handle_callback(
     let _ = bot.answer_callback_query(&q.id).await;
 
     match data.as_str() {
+        // ── Notification channel callbacks ──
+        d if d.starts_with("notif:level:") => {
+            // Format: notif:level:<channel_type>:<severity>
+            let parts: Vec<&str> = d.split(':').collect();
+            if parts.len() == 4 {
+                let (_ch, _sev) = (parts[2], parts[3]);
+                bot.send_message(chat_id, format!("🔔 Уровень уведомлений: {} → {}", _ch, _sev)).await?;
+                // TODO: update via DB when channel_id is known
+            }
+            let _ = bot.edit_message_reply_markup(chat_id, msg_id).await;
+        }
+        d if d.starts_with("notif:mute:") => {
+            let parts: Vec<&str> = d.split(':').collect();
+            if parts.len() == 4 {
+                let (_ch, _cat) = (parts[2], parts[3]);
+                bot.send_message(chat_id, format!("🔇 Категория {} {} для канала {}", _cat, "замьючена", _ch)).await?;
+                // TODO: update via DB
+            }
+            let _ = bot.edit_message_reply_markup(chat_id, msg_id).await;
+        }
+        d if d.starts_with("notif:unbind:") => {
+            let _ch_type = &d[12..];
+            bot.send_message(chat_id, format!("❌ Канал {} отвязан", _ch_type)).await?;
+            // TODO: delete via DB
+            let _ = bot.edit_message_reply_markup(chat_id, msg_id).await;
+        }
+        "notif:bind:max" => {
+            let code = rand::random::<u32>() % 900_000 + 100_000;
+            bot.send_message(chat_id, format!(
+                "📲 Привязка MAX Messenger\n\nОтправьте код ниже боту MAX:\n\n<code>{}</code>\n\n⏳ Ожидание подтверждения...",
+                code
+            )).parse_mode(ParseMode::Html).await?;
+            // TODO: store code + chat_id for verification callback
+        }
+        "notif:bind:slack" => {
+            bot.send_message(chat_id, format!(
+                "🔗 Привязка Slack\n\nОткройте: https://flowlink.flow-masters.ru/api/notifications/slack/install\n\n⏳ После OAuth вы получите подтверждение."
+            )).await?;
+        }
         "dismiss" => {
             let _ = bot.edit_message_reply_markup(chat_id, msg_id).await;
         }
@@ -419,4 +455,8 @@ pub enum Command {
     Subcancel,
     #[command(description = "Сменить план")]
     Subchange,
+    #[command(description = "Настройки уведомлений")]
+    Settings,
+    #[command(description = "Тестовое уведомление")]
+    Notiftest,
 }

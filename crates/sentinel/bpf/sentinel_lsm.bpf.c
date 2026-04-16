@@ -1,217 +1,129 @@
 // FlowLink Sentinel — LSM BPF programs for kernel-level blocking
+//
+// Uses BPF_PROG macro from bpf_tracing.h for proper LSM argument access.
 // Requires: CONFIG_BPF_LSM=y, kernel >= 5.7, "bpf" in /sys/kernel/security/lsm
-// Compile: clang -O2 -g -target bpf -nostdinc -c sentinel_lsm.bpf.c -o sentinel_lsm.bpf.o
+// Compile: clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I<bpf_headers> -c sentinel_lsm.bpf.c
+//
+// PORTABILITY: vmlinux.h is generated at build time from /sys/kernel/btf/vmlinux.
+// The BPF_PROG macro + CO-RE ensures compatibility across kernel versions.
 
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
+#ifdef HAS_VMLINUX
+#include "vmlinux_local.h"
+#else
+#error "vmlinux.h required for LSM BPF — generate with: bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux_local.h"
+#endif
 
-// BPF map definition helpers
-#define __uint(name, val) int (*name)[val]
-#define __type(name, val) typeof(val) *name
-#define SEC(name) __attribute__((section(name), used))
+// We need bpf_helpers.h and bpf_tracing.h from libbpf for BPF_PROG macro
+// These are bundled in the bpf_headers/ directory at build time
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
 
-// BPF helpers
-#define __always_inline __attribute__((always_inline))
-#define NULL ((void *)0)
-
-static void *(*const bpf_map_lookup_elem)(void *map, const void *key) = (void *)1;
-static uint64_t (*const bpf_get_current_pid_tgid)(void) = (void *)14;
-static uint64_t (*const bpf_get_current_uid_gid)(void) = (void *)15;
-static long (*const bpf_probe_read_kernel)(void *dst, uint32_t size, const void *ptr) = (void *)114;
-static long (*const bpf_probe_read_user_str)(void *dst, uint32_t size, const void *ptr) = (void *)112;
+char LICENSE[] SEC("license") = "GPL";
 
 #define MAX_COMM_LEN 64
-#define MAX_PATH_LEN 128
 
-// ── Blocked commands map ────────────────────────────────────────────────
-struct cmd_policy_key {
-    char comm[MAX_COMM_LEN];
-};
-struct cmd_policy_value {
-    uint32_t action; // 0=allow, 1=deny
-};
+// Command blocklist map: key=command name (64 bytes), value=action (1=block)
 struct {
-    __uint(type, 1);
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
-    __uint(key_size, sizeof(struct cmd_policy_key));
-    __uint(value_size, sizeof(struct cmd_policy_value));
+    __type(key, char[MAX_COMM_LEN]);
+    __type(value, __u32);
 } blocked_commands SEC(".maps");
 
-// ── Protected paths map ─────────────────────────────────────────────────
-struct path_policy_key {
-    char prefix[MAX_PATH_LEN];
-};
-struct path_policy_value {
-    uint32_t action; // 0=allow, 1=deny
-};
+// Path protection map (reserved for future use)
 struct {
-    __uint(type, 1);
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 4096);
-    __uint(key_size, sizeof(struct path_policy_key));
-    __uint(value_size, sizeof(struct path_policy_value));
+    __type(key, char[128]);
+    __type(value, __u32);
 } protected_paths SEC(".maps");
 
-// ── Whitelist pids ──────────────────────────────────────────────────────
+// Per-PID whitelist — these PIDs bypass all blocking
 struct {
-    __uint(type, 1);
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1024);
-    __uint(key_size, sizeof(uint32_t));
-    __uint(value_size, sizeof(uint32_t));
+    __type(key, __u32);
+    __type(value, __u32);
 } whitelist_pids SEC(".maps");
 
-// ── Blocked pids ────────────────────────────────────────────────────────
+// Per-PID blocklist — these PIDs are blocked from everything
 struct {
-    __uint(type, 1);
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 65536);
-    __uint(key_size, sizeof(uint32_t));
-    __uint(value_size, sizeof(uint32_t));
+    __type(key, __u32);
+    __type(value, __u32);
 } blocked_pids SEC(".maps");
 
-// Helper: check if pid is whitelisted
-static __always_inline int is_whitelisted(uint32_t pid)
-{
-    uint32_t *val = bpf_map_lookup_elem(&whitelist_pids, &pid);
-    return val && *val == 1;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// LSM HOOK: bprm_check_security — block dangerous commands
-// ═══════════════════════════════════════════════════════════════════════════
-// int bprm_check_security(struct linux_binprm *bprm)
-
+// LSM: bprm_check_security — block dangerous commands at exec time
 SEC("lsm/bprm_check_security")
-int block_exec(struct linux_binprm *bprm)
+int BPF_PROG(block_exec, struct linux_binprm *bprm)
 {
-    uint64_t pid_tgid = bpf_get_current_pid_tgid();
-    uint32_t pid = pid_tgid >> 32;
-    uint64_t uid_gid = bpf_get_current_uid_gid();
-    uint32_t uid = (uint32_t)uid_gid;
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
 
-    if (is_whitelisted(pid)) return 0;
+    // Check whitelist
+    __u32 *wv = bpf_map_lookup_elem(&whitelist_pids, &pid);
+    if (wv && *wv == 1) return 0;
 
-    // Check per-pid block list
-    struct policy_key { uint32_t pid; };
-    struct policy_key pk = { .pid = pid };
-    uint32_t *pv = bpf_map_lookup_elem(&blocked_pids, &pk);
-    if (pv && *pv == 1) return -1; // EPERM
+    // Check per-PID block
+    __u32 *pv = bpf_map_lookup_elem(&blocked_pids, &pid);
+    if (pv && *pv == 1) return -1;
 
-    // Read command from bprm->filename
-    char comm[MAX_COMM_LEN] = {};
-    const char *filename = NULL;
-    bpf_probe_read_kernel(&filename, sizeof(filename), (char *)bprm + 0x08);
-    if (filename) {
-        bpf_probe_read_user_str(comm, sizeof(comm), filename);
-    }
-    if (comm[0] == '\0') return 0;
+    // Read bprm->filename into local buffer
+    char fname[MAX_COMM_LEN] = {};
+    const char *fn = bprm->filename;
+    if (!fn) return 0;
+    bpf_probe_read_kernel_str(fname, sizeof(fname), fn);
 
-    // Check full path in command blocklist
-    struct cmd_policy_key ck;
-    __builtin_memset(&ck, 0, sizeof(ck));
-    __builtin_memcpy(&ck.comm, comm, MAX_COMM_LEN);
-    struct cmd_policy_value *cv = bpf_map_lookup_elem(&blocked_commands, &ck);
-    if (cv && cv->action == 1) return -1; // EPERM
+    if (fname[0] == '\0') return 0;
 
-    // Check basename (e.g., "/usr/bin/rm" → "rm")
+    // Check full path in blocked_commands
+    __u32 *cv = bpf_map_lookup_elem(&blocked_commands, fname);
+    if (cv && *cv == 1) return -1;
+
+    // Extract basename (after last '/')
+    char base[MAX_COMM_LEN] = {};
     int last_slash = -1;
     #pragma unroll
     for (int i = 0; i < MAX_COMM_LEN - 1; i++) {
-        if (comm[i] == '/') last_slash = i;
-        if (comm[i] == '\0') break;
+        if (fname[i] == '/') last_slash = i;
+        if (fname[i] == '\0') break;
     }
-    if (last_slash >= 0 && last_slash + 1 < MAX_COMM_LEN) {
-        struct cmd_policy_key bk;
-        __builtin_memset(&bk, 0, sizeof(bk));
-        // Copy basename byte-by-byte (BPF can't handle variable-length memcpy)
-        #pragma unroll
-        for (int i = 0; i < MAX_COMM_LEN; i++) {
-            int src = last_slash + 1 + i;
-            if (src >= MAX_COMM_LEN || comm[src] == '\0') break;
-            bk.comm[i] = comm[src];
-        }
-        struct cmd_policy_value *bv = bpf_map_lookup_elem(&blocked_commands, &bk);
-        if (bv && bv->action == 1) return -1; // EPERM
-    }
-
-    return 0; // Allow
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// LSM HOOK: file_open — block writes to protected paths
-// ═══════════════════════════════════════════════════════════════════════════
-// int file_open(struct file *file)
-
-SEC("lsm/file_open")
-int block_file_open(struct file *file)
-{
-    uint64_t pid_tgid = bpf_get_current_pid_tgid();
-    uint32_t pid = pid_tgid >> 32;
-
-    if (is_whitelisted(pid)) return 0;
-
-    // Check f_mode for write intent (FMODE_WRITE = 0x1)
-    unsigned int f_mode = 0;
-    bpf_probe_read_kernel(&f_mode, sizeof(f_mode), (char *)file + 0x44);
-    if (!(f_mode & 1)) return 0; // Read-only — allow
-
-    // Get file path using bpf_d_path (helper 147)
-    static long (*const bpf_d_path)(void *path, char *buf, uint32_t size) = (void *)147;
-    char path[MAX_PATH_LEN] = {};
-    // file->f_path at offset 0x14 on x86_64 5.15
-    long path_len = bpf_d_path((char *)file + 0x14, path, sizeof(path));
-    if (path_len <= 0) return 0;
-
-    // Check protected paths — prefix match
-    struct path_policy_key pk;
-    __builtin_memset(&pk, 0, sizeof(pk));
-    __builtin_memcpy(&pk.prefix, path, MAX_PATH_LEN);
-
-    // Try common prefix lengths (/etc, /etc/, /etc/p, etc.)
+    int base_start = (last_slash >= 0) ? last_slash + 1 : 0;
     #pragma unroll
-    for (int len = 4; len <= 20; len++) {
-        if (path[len] == '/' || path[len] == '\0') {
-            struct path_policy_key tpk;
-            __builtin_memset(&tpk, 0, sizeof(tpk));
-            __builtin_memcpy(&tpk.prefix, path, len + 1);
-            struct path_policy_value *pv = bpf_map_lookup_elem(&protected_paths, &tpk);
-            if (pv && pv->action == 1) return -1; // EPERM
-        }
-        if (path[len] == '\0') break;
+    for (int i = 0; i < MAX_COMM_LEN - 1; i++) {
+        int src = base_start + i;
+        if (src >= MAX_COMM_LEN || fname[src] == '\0') break;
+        base[i] = fname[src];
     }
 
-    return 0; // Allow
-}
+    // Check basename in blocked_commands
+    __u32 *bv = bpf_map_lookup_elem(&blocked_commands, base);
+    if (bv && *bv == 1) return -1;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// LSM HOOK: inode_unlink — monitor file deletions
-// ═══════════════════════════════════════════════════════════════════════════
-
-SEC("lsm/inode_unlink")
-int monitor_unlink(struct inode *dir, struct dentry *dentry)
-{
-    // Deletion monitoring only — actual blocking handled by file_open
     return 0;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// LSM HOOK: socket_bind — block network binds from blocked pids
-// ═══════════════════════════════════════════════════════════════════════════
+// LSM: file_open — pass-through (reserved for path protection)
+SEC("lsm/file_open")
+int BPF_PROG(block_file_open, struct file *file) { return 0; }
 
+// LSM: inode_unlink — pass-through (reserved for file deletion monitoring)
+SEC("lsm/inode_unlink")
+int BPF_PROG(monitor_unlink, struct inode *dir, struct dentry *dentry) { return 0; }
+
+// LSM: socket_bind — block network for blocked PIDs
 SEC("lsm/socket_bind")
-int monitor_bind(struct socket *sock)
+int BPF_PROG(monitor_bind, struct socket *sock)
 {
-    uint64_t pid_tgid = bpf_get_current_pid_tgid();
-    uint32_t pid = pid_tgid >> 32;
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 pid = pid_tgid >> 32;
 
-    if (is_whitelisted(pid)) return 0;
+    __u32 *wv = bpf_map_lookup_elem(&whitelist_pids, &pid);
+    if (wv && *wv == 1) return 0;
 
-    struct policy_key { uint32_t pid; };
-    struct policy_key pk = { .pid = pid };
-    uint32_t *pv = bpf_map_lookup_elem(&blocked_pids, &pk);
-    if (pv && *pv == 1) return -1; // EPERM
+    __u32 *pv = bpf_map_lookup_elem(&blocked_pids, &pid);
+    if (pv && *pv == 1) return -1;
 
-    return 0; // Allow
+    return 0;
 }
-
-char LICENSE[] SEC("license") = "GPL";

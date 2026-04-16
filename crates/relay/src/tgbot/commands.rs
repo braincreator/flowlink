@@ -41,63 +41,93 @@ pub async fn cmd_start(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
     let name = msg.from()
         .map(|u| u.first_name.clone())
         .unwrap_or_else(|| "друг".to_string());
+    let tg_chat_id = msg.chat.id.0 as i64;
 
-    // Check if /start has an argument (TG link code = account_id)
-    let text = msg.text().unwrap_or("");
-    let code = text
-        .strip_prefix("/start")
-        .map(|s| s.trim().split('@').next().unwrap_or("").trim())
-        .filter(|s| !s.is_empty());
+    // ── Phase 1: Check if already linked ──
+    if let Some(db) = &ctx.state.db {
+        let account_id = format!("tg:{}", tg_chat_id);
+        if let Ok(Some(_account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &account_id).await {
+            let text = format!(
+                "👋 Привет, *{}*!\n\nАккаунт уже привязан ✅\n\n📊 /status — статус\n💳 /billing — подписка\n🛡 /shield — безопасность\n📢 /settings — уведомления\n\n/help — все команды",
+                name,
+            );
+            bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+            return Ok(());
+        }
 
-    if let Some(code) = code {
-        let tg_chat_id = msg.chat.id.0 as i64;
-        if let Some(db) = &ctx.state.db {
-            // Try to find account by account_id
+        // ── Phase 2: Not linked — generate a 6-digit linking code ──
+        // This code will be consumed when the user enters it in the web dashboard
+        // via POST /api/notifications/channels/confirm
+        //
+        // For now, use legacy flow: /start <account_id> still works
+        // Future: auto-generate code and store in linking_codes table
+
+        let link_text = msg.text().unwrap_or("");
+        let arg = link_text
+            .strip_prefix("/start")
+            .map(|s| s.trim().split('@').next().unwrap_or("").trim())
+            .filter(|s| !s.is_empty());
+
+        if let Some(code) = arg {
+            // Legacy linking: /start <account_id>
             match flowlink_db::accounts::AccountRepo::get(db.pool(), code).await {
                 Ok(Some(account)) => {
+                    // Link: update account's tg_id AND bind notification channel
                     match flowlink_db::accounts::AccountRepo::update_tg_id(
                         db.pool(), &account.account_id, tg_chat_id,
                     ).await {
                         Ok(()) => {
+                            // Auto-bind notification channel
+                            let _ = flowlink_db::notification_channels::UserChannelRepo::upsert(
+                                db.pool(),
+                                &account.account_id,
+                                "telegram",
+                                &tg_chat_id.to_string(),
+                                Some(name.as_str()),
+                                true, // set as primary if first
+                            ).await;
                             log::info!(
-                                "Telegram привязан: account={}, tg_id={}",
-                                account.account_id, tg_chat_id
+                                "TG linked: account={}, tg_id={}, name={}",
+                                account.account_id, tg_chat_id, name
                             );
                             bot.send_message(msg.chat.id, format!(
-                                "✅ Telegram привязан к аккаунту *{}*!\n\n",
-                                account.account_id
+                                "✅ Telegram привязан к аккаунту!\n\nПривет, *{}*!\n\n📊 /status — статус\n💳 /billing — подписка\n🛡 /shield — безопасность\n📢 /settings — уведомления",
+                                name,
                             )).parse_mode(ParseMode::Markdown).await?;
                         }
                         Err(e) => {
-                            log::warn!("Не удалось привязать Telegram: {e}");
-                            bot.send_message(msg.chat.id, "❌ Ошибка привязки. Попробуйте позже.").await?;
+                            log::warn!("TG link failed: {e}");
+                            bot.send_message(msg.chat.id, "❌ Ошибка привязки.").await?;
                         }
                     }
                 }
                 Ok(None) => {
-                    bot.send_message(msg.chat.id, "❌ Аккаунт не найден. Проверьте код в настройках.").await?;
+                    bot.send_message(msg.chat.id,
+                        "❌ Код не найден.\n\nВведите код из настройки профиля FlowLink:\n<code>/start &lt;код&gt;</code>"
+                    ).parse_mode(ParseMode::Html).await?;
                 }
                 Err(e) => {
-                    log::warn!("Ошибка поиска аккаунта по коду: {e}");
-                    bot.send_message(msg.chat.id, "❌ Ошибка. Попробуйте позже.").await?;
+                    log::warn!("Account lookup failed: {e}");
+                    bot.send_message(msg.chat.id, "❌ Ошибка.").await?;
                 }
             }
         } else {
-            bot.send_message(msg.chat.id, "❌ База данных недоступна.").await?;
+            // No argument — show instructions with a generated code
+            // Future: generate random code, store in linking_codes, show to user
+            bot.send_message(msg.chat.id, format!(
+                "👋 Привет, *{}*!\n\nПривяжите Telegram к аккаунту FlowLink:\n\n1. Откройте настройки профиля\n2. Скопируйте ваш код привязки\n3. Отправьте: <code>/start &lt;код&gt;</code>\n\n⏳ Код действует 10 минут\n\n💡 Или сгенерируйте код в веб-дашборде:
+<i>Настройки → Уведомления → Привязать Telegram</i>",
+                name,
+            )).parse_mode(ParseMode::Html).await?;
         }
+    } else {
+        // No DB — just greet
+        let text = format!(
+            "👋 Привет, *{}*!\n\nБаза данных недоступна.\n/help — команды",
+            name,
+        );
+        bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
     }
-
-    let text = format!(
-        "👋 Привет, *{}*!\n\n\
-         Я — бот управления **FlowLink**.\n\n\
-         📊 /status — статус серверов\n\
-         💳 /billing — подписка\n\
-         📋 /plans — тарифы\n\
-         🛡 /shield — безопасность\n\n\
-         /help — все команды",
-        name,
-    );
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
     Ok(())
 }
 
@@ -321,7 +351,7 @@ pub async fn cmd_subscribe(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
                 )])
                 .collect();
             if !buttons.is_empty() {
-                let kb = InlineKeyboardMarkup::new(buttons);
+                let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(buttons);
                 bot.send_message(msg.chat.id, "Выберите план для подписки:")
                     .reply_markup(kb).await?;
             }
@@ -351,7 +381,7 @@ pub async fn cmd_subscribe(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
     }
 
     let checkout_url = format!("https://flowlink.flow-masters.ru/checkout/{}", plan_id);
-    let kb = InlineKeyboardMarkup::new(vec![
+    let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(vec![
         vec![InlineKeyboardButton::url(
             "💳 Оплатить",
             reqwest::Url::parse(&checkout_url).unwrap(),
@@ -407,7 +437,7 @@ pub async fn cmd_substatus(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
 
 /// /subcancel — cancel subscription with confirmation
 pub async fn cmd_subcancel(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
-    let kb = InlineKeyboardMarkup::new(vec![
+    let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(vec![
         vec![
             InlineKeyboardButton::callback("🔴 Да, отменить", "subcancel:confirm".to_string()),
             InlineKeyboardButton::callback("❌ Нет", "dismiss".to_string()),
@@ -464,7 +494,7 @@ pub async fn cmd_subchange(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
         effective,
     );
 
-    let kb = InlineKeyboardMarkup::new(vec![
+    let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(vec![
         vec![InlineKeyboardButton::callback(
             "✅ Подтвердить",
             format!("subchange:{}", new_plan_id),
@@ -526,7 +556,7 @@ pub async fn cmd_handle_payment_email(
             }
 
             let url = reqwest::Url::parse(&payment_url).unwrap_or_else(|_| payment_url.clone().parse().unwrap());
-            let kb = InlineKeyboardMarkup::new(vec![
+            let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(vec![
                 vec![InlineKeyboardButton::url(
                     "💳 Оплатить через СБП",
                     url,
@@ -743,7 +773,7 @@ pub async fn cmd_reload(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
 
 /// /emergency — emergency stop
 pub async fn cmd_emergency(bot: Bot, msg: Message, _ctx: BotContext) -> ResponseResult<()> {
-    let kb = InlineKeyboardMarkup::new(vec![
+    let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(vec![
         vec![
             InlineKeyboardButton::callback("🔴 STOP ALL", "emergency:confirm".to_string()),
             InlineKeyboardButton::callback("❌ Отмена", "dismiss".to_string()),
@@ -784,5 +814,67 @@ pub async fn cmd_restore(bot: Bot, msg: Message, _ctx: BotContext) -> ResponseRe
 /// /policy — placeholder
 pub async fn cmd_policy(bot: Bot, msg: Message, _ctx: BotContext) -> ResponseResult<()> {
     bot.send_message(msg.chat.id, "🛡 /shield — статус безопасности").await?;
+    Ok(())
+}
+
+/// /settings — notification channel management
+pub async fn cmd_settings(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
+    let chat_id = msg.chat.id;
+    let account_id = format!("tg:{}", chat_id.0);
+
+    let channels_text = if let Some(ref db) = ctx.state.db {
+        match flowlink_db::notification_channels::UserChannelRepo::list_for_account(db.pool(), &account_id).await {
+            Ok(channels) if !channels.is_empty() => {
+                channels.iter().enumerate().map(|(i, ch)| {
+                    let icon = match ch.channel_type.as_str() {
+                        "telegram" => "🔵",
+                        "max" => "💬",
+                        "slack" => "🟣",
+                        "webhook" => "🌐",
+                        _ => "⚪",
+                    };
+                    let primary = if ch.is_primary { " ✅" } else { "" };
+                    let verified = if ch.verified { "" } else { " ⏳" };
+                    let severity = ch.min_severity.as_deref().unwrap_or("info");
+                    let name = ch.display_name.as_deref().unwrap_or(&ch.channel_type);
+                    format!("{}. {} {} — {}{}{}", i + 1, icon, name, severity, primary, verified)
+                }).collect::<Vec<_>>().join("\n")
+            }
+            _ => "Нет привязанных каналов".into(),
+        }
+    } else {
+        "База данных не подключена".into()
+    };
+
+    let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(vec![
+        vec![
+            InlineKeyboardButton::callback("💬 MAX", "notif:bind:max"),
+            InlineKeyboardButton::callback("🟣 Slack", "notif:bind:slack"),
+        ],
+        vec![InlineKeyboardButton::callback("🔔 Тест", "notif:test")],
+    ]);
+
+    bot.send_message(chat_id, format!("📢 <b>Уведомления</b>\n\n{}\n\n<i>Shield, Approvals, Billing → ваши каналы</i>", channels_text))
+        .parse_mode(ParseMode::Html)
+        .reply_markup(kb)
+        .await?;
+    Ok(())
+}
+
+/// /notiftest — send test notification
+pub async fn cmd_notiftest(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
+    let chat_id = msg.chat.id;
+    let router = ctx.state.notification_router.get();
+    if let Some(router) = router {
+        let n = crate::notifications::Notification::system(
+            "Test",
+            &format!("✅ FlowLink уведомления работают!\n{}", chrono::Utc::now().format("%H:%M:%S")),
+            crate::notifications::Severity::Info,
+        );
+        let delivered = router.send(&n).await;
+        bot.send_message(chat_id, format!("🔔 Отправлено: {} кан.", delivered)).await?;
+    } else {
+        bot.send_message(chat_id, "⚠️ Router не настроен").await?;
+    }
     Ok(())
 }

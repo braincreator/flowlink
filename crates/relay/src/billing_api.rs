@@ -628,7 +628,7 @@ pub async fn change_subscription_plan(
     }
 }
 
-// TODO: legacy DB-only subscription CRUD — kept for backward compat
+// Legacy DB-only subscription CRUD
 // GET /api/billing/subscriptions — список подписок из БД
 pub async fn list_subscriptions(
     State(state): State<AppState>,
@@ -763,6 +763,21 @@ pub async fn tochka_webhook(
                             let _ = flowlink_db::accounts::AccountRepo::update_plan(
                                 db.pool(), &sub.account_id, &sub.plan_id,
                             ).await;
+                            // Send payment success email for subscription
+                            if let Some(email_svc) = &state.email_service {
+                                if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &sub.account_id).await {
+                                    if let Some(ref email) = account.email {
+                                        let plan_name = sub.plan_id.clone();
+                                        let email_svc = email_svc.clone();
+                                        let to = email.clone();
+                                        tokio::spawn(async move {
+                                            if let Err(e) = email_svc.send_payment_success(&to, &to, &plan_name, "подписка").await {
+                                                log::warn!("Failed to send subscription welcome email to {to}: {e}");
+                                            }
+                                        });
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -780,6 +795,23 @@ pub async fn tochka_webhook(
                         callback.subscription_id,
                         callback.failure_reason.as_deref().unwrap_or("unknown")
                     );
+                    // Send payment failed email
+                    if let Some(email_svc) = &state.email_service {
+                        if let Ok(Some(sub)) = flowlink_db::subscriptions::SubscriptionRepo::get_active(db.pool(), &callback.subscription_id).await {
+                            if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &sub.account_id).await {
+                                if let Some(ref email) = account.email {
+                                    let plan_name = sub.plan_id.clone();
+                                    let email_svc = email_svc.clone();
+                                    let to = email.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = email_svc.send_payment_failed(&to, &to, &plan_name).await {
+                                            log::warn!("Failed to send payment failed email to {to}: {e}");
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
                 "cancelled" | "expired" => {
                     let _ = flowlink_db::subscriptions::SubscriptionRepo::cancel(
@@ -948,7 +980,7 @@ pub struct SubscribeResponse {
 }
 
 // ═══════════════════════════════════════════════
-// TODO: legacy SBP one-time payment (kept for reference)
+// Legacy SBP one-time payment (kept for reference)
 // ═══════════════════════════════════════════════
 /*
 #[derive(Deserialize)]

@@ -1,6 +1,6 @@
 pub mod pool;
 pub mod auth;
-pub mod auth_api;
+pub mod auth_oauth;
 pub mod handler;
 pub mod eventbus;
 pub mod approval;
@@ -20,8 +20,10 @@ pub mod billing_persist;
 pub mod billing_middleware;
 pub mod email;
 pub mod email_auth;
+pub mod notifications;
 pub mod email_queue;
 pub mod preferences_api;
+pub mod notifications_api;
 pub mod dashboard;
 
 pub mod config_reload;
@@ -188,6 +190,7 @@ impl Relay {
                 db.clone(),
             )),
             metrics,
+            tg_bot: std::sync::OnceLock::new(),
             billing: if self.config.billing.enabled {
                 let payment_config = {
                     let bc = &self.config.billing;
@@ -205,11 +208,19 @@ impl Relay {
                     }
                     pc
                 };
-                let engine = Arc::new(flowlink_billing::BillingEngine::new(payment_config));
+                let engine = if let Some(ref db_pool) = db {
+                    // Use DbPersist for real DB-backed billing
+                    let persist = Arc::new(crate::billing_persist::DbPersist::new(db_pool.pool().clone()));
+                    Arc::new(flowlink_billing::BillingEngine::with_persist(payment_config, persist))
+                } else {
+                    Arc::new(flowlink_billing::BillingEngine::new(payment_config))
+                };
                 // Load plans from DB if available
                 if let Some(ref db_pool) = db {
                     engine.plans().load_from_db(db_pool).await;
                 }
+                // Load all account billing data from DB
+                engine.load_all().await.ok();
                 Some(engine)
             } else {
                 None
@@ -254,7 +265,9 @@ impl Relay {
             rate_limiter: Arc::new(ratelimit::RateLimiter::new(100, 10)),
             control_plane: crate::control_plane::ControlPlaneState::new(),
             email_queue: std::sync::OnceLock::new(),
-            tg_bot: std::sync::OnceLock::new(),
+            notification_router: std::sync::OnceLock::new(),
+            notification_store: Some(Arc::new(crate::preferences_api::NotificationStore::new())),
+            rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
         };
 
         // Email queue worker (requires both email_service and db)
@@ -364,6 +377,90 @@ impl Relay {
                 let _ = bot_state.tg_bot.set(teloxide::Bot::new(&token));
                 crate::tgbot::start_tgbot(bot_state, token, bot_config).await;
                 info!("Telegram bot started");
+
+                // Initialize notification router from env with DB pool
+                let pool_clone = state.db.as_ref().map(|d| d.pool().clone());
+                let router = crate::notifications::NotificationRouter::from_env(pool_clone);
+                if router.channel_count() > 0 {
+                    let router = std::sync::Arc::new(router);
+                    let _ = state.notification_router.set(router.clone());
+
+                    // Start shield alert → notification channel forwarder
+                    let notify_state = state.clone();
+                    let notify_router = router.clone();
+                    tokio::spawn(async move {
+                        let mut rx = notify_state.eventbus.subscribe("shield_alert");
+                        log::info!("🛡️ Shield → notification channels active ({} channel(s))", notify_router.channel_count());
+                        while let Ok(msg) = rx.recv().await {
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&msg) {
+                                // Resolve agent_id → account_id via registry
+                                let account_id = v.get("agent_id")
+                                    .and_then(|a| a.as_str())
+                                    .and_then(|agent_id| {
+                                        notify_state.registry.get_agent(agent_id)
+                                            .map(|agent| agent.client_id)
+                                    })
+                                    .unwrap_or_default();
+
+                                let mut notification = crate::notifications::Notification::shield_alert(
+                                    &account_id,
+                                    v.get("pid").and_then(|p| p.as_i64()).unwrap_or(0) as i32,
+                                    v.get("username").and_then(|u| u.as_str()).unwrap_or("?"),
+                                    v.get("command").and_then(|c| c.as_str()).unwrap_or("?"),
+                                    v.get("rule_name").and_then(|r| r.as_str()).unwrap_or("?"),
+                                    v.get("action").and_then(|a| a.as_str()).unwrap_or("?"),
+                                );
+
+                                // If no account resolved, also mark for global (admin) delivery
+                                if account_id.is_empty() {
+                                    notification.tags.push("global_fallback".into());
+                                }
+
+                                notify_router.send(&notification).await;
+                            }
+                        }
+                    });
+
+                    // Start approval → notification channel forwarder
+                    let approve_state = state.clone();
+                    let approve_router = router.clone();
+                    tokio::spawn(async move {
+                        let mut rx = approve_state.eventbus.subscribe("approval_request");
+                        log::info!("📋 Approval → notification channels active");
+                        while let Ok(msg) = rx.recv().await {
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&msg) {
+                                let account_id = v.get("agent_id")
+                                    .and_then(|a| a.as_str())
+                                    .and_then(|agent_id| {
+                                        approve_state.registry.get_agent(agent_id)
+                                            .map(|agent| agent.client_id)
+                                    })
+                                    .unwrap_or_default();
+
+                                let body = format!(
+                                    "<b>📋 Approval Request</b>\nAgent: {}\nCommand: <code>{}</code>\n{}",
+                                    v.get("agent_id").and_then(|a| a.as_str()).unwrap_or("?"),
+                                    v.get("command").and_then(|c| c.as_str()).unwrap_or("?"),
+                                    v.get("reason").and_then(|r| r.as_str()).unwrap_or(""),
+                                );
+
+                                let notification = crate::notifications::Notification {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    account_id,
+                                    severity: crate::notifications::Severity::Warning,
+                                    category: crate::notifications::Category::Audit,
+                                    subject: "Approval Required".into(),
+                                    body,
+                                    data: std::collections::HashMap::new(),
+                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                    tags: vec!["approval".into(), "audit".into()],
+                                };
+
+                                approve_router.send(&notification).await;
+                            }
+                        }
+                    });
+                }
             }
         }
 

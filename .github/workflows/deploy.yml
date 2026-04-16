@@ -1,0 +1,83 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            libssl-dev pkg-config libclang-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --bin flowlink
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowlink-binary
+          path: target/release/flowlink
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: flowlink-binary
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+
+            # Stop existing service
+            sudo systemctl stop flowlink || true
+
+            # Backup current binary
+            if [ -f /usr/local/bin/flowlink ]; then
+              cp /usr/local/bin/flowlink /usr/local/bin/flowlink.bak
+            fi
+
+            # Upload new binary
+            sudo mkdir -p /opt/flowlink
+            sudo chown $USER:$USER /opt/flowlink
+
+            echo "Waiting for binary upload..."
+
+            # Restart service
+            sudo systemctl start flowlink
+
+            # Health check
+            sleep 3
+            curl -sf http://localhost:8080/healthz || {
+              echo "Health check failed! Rolling back..."
+              sudo systemctl stop flowlink
+              if [ -f /usr/local/bin/flowlink.bak ]; then
+                cp /usr/local/bin/flowlink.bak /usr/local/bin/flowlink
+                sudo systemctl start flowlink
+              fi
+              exit 1
+            }
+
+            echo "Deploy successful!"

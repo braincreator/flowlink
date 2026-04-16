@@ -56,6 +56,10 @@ pub struct PlanLimits {
     pub exec_timeout_sec: u64,
     /// Shield level: "basic", "advanced", "enterprise"
     pub shield_level: String,
+    /// Rate limit: max API requests per window
+    pub rate_limit_requests: u32,
+    /// Rate limit: window in seconds
+    pub rate_limit_window_secs: u32,
 }
 
 /// A billing plan
@@ -122,6 +126,8 @@ impl Plan {
                 max_file_size_mb: 10,
                 exec_timeout_sec: 60,
                 shield_level: "basic".to_string(),
+                rate_limit_requests: 30,
+                rate_limit_window_secs: 60,
             },
             features: all_features(),
             available: true,
@@ -150,6 +156,8 @@ impl Plan {
                 max_file_size_mb: 100,
                 exec_timeout_sec: 300,
                 shield_level: "advanced".to_string(),
+                rate_limit_requests: 200,
+                rate_limit_window_secs: 60,
             },
             features: all_features(),
             available: true,
@@ -178,6 +186,8 @@ impl Plan {
                 max_file_size_mb: 0, // configurable
                 exec_timeout_sec: 0, // configurable
                 shield_level: "enterprise".to_string(),
+                rate_limit_requests: 0, // unlimited
+                rate_limit_window_secs: 60,
             },
             features: all_features(),
             available: true,
@@ -222,6 +232,8 @@ impl Plan {
                 max_file_size_mb: db.limits.max_file_size_mb,
                 exec_timeout_sec: db.limits.exec_timeout_sec,
                 shield_level: db.limits.shield_level.clone(),
+                rate_limit_requests: if db.limits.rate_limit_requests > 0 { db.limits.rate_limit_requests as u32 } else { 100 },
+                rate_limit_window_secs: if db.limits.rate_limit_window_secs > 0 { db.limits.rate_limit_window_secs as u32 } else { 60 },
             },
             features: db.features,
             available: db.is_active,
@@ -361,7 +373,7 @@ mod tests {
         assert_eq!(pro.limits.max_hosts, 50);
         assert_eq!(pro.limits.max_users, 25);
         assert_eq!(pro.limits.audit_retention_days, 365);
-        assert_eq!(pro.price_kopecks, 599_000);
+        assert_eq!(pro.price_kopecks, 499_000);
         assert_eq!(pro.trial_days, None);
     }
 

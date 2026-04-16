@@ -156,17 +156,20 @@ impl Sentinel {
     }
 }
 
+
+// Wrapper to make perf_buffer pointer Send-safe
+#[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+struct SendPerfBuffer(*mut libbpf_sys::perf_buffer);
+#[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+unsafe impl Send for SendPerfBuffer {}
+
 // ── Platform backends ──────────────────────────────────────────────────────
 
 #[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
 impl Sentinel {
     async fn start_ebpf(&mut self) -> anyhow::Result<()> {
-        use aya::maps::perf::AsyncPerfEventArray;
-        use aya::programs::TracePoint;
-        use aya::util::online_cpus;
-        use aya::Bpf;
-        use bytes::BytesMut;
-        use tokio::sync::mpsc::error::TrySendError;
+        use libbpf_sys::*;
+        use std::ptr;
 
         // ── Try to load LSM BPF blocker (kernel-level blocking) ──
         match crate::lsm_blocker::LsmBlocker::load() {
@@ -184,102 +187,114 @@ impl Sentinel {
             }
             Err(e) => {
                 tracing::warn!("LSM BPF not available (monitoring only): {}", e);
-                tracing::warn!("Enable with: echo \"bpf,landlock,lockdown,yama,apparmor\" > /sys/kernel/security/lsm");
             }
         }
 
-        // ── Continue with tracepoint monitoring ──
-
+        // ── Tracepoint monitoring via libbpf ──
         let bpf_bytes = include_bytes!("../bpf/sentinel.bpf.o");
-        let mut bpf =
-            Bpf::load(bpf_bytes).map_err(|e| anyhow::anyhow!("Failed to load BPF: {}", e))?;
+        let obj_opts = bpf_object_open_opts {
+            sz: std::mem::size_of::<bpf_object_open_opts>() as u64,
+            ..unsafe { std::mem::zeroed() }
+        };
 
-        // Attach all tracepoints
-        let programs: &[(&str, &str, &str)] = &[
-            ("trace_execve", "syscalls", "sys_enter_execve"),
-            ("trace_openat", "syscalls", "sys_enter_openat"),
-            ("trace_connect", "syscalls", "sys_enter_connect"),
-            ("trace_bind", "syscalls", "sys_enter_bind"),
-            ("trace_unlinkat", "syscalls", "sys_enter_unlinkat"),
-            ("trace_mount", "syscalls", "sys_enter_mount"),
+        let obj = unsafe {
+            bpf_object__open_mem(
+                bpf_bytes.as_ptr() as *const libc::c_void,
+                bpf_bytes.len() as u64,
+                &obj_opts,
+            )
+        };
+        if obj.is_null() {
+            tracing::warn!("libbpf: failed to open tracepoint BPF object");
+            return Ok(());
+        }
+
+        let ret = unsafe { bpf_object__load(obj) };
+        if ret != 0 {
+            let errno = unsafe { *libc::__errno_location() };
+            tracing::warn!("libbpf: failed to load tracepoint programs (errno={})", errno);
+            unsafe { bpf_object__close(obj) };
+            return Ok(());
+        }
+
+        // Attach tracepoint programs
+        let tracepoints: &[(&str, &str)] = &[
+            ("trace_execve", "syscalls/sys_enter_execve"),
+            ("trace_openat", "syscalls/sys_enter_openat"),
+            ("trace_connect", "syscalls/sys_enter_connect"),
+            ("trace_bind", "syscalls/sys_enter_bind"),
+            ("trace_unlinkat", "syscalls/sys_enter_unlinkat"),
+            ("trace_mount", "syscalls/sys_enter_mount"),
         ];
 
-        for (prog_name, category, name) in programs {
-            let program: &mut TracePoint = bpf
-                .program_mut(prog_name)
-                .ok_or_else(|| anyhow::anyhow!("BPF program '{}' not found", prog_name))?
-                .try_into()
-                .map_err(|e: aya::programs::ProgramError| {
-                    anyhow::anyhow!("'{}' is not a TracePoint: {}", prog_name, e)
-                })?;
-            program
-                .load()
-                .map_err(|e| anyhow::anyhow!("Failed to load '{}': {}", prog_name, e))?;
-            program
-                .attach(category, name)
-                .map_err(|e| anyhow::anyhow!("Failed to attach '{}': {}", prog_name, e))?;
+        let mut attached = 0;
+        for (prog_name, _tp) in tracepoints {
+            let c_name = std::ffi::CString::new(*prog_name).unwrap();
+            let prog = unsafe { bpf_object__find_program_by_name(obj, c_name.as_ptr()) };
+            if prog.is_null() { continue; }
+            let link = unsafe { bpf_program__attach(prog) };
+            if !link.is_null() { attached += 1; }
         }
 
-        // Read events from perf buffer
-        let mut perf_array: AsyncPerfEventArray<_> = bpf
-            .take_map("events")
-            .ok_or_else(|| anyhow::anyhow!("BPF 'events' map not found"))?
-            .try_into()
-            .map_err(|e: aya::maps::MapError| {
-                anyhow::anyhow!("'events' is not a perf event array: {}", e)
-            })?;
+        // Set up perf buffer for events
+        let events_cname = std::ffi::CString::new("events").unwrap();
+        let events_map = unsafe { bpf_object__find_map_by_name(obj, events_cname.as_ptr()) };
+        if events_map.is_null() {
+            tracing::info!("eBPF: {} tracepoints attached (no events map)", attached);
+            std::mem::forget(obj);
+            return Ok(());
+        }
+        let events_fd = unsafe { bpf_map__fd(events_map) };
 
-        let cpus = online_cpus().map_err(|e| anyhow::anyhow!("Failed to get CPU list: {}", e))?;
+        // Perf buffer callback
         let sender = self.sender.clone();
-
-        for cpu_id in cpus {
-            let mut buf = perf_array
-                .open(cpu_id, None)
-                .map_err(|e| anyhow::anyhow!("Failed to open perf buf for cpu {}: {}", cpu_id, e))?;
-            let sender = sender.clone();
-
-            tokio::spawn(async move {
-                let mut buffers: Vec<BytesMut> =
-                    (0..16).map(|_| BytesMut::with_capacity(2048)).collect();
-
-                loop {
-                    let events = buf.read_events(&mut buffers).await;
-                    match events {
-                        Ok(n) => {
-                            if n.read == 0 {
-                                continue;
-                            }
-                            for i in 0..n.read {
-                                let data = &buffers[i][..n.header.size as usize];
-                                if let Ok(event) = parse_bpf_event(data) {
-                                    match sender.try_send(event) {
-                                        Ok(()) => {}
-                                        Err(TrySendError::Full(_)) => {
-                                            tracing::debug!("event channel full, dropping");
-                                        }
-                                        Err(TrySendError::Closed(_)) => return,
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("perf event read error on cpu {}: {}", cpu_id, e);
-                            break;
-                        }
-                    }
+        let sample_ctx: Box<Box<dyn FnMut(*const libc::c_void, usize) + Send>> =
+            Box::new(Box::new(move |data: *const libc::c_void, size: usize| {
+                let bytes = unsafe { std::slice::from_raw_parts(data as *const u8, size) };
+                if let Ok(event) = parse_bpf_event(bytes) {
+                    use tokio::sync::mpsc::error::TrySendError;
+                    let _ = sender.try_send(event);
                 }
-            });
+            }));
+        let sample_ctx_ptr = Box::into_raw(sample_ctx) as *mut libc::c_void;
+
+        let pb = SendPerfBuffer(unsafe {
+            perf_buffer__new(
+                events_fd, 64,
+                Some(Self::perf_sample_cb), None,
+                sample_ctx_ptr, ptr::null(),
+            )
+        });
+        if pb.0.is_null() {
+            tracing::warn!("Failed to create perf buffer");
+            std::mem::forget(obj);
+            return Ok(());
         }
 
-        tracing::info!(
-            "eBPF sentinel started — monitoring execve, openat, connect, bind, unlinkat, mount on {} CPUs",
-            cpus.len()
-        );
+        // Poll in background
+        let pb_raw = pb.0 as usize; // usize is Send
+        tokio::task::spawn_blocking(move || {
+            let pb_ptr = pb_raw as *mut libbpf_sys::perf_buffer;
+            loop {
+                let ret = unsafe { perf_buffer__poll(pb_ptr, 100) };
+                if ret < 0 { break; }
+            }
+            unsafe { perf_buffer__free(pb_ptr) };
+        });
 
-        // Prevent BPF from being dropped (unloads programs)
-        std::mem::forget(bpf);
-
+        tracing::info!("eBPF sentinel started via libbpf: {} tracepoints attached", attached);
+        std::mem::forget(obj);
         Ok(())
+    }
+
+    #[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
+    unsafe extern "C" fn perf_sample_cb(ctx: *mut libc::c_void, _cpu: i32, data: *mut libc::c_void, size: u32) {
+        unsafe {
+            if !ctx.is_null() {
+                let cb = &mut *(ctx as *mut Box<dyn FnMut(*const libc::c_void, usize) + Send>);
+                cb(data as *const libc::c_void, size as usize);
+            }
+        }
     }
 }
 

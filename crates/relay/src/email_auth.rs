@@ -111,8 +111,21 @@ pub async fn send_code(
         }))).into_response();
     }
 
-    // TODO: send actual email when email service is connected
-    log::info!("📧 Dev mode: code for {email}: {code}");
+    // Send verification email
+    let send_result = if let Some(ref email_svc) = state.email_service {
+        email_svc.send_verification_code(&email, &code).await
+    } else {
+        log::info!("📧 Dev mode (no SMTP): code for {email}: {code}");
+        Ok(())
+    };
+
+    if let Err(e) = send_result {
+        log::warn!("Failed to send verification email to {email}: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+            "ok": false, "error": "Failed to send email"
+        }))).into_response();
+    }
+
     log::info!("🔑 Verification code sent to {email}");
 
     (StatusCode::OK, Json(json!({

@@ -612,7 +612,7 @@ mod tests {
     }
 }
 
-fn json_error(status: StatusCode, code: &str, message: &str) -> Response {
+pub(crate) fn json_error(status: StatusCode, code: &str, message: &str) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "application/json")],

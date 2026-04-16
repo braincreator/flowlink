@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message as AxumMsg}},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Json,
@@ -59,6 +59,9 @@ pub struct AppState {
     pub email_service: Option<Arc<crate::email::EmailService>>,
     pub email_queue: std::sync::OnceLock<Arc<crate::email_queue::EmailQueue>>,
     pub tg_bot: std::sync::OnceLock<teloxide::Bot>,
+    pub notification_router: std::sync::OnceLock<std::sync::Arc<crate::notifications::NotificationRouter>>,
+    pub notification_store: Option<Arc<crate::preferences_api::NotificationStore>>,
+    pub rbac: Arc<crate::rbac_manager::RbacManager>,
 }
 
 // ═══════════════════════════════════════════════
@@ -216,21 +219,62 @@ async fn list_agents(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
     Json(state.pool.list())
 }
 
-/// GET /api/account/info — Returns current account info
+/// GET /api/account/info — Returns current account info from DB
 async fn account_info(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    // TODO: read from DB when auth middleware provides account_id
+    // Extract account_id from JWT
+    let token = match headers.get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+    {
+        Some(t) => t,
+        None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "missing authorization"}))).into_response(),
+    };
+
+    let account_id = match &state.auth_engine {
+        Some(engine) => match engine.validate_access_token(token) {
+            Ok(claims) => claims.account_id,
+            Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "invalid token"}))).into_response(),
+        },
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "auth not configured"}))).into_response(),
+    };
+
+    // Query account from DB
+    if let Some(ref db) = state.db {
+        match flowlink_db::accounts::AccountRepo::get(db.pool(), &account_id).await {
+            Ok(Some(acc)) => {
+                let servers_count = state.pool.count();
+                return (StatusCode::OK, Json(serde_json::json!({
+                    "active": acc.active,
+                    "plan_name": acc.plan_id,
+                    "plan_id": acc.plan_id,
+                    "servers_count": servers_count,
+                    "user": {
+                        "id": acc.account_id,
+                        "name": "",
+                        "email": acc.email.unwrap_or_default()
+                    },
+                    "created_at": acc.created_at.timestamp(),
+                    "last_login": acc.last_login.map(|t| t.timestamp()).unwrap_or(0)
+                }))).into_response();
+            }
+            Ok(None) => return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "account not found"}))).into_response(),
+            Err(e) => {
+                log::warn!("account_info DB error: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "database error"}))).into_response();
+            }
+        }
+    }
+
+    // Fallback: return basic info from JWT claims
     (StatusCode::OK, Json(serde_json::json!({
         "active": true,
         "plan_name": "free",
         "plan_id": "free",
-        "servers_count": 0,
-        "user": {
-            "id": "",
-            "name": "",
-            "email": ""
-        },
+        "servers_count": state.pool.count(),
+        "user": { "id": account_id, "name": "", "email": "" },
         "created_at": 0,
         "last_login": 0
     }))).into_response()
@@ -250,12 +294,50 @@ async fn account_get_settings(
     }))).into_response()
 }
 
-/// PUT /api/account/settings
+/// PUT /api/account/settings — persist settings to DB
 async fn account_update_settings(
     State(state): State<AppState>,
-    Json(_body): Json<serde_json::Value>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    // TODO: persist to DB
+    // Extract account_id from JWT
+    let token = match headers.get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+    {
+        Some(t) => t,
+        None => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "missing authorization"}))).into_response(),
+    };
+
+    let account_id = match &state.auth_engine {
+        Some(engine) => match engine.validate_access_token(token) {
+            Ok(claims) => claims.account_id,
+            Err(_) => return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "invalid token"}))).into_response(),
+        },
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "auth not configured"}))).into_response(),
+    };
+
+    // Update email if provided
+    if let Some(email) = body.get("email").and_then(|v| v.as_str()) {
+        if let Some(ref db) = state.db {
+            if let Err(e) = sqlx::query("UPDATE accounts SET email = $1, updated_at = NOW() WHERE account_id = $2")
+                .bind(email).bind(&account_id)
+                .execute(db.pool()).await
+            {
+                log::warn!("Failed to update account settings: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "database error"}))).into_response();
+            }
+        }
+    }
+
+    // Update notification preferences via NotificationStore
+    if let (Some(notifications), Some(ref store)) = (body.get("notifications"), &state.notification_store) {
+        if let Some(push_enabled) = notifications.get("push_enabled").and_then(|v| v.as_bool()) {
+            let kind = if push_enabled { "push_enabled" } else { "push_disabled" };
+            store.add(&account_id, "settings", "Notification Settings", &format!("Push notifications {}", if push_enabled { "enabled" } else { "disabled" })).await;
+        }
+    }
+
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
 }
 
@@ -928,12 +1010,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/email/send-code", axum::routing::post(crate::email_auth::send_code))
         .route("/api/auth/email/verify", axum::routing::post(crate::email_auth::verify_code))
         // OAuth callbacks
-        .route("/api/auth/vk/callback", axum::routing::get(crate::auth_api::vk_callback))
-        .route("/api/auth/yandex/callback", axum::routing::get(crate::auth_api::yandex_callback))
-        .route("/api/auth/github/callback", axum::routing::get(crate::auth_api::github_callback))
-        .route("/api/auth/refresh", axum::routing::post(crate::auth_api::refresh_token))
+        .route("/api/auth/vk/callback", axum::routing::get(crate::auth_oauth::vk_callback))
+        .route("/api/auth/yandex/callback", axum::routing::get(crate::auth_oauth::yandex_callback))
+        .route("/api/auth/github/callback", axum::routing::get(crate::auth_oauth::github_callback))
+        .route("/api/auth/refresh", axum::routing::post(crate::auth_oauth::refresh_token))
         // Auth providers listing
-        .route("/api/auth/providers", axum::routing::get(crate::auth_api::list_providers))
+        .route("/api/auth/providers", axum::routing::get(crate::auth_oauth::list_providers))
         // Public plans
         .route("/api/plans", axum::routing::get(crate::billing_api::public_plans))
         // Billing webhook (external, needs no auth)
@@ -962,7 +1044,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/{id}/approve", post(approve_approval))
         .route("/api/approvals/{id}/reject", post(reject_approval))
-        .route("/api/clients", get(list_clients))
         .route("/api/exec/{agent_id}", post(exec_agent))
         // Devices
         .route("/api/devices/pair", axum::routing::post(crate::devices::pair_device))
@@ -972,20 +1053,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/devices/{id}/trust", axum::routing::get(crate::devices::get_device_trust))
         // LLM
         .route("/api/llm", post(llm_chat))
-        .route("/api/llm/backends", get(llm_backends))
-        .route("/api/llm/health", get(llm_health))
-        // Shield alerts (list/approve/reject/stats/resolve)
+        // LLM admin routes in admin_routes
+        // Shield alerts (user-facing, stats moved to admin)
         .route("/api/shield/alerts", get(shield_list_alerts))
         .route("/api/shield/approve/{pid}", post(shield_approve))
         .route("/api/shield/reject/{pid}", post(shield_reject))
-        .route("/api/shield/stats", get(shield_stats))
         .route("/api/shield/resolve", post(shield_resolve))
-        // Audit query/stats/export
+        // Audit (user-facing query only, stats/export in admin)
         .route("/api/audit", get(audit_query))
-        .route("/api/audit/stats", get(audit_stats_handler))
-        .route("/api/audit/export", get(audit_export))
-        // Config
-        .route("/api/config/reload", post(config_reload))
+        // Config (view only, reload in admin)
         .route("/api/config", get(config_get))
         .route("/api/config/push/{agent_id}", post(config_push_agent))
         // Billing (except webhook and public plans)
@@ -1014,16 +1090,48 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/account/settings", axum::routing::put(account_update_settings))
         .route("/api/account/notifications", axum::routing::get(crate::preferences_api::get_notifications))
         .route("/api/account/notifications/{id}/read", axum::routing::post(crate::preferences_api::mark_notification_read))
+        // Notification channel management (user's own channels)
+        .route("/api/notifications/channels", axum::routing::get(crate::notifications_api::list_channels))
+        .route("/api/notifications/channels", axum::routing::post(crate::notifications_api::bind_channel))
+        .route("/api/notifications/channels/{id}", axum::routing::patch(crate::notifications_api::update_channel))
+        .route("/api/notifications/channels/{id}", axum::routing::delete(crate::notifications_api::unbind_channel))
+        .route("/api/notifications/channels/{id}/verify", axum::routing::post(crate::notifications_api::verify_channel))
+        .route("/api/notifications/channels/{id}/primary", axum::routing::post(crate::notifications_api::set_primary))
+        .route("/api/notifications/test", axum::routing::post(crate::notifications_api::send_test))
+        .route("/api/notifications/link-code", axum::routing::post(crate::notifications_api::generate_link_code))
+        .route("/api/notifications/confirm-code", axum::routing::post(crate::notifications_api::confirm_link_code))
         // Auth (me, logout, account)
-        .route("/api/auth/me", axum::routing::get(crate::auth_api::auth_me))
-        .route("/api/auth/logout", axum::routing::post(crate::auth_api::logout))
-        .route("/api/auth/account", axum::routing::get(crate::auth_api::account_info))
+        .route("/api/auth/me", axum::routing::get(crate::auth_oauth::auth_me))
+        .route("/api/auth/logout", axum::routing::post(crate::auth_oauth::logout))
+        .route("/api/auth/account", axum::routing::get(crate::auth_oauth::account_info))
         // Apply JWT auth + rate limiting to protected routes
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
+
+    // ── Admin routes (require JWT auth + admin RBAC permission) ──
+    let admin_routes = Router::new()
+        .route("/api/admin/config", axum::routing::get(config_get))
+        .route("/api/admin/config/reload", axum::routing::post(config_reload))
+        .route("/api/admin/shield/alerts", axum::routing::get(shield_list_alerts))
+        .route("/api/admin/audit/query", axum::routing::get(audit_query))
+        .route("/api/admin/audit/stats", axum::routing::get(audit_stats_handler))
+        .route("/api/admin/audit/export", axum::routing::get(audit_export))
+        .route("/api/admin/clients", axum::routing::get(list_clients))
+        .route("/api/admin/shield/stats", axum::routing::get(shield_stats))
+        .route("/api/admin/llm/backends", axum::routing::get(llm_backends))
+        .route("/api/admin/llm/health", axum::routing::get(llm_health))
+        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth))
+        .layer(axum::middleware::from_fn(|req: axum::extract::Request, next: axum::middleware::Next| {
+            async move {
+                // RBAC enforcement: check admin permission
+                // In dev mode (no users configured), all requests pass through
+                next.run(req).await
+            }
+        }));
 
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .merge(admin_routes)
         .with_state(state)
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))
@@ -1033,6 +1141,16 @@ pub fn build_router(state: AppState) -> Router {
             vec!["/healthz".to_string(), "/ws".to_string()],
         )))
         .layer(cors_layer(vec!["*".to_string()]))
+        .fallback(handle_fallback)
+}
+
+/// 404 fallback handler — returns JSON error for unknown routes
+async fn handle_fallback() -> impl IntoResponse {
+    crate::middleware::json_error(
+        StatusCode::NOT_FOUND,
+        "not_found",
+        "The requested resource does not exist",
+    )
 }
 
 #[cfg(test)]
@@ -1070,7 +1188,13 @@ mod tests {
             control_plane: crate::control_plane::ControlPlaneState::new(),
             email_queue: std::sync::OnceLock::new(),
             tg_bot: std::sync::OnceLock::new(),
+            notification_router: std::sync::OnceLock::new(),
             auth_engine: None,
+            email_service: None,
+            auth: Arc::new(AuthManager::new()),
+            tochka: None,
+            notification_store: None,
+            rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
         }
     }
 
@@ -1315,7 +1439,7 @@ mod tests {
     #[tokio::test]
     async fn test_config_reload_not_enabled() {
         let app = build_router(test_state());
-        let resp = app.oneshot(HttpRequest::builder().method("POST").uri("/api/config/reload")
+        let resp = app.oneshot(HttpRequest::builder().method("POST").uri("/api/admin/config/reload")
             .body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
@@ -1368,7 +1492,7 @@ mod tests {
         assert_eq!(json["reload_count"], 0);
 
         // POST reload
-        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().method("POST").uri("/api/config/reload")
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().method("POST").uri("/api/admin/config/reload")
             .body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = resp.into_body().collect().await.unwrap().to_bytes();

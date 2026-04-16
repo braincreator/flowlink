@@ -81,6 +81,15 @@ fn make_state(tmp: &std::path::Path) -> AppState {
         usage_tracker: Arc::new(flowlink_relay::billing_middleware::UsageTracker::new()),
         rate_limiter: Arc::new(flowlink_relay::ratelimit::RateLimiter::new(100, 10)),
         control_plane: ControlPlaneState::new(),
+        email_queue: std::sync::OnceLock::new(),
+        tg_bot: std::sync::OnceLock::new(),
+        auth_engine: None,
+        email_service: None,
+        auth,
+        tochka: None,
+        notification_store: None,
+            rbac: std::sync::Arc::new(flowlink_relay::rbac_manager::RbacManager::new()),
+            notification_router: std::sync::OnceLock::new(),
     }
 }
 

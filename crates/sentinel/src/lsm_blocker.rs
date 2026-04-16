@@ -1,53 +1,57 @@
 //! LSM BPF loader — loads blocking programs into kernel LSM hooks
 //!
-//! Requires: CONFIG_BPF_LSM=y, kernel >= 5.7, "bpf" in LSM list
+//! Uses libbpf (via libbpf-sys) for reliable BPF object loading.
+//! libbpf is the reference BPF loader — handles any clang-generated ELF.
 //!
-//! Hot-reload: all policy methods can be called at any time after `load()`.
-//! No restart needed — maps are updated in-place in the kernel.
+//! Requires: CONFIG_BPF_LSM=y, kernel >= 5.7, "bpf" in LSM list
 
 #[cfg(all(target_os = "linux", feature = "linux-ebpf"))]
 mod inner {
-    use anyhow::Result;
-    use aya::maps::HashMap;
-    use aya::programs::Lsm;
-    use aya::Bpf;
+    use anyhow::{Context, Result};
+    use libbpf_sys::*;
     use std::collections::HashSet;
+    use std::ffi::CString;
+    use std::mem::size_of;
+    use std::ptr;
 
     const MAX_COMM_LEN: usize = 64;
     const MAX_PATH_LEN: usize = 128;
 
-    #[derive(Debug)]
+    // BPF map key/value structs — must match sentinel_lsm.bpf.c exactly
+    #[derive(Debug, Copy, Clone)]
     #[repr(C)]
     struct CmdPolicyKey {
         comm: [u8; MAX_COMM_LEN],
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     struct CmdPolicyValue {
         action: u32,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Copy, Clone)]
     #[repr(C)]
     struct PathPolicyKey {
         prefix: [u8; MAX_PATH_LEN],
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     struct PathPolicyValue {
         action: u32,
     }
 
-    /// Manages LSM BPF programs and their policy maps.
-    /// Thread-safe: wrap in `Arc<Mutex<LsmBlocker>>` for concurrent access.
+    /// Manages LSM BPF programs and their policy maps via libbpf.
     pub struct LsmBlocker {
-        _bpf: Bpf,
-        cmd_map: HashMap<CmdPolicyKey, CmdPolicyValue>,
-        path_map: HashMap<PathPolicyKey, PathPolicyValue>,
-        blocked_pids_map: HashMap<u32, u32>,
-        whitelist_map: HashMap<u32, u32>,
+        obj: *mut bpf_object,
+        // Keep links alive — if dropped, LSM programs detach!
+        links: Vec<*mut bpf_link>,
+        // FDs for maps — used for bpf_map_lookup/update/delete
+        cmd_map_fd: i32,
+        path_map_fd: i32,
+        blocked_pids_fd: i32,
+        whitelist_fd: i32,
         // Local tracking for introspection
         blocked_commands: HashSet<String>,
         protected_paths: HashSet<String>,
@@ -55,61 +59,93 @@ mod inner {
         blocked_pids: HashSet<u32>,
     }
 
-    impl LsmBlocker {
-        /// Load LSM BPF programs from embedded object
-        pub fn load() -> Result<Self> {
-            let bpf_bytes = include_bytes!("../../bpf/sentinel_lsm.bpf.o");
-            let mut bpf = Bpf::load(bpf_bytes)
-                .map_err(|e| anyhow::anyhow!("Failed to load LSM BPF: {}", e))?;
+    // libbpf object is thread-safe for map operations
+    unsafe impl Send for LsmBlocker {}
+    unsafe impl Sync for LsmBlocker {}
 
-            // Attach LSM programs
-            let programs = ["block_exec", "block_file_open", "monitor_unlink", "monitor_bind"];
-            for prog_name in &programs {
-                let program: &mut Lsm = bpf
-                    .program_mut(prog_name)
-                    .ok_or_else(|| anyhow::anyhow!("LSM program '{}' not found", prog_name))?
-                    .try_into()
-                    .map_err(|e: aya::programs::ProgramError| {
-                        anyhow::anyhow!("'{}' is not an LSM program: {}", prog_name, e)
-                    })?;
-                program
-                    .load("sentinel_lsm", &aya::programs::ProgramId(0))
-                    .map_err(|e| anyhow::anyhow!("Failed to load LSM '{}': {}", prog_name, e))?;
-                program
-                    .attach()
-                    .map_err(|e| anyhow::anyhow!("Failed to attach LSM '{}': {}", prog_name, e))?;
+    impl LsmBlocker {
+        /// Load LSM BPF programs from embedded object file
+        pub fn load() -> Result<Self> {
+            let bpf_bytes = include_bytes!("../bpf/sentinel_lsm.bpf.o");
+
+            // Create libbpf object from embedded bytes
+            let obj_opts = bpf_object_open_opts {
+                sz: size_of::<bpf_object_open_opts>() as u64,
+                object_name: ptr::null(),
+                ..unsafe { std::mem::zeroed() }
+            };
+
+            let obj = unsafe {
+                // libbpf needs a NUL-terminated path or memory buffer
+                // Use bpf_object__open_mem for in-memory loading
+                bpf_object__open_mem(
+                    bpf_bytes.as_ptr() as *const libc::c_void,
+                    bpf_bytes.len() as u64,
+                    &obj_opts,
+                )
+            };
+
+            if obj.is_null() {
+                return Err(anyhow::anyhow!(
+                    "libbpf failed to open BPF object"
+                ));
             }
 
-            // Take maps from BPF object (we own them now)
-            let cmd_map: HashMap<_, CmdPolicyKey, CmdPolicyValue> = bpf
-                .take_map("blocked_commands")
-                .ok_or_else(|| anyhow::anyhow!("blocked_commands map not found"))?
-                .try_into()
-                .map_err(|e| anyhow::anyhow!("blocked_commands: {}", e))?;
-            let path_map: HashMap<_, PathPolicyKey, PathPolicyValue> = bpf
-                .take_map("protected_paths")
-                .ok_or_else(|| anyhow::anyhow!("protected_paths map not found"))?
-                .try_into()
-                .map_err(|e| anyhow::anyhow!("protected_paths: {}", e))?;
-            let blocked_pids_map: HashMap<_, u32, u32> = bpf
-                .take_map("blocked_pids")
-                .ok_or_else(|| anyhow::anyhow!("blocked_pids map not found"))?
-                .try_into()
-                .map_err(|e| anyhow::anyhow!("blocked_pids: {}", e))?;
-            let whitelist_map: HashMap<_, u32, u32> = bpf
-                .take_map("whitelist_pids")
-                .ok_or_else(|| anyhow::anyhow!("whitelist_pids map not found"))?
-                .try_into()
-                .map_err(|e| anyhow::anyhow!("whitelist_pids: {}", e))?;
+            // Load all programs into kernel
+            let ret = unsafe { bpf_object__load(obj) };
+            if ret != 0 {
+                let err = unsafe { libc::__errno_location() };
+                let errno = unsafe { *err };
+                // Clean up
+                unsafe { bpf_object__close(obj) };
+                return Err(anyhow::anyhow!(
+                    "libbpf failed to load BPF programs (errno={}: {})",
+                    errno,
+                    std::io::Error::from_raw_os_error(errno)
+                ));
+            }
 
-            tracing::info!("🔒 LSM BPF blocker loaded — kernel-level blocking active");
+            // Get map FDs
+            let cmd_map_fd = Self::get_map_fd(obj, "blocked_commands")?;
+            let path_map_fd = Self::get_map_fd(obj, "protected_paths")?;
+            let blocked_pids_fd = Self::get_map_fd(obj, "blocked_pids")?;
+            let whitelist_fd = Self::get_map_fd(obj, "whitelist_pids")?;
+
+
+            // Attach LSM programs
+            let lsm_progs = ["block_exec", "block_file_open", "monitor_unlink", "monitor_bind"];
+            let mut links: Vec<*mut bpf_link> = Vec::new();
+            let mut attached = 0;
+            for prog_name in &lsm_progs {
+                let c_name = CString::new(*prog_name).unwrap();
+                let prog = unsafe { bpf_object__find_program_by_name(obj, c_name.as_ptr()) };
+                if prog.is_null() {
+                    tracing::warn!("LSM program '{}' not found", prog_name);
+                    continue;
+                }
+                let link = unsafe { bpf_program__attach(prog) };
+                if link.is_null() {
+                    let errno = unsafe { *libc::__errno_location() };
+                    tracing::warn!("Failed to attach LSM '{}': errno={}", prog_name, errno);
+                } else {
+                    links.push(link);
+                    attached += 1;
+                    tracing::info!("Attached LSM: {}", prog_name);
+                }
+            }
+            if attached == 0 {
+                unsafe { bpf_object__close(obj); }
+                return Err(anyhow::anyhow!("No LSM programs attached"));
+            }
+            tracing::info!("🔒 LSM BPF blocker loaded via libbpf — kernel-level blocking active");
 
             Ok(Self {
-                _bpf: bpf,
-                cmd_map,
-                path_map,
-                blocked_pids_map,
-                whitelist_map,
+                obj,
+                links,
+                cmd_map_fd,
+                path_map_fd,
+                blocked_pids_fd,
+                whitelist_fd,
                 blocked_commands: HashSet::new(),
                 protected_paths: HashSet::new(),
                 whitelisted_pids: HashSet::new(),
@@ -117,103 +153,125 @@ mod inner {
             })
         }
 
-        // ── Hot-reload policy methods ──────────────────────────────────
+        fn get_map_fd(obj: *mut bpf_object, name: &str) -> Result<i32> {
+            let c_name = CString::new(name).context("map name")?;
+            let map = unsafe { bpf_object__find_map_by_name(obj, c_name.as_ptr()) };
+            if map.is_null() {
+                // Clean up on error
+                unsafe { bpf_object__close(obj) };
+                return Err(anyhow::anyhow!("BPF map '{}' not found", name));
+            }
+            let fd = unsafe { bpf_map__fd(map) };
+            if fd < 0 {
+                unsafe { bpf_object__close(obj) };
+                return Err(anyhow::anyhow!("Failed to get FD for map '{}'", name));
+            }
+            Ok(fd)
+        }
 
-        /// Block a command system-wide (e.g., "rm", "mkfs")
-        pub fn block_command(&mut self, cmd: &str) -> Result<()> {
-            let key = CmdPolicyKey {
-                comm: str_to_fixed::<MAX_COMM_LEN>(cmd),
+        // ── BPF map helpers ──────────────────────────────────────────
+
+        fn map_update<K, V>(&self, fd: i32, key: &K, value: &V) -> Result<()> {
+            let ret = unsafe {
+                bpf_map_update_elem(
+                    fd as i32,
+                    key as *const K as *const libc::c_void,
+                    value as *const V as *const libc::c_void,
+                    BPF_ANY as u64,
+                )
             };
-            self.cmd_map
-                .insert(key, CmdPolicyValue { action: 1 }, 0)
-                .map_err(|e| anyhow::anyhow!("Failed to block command: {}", e))?;
+            if ret != 0 {
+                let errno = unsafe { *libc::__errno_location() };
+                return Err(anyhow::anyhow!(
+                    "bpf_map_update_elem failed (errno={})", errno
+                ));
+            }
+            Ok(())
+        }
+
+        fn map_delete<K>(&self, fd: i32, key: &K) -> Result<()> {
+            let ret = unsafe {
+                bpf_map_delete_elem(
+                    fd as i32,
+                    key as *const K as *const libc::c_void,
+                )
+            };
+            if ret != 0 {
+                let errno = unsafe { *libc::__errno_location() };
+                return Err(anyhow::anyhow!(
+                    "bpf_map_delete_elem failed (errno={})", errno
+                ));
+            }
+            Ok(())
+        }
+
+        // ── Hot-reload policy methods ────────────────────────────────
+
+        pub fn block_command(&mut self, cmd: &str) -> Result<()> {
+            let key = CmdPolicyKey { comm: str_to_fixed(cmd) };
+            let val = CmdPolicyValue { action: 1 };
+            self.map_update(self.cmd_map_fd, &key, &val)?;
             self.blocked_commands.insert(cmd.to_string());
             tracing::info!(action = "block_command", command = cmd);
             Ok(())
         }
 
-        /// Unblock a previously blocked command
         pub fn unblock_command(&mut self, cmd: &str) -> Result<()> {
-            let key = CmdPolicyKey {
-                comm: str_to_fixed::<MAX_COMM_LEN>(cmd),
-            };
-            self.cmd_map
-                .remove(&key)
-                .map_err(|e| anyhow::anyhow!("Failed to unblock command: {}", e))?;
+            let key = CmdPolicyKey { comm: str_to_fixed(cmd) };
+            self.map_delete(self.cmd_map_fd, &key)?;
             self.blocked_commands.remove(cmd);
             tracing::info!(action = "unblock_command", command = cmd);
             Ok(())
         }
 
-        /// Protect a path prefix (block writes)
         pub fn protect_path(&mut self, path: &str) -> Result<()> {
-            let key = PathPolicyKey {
-                prefix: str_to_fixed::<MAX_PATH_LEN>(path),
-            };
-            self.path_map
-                .insert(key, PathPolicyValue { action: 1 }, 0)
-                .map_err(|e| anyhow::anyhow!("Failed to protect path: {}", e))?;
+            let key = PathPolicyKey { prefix: str_to_fixed(path) };
+            let val = PathPolicyValue { action: 1 };
+            self.map_update(self.path_map_fd, &key, &val)?;
             self.protected_paths.insert(path.to_string());
             tracing::info!(action = "protect_path", path = path);
             Ok(())
         }
 
-        /// Unprotect a previously protected path
         pub fn unprotect_path(&mut self, path: &str) -> Result<()> {
-            let key = PathPolicyKey {
-                prefix: str_to_fixed::<MAX_PATH_LEN>(path),
-            };
-            self.path_map
-                .remove(&key)
-                .map_err(|e| anyhow::anyhow!("Failed to unprotect path: {}", e))?;
+            let key = PathPolicyKey { prefix: str_to_fixed(path) };
+            self.map_delete(self.path_map_fd, &key)?;
             self.protected_paths.remove(path);
             tracing::info!(action = "unprotect_path", path = path);
             Ok(())
         }
 
-        /// Whitelist a PID (bypass all checks)
         pub fn whitelist_pid(&mut self, pid: u32) -> Result<()> {
-            self.whitelist_map
-                .insert(pid, 1, 0)
-                .map_err(|e| anyhow::anyhow!("Failed to whitelist PID: {}", e))?;
+            let val: u32 = 1;
+            self.map_update(self.whitelist_fd, &pid, &val)?;
             self.whitelisted_pids.insert(pid);
             tracing::info!(action = "whitelist_pid", pid = pid);
             Ok(())
         }
 
-        /// Remove PID from whitelist
         pub fn unwhitelist_pid(&mut self, pid: u32) -> Result<()> {
-            self.whitelist_map
-                .remove(&pid)
-                .map_err(|e| anyhow::anyhow!("Failed to unwhitelist PID: {}", e))?;
+            self.map_delete(self.whitelist_fd, &pid)?;
             self.whitelisted_pids.remove(&pid);
             Ok(())
         }
 
-        /// Block a specific PID (deny all operations)
         pub fn block_pid(&mut self, pid: u32) -> Result<()> {
-            self.blocked_pids_map
-                .insert(pid, 1, 0)
-                .map_err(|e| anyhow::anyhow!("Failed to block PID: {}", e))?;
+            let val: u32 = 1;
+            self.map_update(self.blocked_pids_fd, &pid, &val)?;
             self.blocked_pids.insert(pid);
             tracing::info!(action = "block_pid", pid = pid);
             Ok(())
         }
 
-        /// Unblock a previously blocked PID
         pub fn unblock_pid(&mut self, pid: u32) -> Result<()> {
-            self.blocked_pids_map
-                .remove(&pid)
-                .map_err(|e| anyhow::anyhow!("Failed to unblock PID: {}", e))?;
+            self.map_delete(self.blocked_pids_fd, &pid)?;
             self.blocked_pids.remove(&pid);
             Ok(())
         }
 
-        /// Hot-reload: replace entire policy from config
         pub fn reload_config(&mut self, config: &crate::SentinelConfig) -> Result<ReloadStats> {
             let mut stats = ReloadStats::default();
 
-            // Clear and rebuild command blocklist
             for cmd in &self.blocked_commands.clone() {
                 self.unblock_command(cmd)?;
                 stats.commands_removed += 1;
@@ -223,7 +281,6 @@ mod inner {
                 stats.commands_added += 1;
             }
 
-            // Clear and rebuild protected paths
             for path in &self.protected_paths.clone() {
                 self.unprotect_path(path)?;
                 stats.paths_removed += 1;
@@ -233,7 +290,6 @@ mod inner {
                 stats.paths_added += 1;
             }
 
-            // Re-whitelist own PID
             self.whitelist_pid(std::process::id())?;
 
             tracing::info!(
@@ -244,7 +300,6 @@ mod inner {
             Ok(stats)
         }
 
-        /// Load initial config (same as reload_config but for first load)
         pub fn load_config(&mut self, config: &crate::SentinelConfig) -> Result<()> {
             self.reload_config(config)?;
             Ok(())
@@ -257,7 +312,6 @@ mod inner {
         pub fn whitelisted_pids(&self) -> &HashSet<u32> { &self.whitelisted_pids }
         pub fn blocked_pids(&self) -> &HashSet<u32> { &self.blocked_pids }
 
-        /// Get full policy snapshot for API responses
         pub fn policy_snapshot(&self) -> PolicySnapshot {
             PolicySnapshot {
                 blocked_commands: self.blocked_commands.iter().cloned().collect(),
@@ -268,7 +322,14 @@ mod inner {
         }
     }
 
-    /// Snapshot of current policy state
+    impl Drop for LsmBlocker {
+        fn drop(&mut self) {
+            if !self.obj.is_null() {
+                unsafe { bpf_object__close(self.obj) };
+            }
+        }
+    }
+
     #[derive(Debug, Clone, serde::Serialize)]
     pub struct PolicySnapshot {
         pub blocked_commands: Vec<String>,
@@ -277,7 +338,6 @@ mod inner {
         pub blocked_pids: Vec<u32>,
     }
 
-    /// Stats from a hot-reload operation
     #[derive(Debug, Default)]
     pub struct ReloadStats {
         pub commands_added: usize,
@@ -286,7 +346,6 @@ mod inner {
         pub paths_removed: usize,
     }
 
-    /// Helper: convert &str to fixed-size byte array
     fn str_to_fixed<const N: usize>(s: &str) -> [u8; N] {
         let mut buf = [0u8; N];
         let bytes = s.as_bytes();

@@ -306,6 +306,44 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_email_queue_account ON email_queue(account_id)
         "#,
         ),
+        (
+            "016_user_notification_channels",
+            r#"
+            CREATE TABLE IF NOT EXISTS user_notification_channels (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                account_id VARCHAR(255) NOT NULL REFERENCES accounts(id),
+                channel_type VARCHAR(30) NOT NULL,
+                channel_address VARCHAR(255) NOT NULL,
+                display_name VARCHAR(255),
+                is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+                verified BOOLEAN NOT NULL DEFAULT FALSE,
+                mute_categories JSONB DEFAULT '[]',
+                min_severity VARCHAR(20) DEFAULT 'info',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(account_id, channel_type, channel_address)
+            );
+            CREATE INDEX IF NOT EXISTS idx_unc_account ON user_notification_channels(account_id);
+            CREATE INDEX IF NOT EXISTS idx_unc_type ON user_notification_channels(channel_type);
+            CREATE INDEX IF NOT EXISTS idx_unc_verified ON user_notification_channels(account_id, verified)
+        "#,
+        ),
+        (
+            "017_linking_codes",
+            r#"
+            CREATE TABLE IF NOT EXISTS linking_codes (
+                code VARCHAR(8) PRIMARY KEY,
+                account_id VARCHAR(255) NOT NULL REFERENCES accounts(id),
+                channel_type VARCHAR(30) NOT NULL DEFAULT 'telegram',
+                channel_address VARCHAR(255) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes'),
+                used_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_lc_account ON linking_codes(account_id);
+            CREATE INDEX IF NOT EXISTS idx_lc_expires ON linking_codes(expires_at) WHERE used_at IS NULL
+        "#,
+        ),
     ]
 }
 
@@ -316,7 +354,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 15);
+        assert_eq!(migrations.len(), 17);
     }
 
     #[test]
@@ -338,6 +376,8 @@ mod tests {
             "013_accounts_email",
             "014_email_verification_codes",
             "015_email_queue",
+            "016_user_notification_channels",
+            "017_linking_codes",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(
@@ -363,8 +403,8 @@ mod tests {
         let migrations = get_migrations();
         for (name, sql) in &migrations {
             assert!(
-                sql.contains("CREATE TABLE") || sql.contains("CREATE INDEX"),
-                "Migration '{}' creates neither a table nor an index",
+                sql.contains("CREATE TABLE") || sql.contains("CREATE INDEX") || sql.contains("ALTER TABLE"),
+                "Migration '{}' creates neither a table, index, nor alters a table",
                 name
             );
         }
@@ -605,8 +645,8 @@ mod tests {
         let migrations = get_migrations();
         for (name, sql) in &migrations {
             assert!(
-                sql.contains("CREATE INDEX") || sql.contains("CREATE TABLE"),
-                "Migration '{}' creates neither an index nor a table",
+                sql.contains("CREATE INDEX") || sql.contains("CREATE TABLE") || sql.contains("ALTER TABLE"),
+                "Migration '{}' creates neither an index, table, nor alters a table",
                 name
             );
         }

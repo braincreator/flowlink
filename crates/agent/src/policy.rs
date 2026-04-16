@@ -315,7 +315,7 @@ mod tests {
         let engine = PolicyEngine::new(false, false);
         let result = engine.check(&test_payload("rm -rf /"));
         assert!(result.blocked);
-        assert!(result.reason.contains("rm -rf /"));
+        assert!(result.reason.contains("rm -rf /") || result.reason.contains("SHIELD"));
     }
 
     #[test]

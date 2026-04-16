@@ -222,7 +222,7 @@ async fn main() -> anyhow::Result<()> {
             agent.run().await
         }
         Commands::Relay { config, addr } => {
-            let mut cfg = flowlink_core::config::RelayConfig::load(&config)?;
+            let mut cfg = flowlink_core::config::RelayConfig::load(&config)?; cfg.apply_env_overrides();
             if let Some(addr) = addr {
                 cfg.http_addr = addr.parse()?;
             }
@@ -278,14 +278,18 @@ async fn main() -> anyhow::Result<()> {
             use std::sync::Arc;
             use tokio::sync::Mutex;
 
+            let default_config = flowlink_sentinel::SentinelConfig::default();
+            let kernel = flowlink_api::KernelBlocker::try_load(&default_config);
+
             let state = Arc::new(AppState {
                 engine: flowlink_shield::AnalysisEngine { enable_ast: true, enable_interpreter: true },
-                config: Mutex::new(flowlink_sentinel::SentinelConfig::default()),
+                config: Mutex::new(default_config),
                 blocked_commands: Mutex::new(vec![]),
                 protected_paths: Mutex::new(vec![]),
                 blocked_pids: Mutex::new(vec![]),
                 whitelisted_pids: Mutex::new(vec![]),
                 approvals: Mutex::new(vec![]),
+                kernel,
             });
 
             let app = build_router(state);
@@ -326,10 +330,17 @@ fn cmd_bot(command: BotCommands, config_path: &str) -> anyhow::Result<()> {
             
             println!("✅ Bot configuration loaded from: {}", config_path);
             println!("🚀 Starting bot with auto-recovery: {}", auto_recovery);
-            
-            // TODO: Load actual relay state and start bot
-            // This would integrate with the relay server
-            println!("⚠️ Note: Bot integration requires relay server to be running");
+
+            // Start relay server which includes the bot
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                let mut config = flowlink_core::config::RelayConfig::load(config_path)
+                    .map_err(|e| anyhow::anyhow!("Config load failed: {e}"))?;
+                config.apply_env_overrides();
+                let mut relay = flowlink_relay::Relay::new(config);
+                relay.run().await
+                    .map_err(|e| anyhow::anyhow!("Relay start failed: {e}"))
+            })?;
             
             Ok(())
         }
@@ -340,11 +351,19 @@ fn cmd_bot(command: BotCommands, config_path: &str) -> anyhow::Result<()> {
         }
         BotCommands::Status => {
             println!("📊 Getting bot status...");
-            // TODO: Query actual bot status
-            println!("📱 Bot status: Active (polling mode)");
-            println!("🔄 Auto-recovery: Enabled");
-            println!("⏱️ Uptime: 2h 34m");
-            println!("📨 Messages processed: 1,234");
+            let mut config = flowlink_core::config::RelayConfig::load(config_path)?;
+            config.apply_env_overrides();
+            let url = format!("http://{}/health", config.http_addr);
+            let rt = tokio::runtime::Runtime::new()?;
+            let resp = rt.block_on(async { reqwest::get(&url).await });
+            match resp {
+                Ok(resp) if resp.status().is_success() => {
+                    let body: serde_json::Value = rt.block_on(resp.json()).unwrap_or_default();
+                    println!("📱 Bot status: Active");
+                    println!("📊 Agents: {}", body.get("agents").and_then(|v| v.as_i64()).unwrap_or(0));
+                }
+                _ => println!("❌ Relay server not reachable at {}", url),
+            }
             Ok(())
         }
         BotCommands::SetWebhook { url } => {
