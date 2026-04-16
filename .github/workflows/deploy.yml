@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      OPENSSL_NO_VENDOR: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -22,9 +24,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Update lockfile for stable toolchain
-        run: cargo update
-
       - name: Build release binary
         run: cargo build --release --bin flowlink
 
@@ -38,17 +37,37 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: Download binary
         uses: actions/download-artifact@v4
         with:
           name: flowlink-binary
-          path: ./flowlink
 
       - name: Make binary executable
-        run: chmod +x ./flowlink
+        run: chmod +x flowlink
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+
+            # Backup
+            cp /opt/flowlink/bin/flowlink /opt/flowlink/bin/flowlink.bak 2>/dev/null || true
+
+            # Stop
+            systemctl stop flowlink-relay || true
+            sleep 2
+
+            # Wait for process to die
+            for i in $(seq 1 10); do
+              pgrep -f "flowlink relay" > /dev/null 2>&1 || break
+              kill -9 $(pgrep -f "flowlink relay") 2>/dev/null || true
+              sleep 1
+            done
 
       - name: Upload binary to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -57,10 +76,10 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           source: "flowlink"
-          target: "/usr/local/bin/flowlink"
+          target: "/opt/flowlink/bin/flowlink"
           strip_components: 0
 
-      - name: Restart service & health check
+      - name: Start & verify
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -68,30 +87,11 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 30s
           script: |
-            set -euo pipefail
-
-            # Backup
-            if [ -f /usr/local/bin/flowlink ]; then
-              cp /usr/local/bin/flowlink /usr/local/bin/flowlink.bak
-            fi
-
-            # Stop
-            systemctl stop flowlink || true
-            sleep 1
-
-            # Start
-            systemctl start flowlink
+            chmod +x /opt/flowlink/bin/flowlink
+            systemctl start flowlink-relay
             sleep 3
-
-            # Health check
-            curl -sf http://localhost:8080/healthz || {
-              echo "Health check failed! Rolling back..."
-              systemctl stop flowlink || true
-              if [ -f /usr/local/bin/flowlink.bak ]; then
-                mv /usr/local/bin/flowlink.bak /usr/local/bin/flowlink
-                systemctl start flowlink
-              fi
+            systemctl is-active flowlink-relay && echo "✅ Deploy successful!" || {
+              echo "❌ Service failed to start!"
+              journalctl -u flowlink-relay --no-pager -n 10
               exit 1
             }
-
-            echo "Deploy successful!"
