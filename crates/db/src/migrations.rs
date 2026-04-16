@@ -311,7 +311,7 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             r#"
             CREATE TABLE IF NOT EXISTS user_notification_channels (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                account_id VARCHAR(255) NOT NULL REFERENCES accounts(id),
+                account_id VARCHAR(255) NOT NULL REFERENCES accounts(account_id),
                 channel_type VARCHAR(30) NOT NULL,
                 channel_address VARCHAR(255) NOT NULL,
                 display_name VARCHAR(255),
@@ -333,7 +333,7 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             r#"
             CREATE TABLE IF NOT EXISTS linking_codes (
                 code VARCHAR(8) PRIMARY KEY,
-                account_id VARCHAR(255) NOT NULL REFERENCES accounts(id),
+                account_id VARCHAR(255) NOT NULL REFERENCES accounts(account_id),
                 channel_type VARCHAR(30) NOT NULL DEFAULT 'telegram',
                 channel_address VARCHAR(255) NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
