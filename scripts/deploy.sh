@@ -1,78 +1,125 @@
-#!/usr/bin/env bash
+#!/bin/bash
+# FlowLink CI: build on VPS → deploy → GitHub release
+# Usage:
+#   ./scripts/deploy.sh                  # full pipeline
+#   ./scripts/deploy.sh --skip-release   # build + deploy, no release
+#   ./scripts/deploy.sh --skip-build     # deploy cached binary + release
+#   ./scripts/deploy.sh --tag v1.0.0     # custom tag
 set -euo pipefail
 
-# FlowLink VPS Deploy Script
-# Deploys relay + agent + website to 93.93.207.44
+cd "$(git rev-parse --show-toplevel)"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-VPS_HOST="93.93.207.44"
-VPS_USER="root"
-VPS_PATH="/var/www/flowlink"
+SKIP_BUILD=false
+SKIP_RELEASE=false
+TAG=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --skip-build)   SKIP_BUILD=true ;;
+        --skip-release) SKIP_RELEASE=true ;;
+        --tag)          TAG="$2"; shift ;;
+    esac
+    shift
+done
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+TAG="${TAG:-v$VERSION}"
+VPS="root@93.93.207.44"
+REMOTE_DIR="/root/fl-build"
+SERVICE="flowlink-relay"
 
-echo -e "${GREEN}=== FlowLink Deploy ===${NC}"
+echo "╔══════════════════════════════════╗"
+echo "║   FlowLink Deploy               ║"
+echo "║   Version: $VERSION               ║"
+echo "║   Tag: $TAG              ║"
+echo "╚══════════════════════════════════╝"
 
-# 1. Build release binary
-echo -e "${YELLOW}[1/5] Building release binary...${NC}"
-cd "$PROJECT_DIR"
-cargo build --release --bin flowlink
-echo -e "${GREEN}  ✓ Build complete${NC}"
+# 1. Build on VPS
+if [ "$SKIP_BUILD" = false ]; then
+    echo ""
+    echo "📦 [1/3] Uploading source to VPS..."
+    tar czf /tmp/fl-src.tar.gz \
+        --exclude="target" --exclude=".git" --exclude="video" \
+        --exclude="website" --exclude="docs" --exclude="scripts" \
+        --exclude='*.md' \
+        Cargo.toml Cargo.lock crates/
+    scp -q /tmp/fl-src.tar.gz "$VPS:/tmp/"
+    rm -f /tmp/fl-src.tar.gz
 
-# 2. Build website
-echo -e "${YELLOW}[2/5] Building website...${NC}"
-cd "$PROJECT_DIR/website"
-npm ci --silent
-npm run build
-echo -e "${GREEN}  ✓ Website build complete${NC}"
+    echo "🔨 [2/3] Building on VPS..."
+    ssh "$VPS" bash -s << REMOTE
+        set -euo pipefail
+        cd $REMOTE_DIR
+        tar xzf /tmp/fl-src.tar.gz
+        . /root/.cargo/env
+        cargo build --release --bin flowlink
+        echo "✅ Build done: \$(ls -lh target/release/flowlink | awk '{print \$5}')"
+REMOTE
+fi
 
-# 3. Upload to VPS
-echo -e "${YELLOW}[3/5] Uploading to VPS...${NC}"
-export SSHPASS='o#EkBHi*wZru8+'
-SSH_OPTS="-o StrictHostKeyChecking=no -o PubkeyAuthentication=no"
+# 2. Deploy
+if [ "$SKIP_BUILD" = true ]; then
+    echo ""
+    echo "🚀 [1/2] Deploying cached binary..."
+else
+    echo ""
+    echo "🚀 [3/3] Deploying..."
+fi
 
-sshpass -e ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} "mkdir -p ${VPS_PATH}/{bin,config,website}"
-
-sshpass -e scp $SSH_OPTS \
-    "$PROJECT_DIR/target/release/flowlink" \
-    ${VPS_USER}@${VPS_HOST}:${VPS_PATH}/bin/flowlink
-
-sshpass -e scp $SSH_OPTS \
-    "$PROJECT_DIR/Dockerfile" \
-    "$PROJECT_DIR/Dockerfile.agent" \
-    "$PROJECT_DIR/docker-compose.yml" \
-    ${VPS_USER}@${VPS_HOST}:${VPS_PATH}/
-
-sshpass -e scp -r $SSH_OPTS \
-    "$PROJECT_DIR/website/out/"* \
-    ${VPS_USER}@${VPS_HOST}:${VPS_PATH}/website/
-
-echo -e "${GREEN}  ✓ Upload complete${NC}"
-
-# 4. Configure nginx
-echo -e "${YELLOW}[4/5] Configuring nginx...${NC}"
-sshpass -e ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} "nginx -t && systemctl reload nginx"
-echo -e "${GREEN}  ✓ Nginx configured${NC}"
-
-# 5. Restart services
-echo -e "${YELLOW}[5/5] Restarting services...${NC}"
-sshpass -e ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} "
-    cd ${VPS_PATH}
-    chmod +x bin/flowlink
-    # Stop existing if running
-    pkill -f 'flowlink relay' 2>/dev/null || true
+ssh "$VPS" bash -s << REMOTE
+    set -euo pipefail
+    BIN="/opt/flowlink/bin/flowlink"
+    
+    echo "   Stopping $SERVICE..."
+    systemctl stop $SERVICE || true
+    sleep 2
+    kill -9 \$(pgrep -f "flowlink relay") 2>/dev/null || true
     sleep 1
-    # Start relay in background
-    nohup bin/flowlink relay --config config/relay.json > /var/log/flowlink-relay.log 2>&1 &
-    echo \"Relay PID: \$!\"
-"
-echo -e "${GREEN}  ✓ Services restarted${NC}"
+    
+    echo "   Replacing binary..."
+    cp "$BIN" "\${BIN}.bak" 2>/dev/null || true
+    cp $REMOTE_DIR/target/release/flowlink "$BIN"
+    chmod +x "$BIN"
+    
+    echo "   Starting $SERVICE..."
+    systemctl start $SERVICE
+    sleep 3
+    
+    if systemctl is-active --quiet $SERVICE; then
+        VERSION=\$(\$BIN --version 2>/dev/null || echo "?")
+        echo "   ✅ Deployed! (\$VERSION)"
+    else
+        echo "   ❌ Failed! Rolling back..."
+        systemctl stop $SERVICE 2>/dev/null || true
+        mv "\${BIN}.bak" "$BIN" 2>/dev/null
+        systemctl start $SERVICE 2>/dev/null
+        journalctl -u $SERVICE --no-pager -n 10
+        exit 1
+    fi
+REMOTE
 
-echo -e "${GREEN}=== Deploy Complete ===${NC}"
-echo -e "Website: https://flowlink.flow-masters.ru"
-echo -e "Health:  https://flowlink.flow-masters.ru/api/health"
+# 3. GitHub Release
+if [ "$SKIP_RELEASE" = false ]; then
+    echo ""
+    echo "🏷️  Creating release $TAG..."
+
+    ARCHIVE="/tmp/flowlink-${TAG#v}-linux-amd64.tar.gz"
+    scp -q "$VPS:$REMOTE_DIR/target/release/flowlink" "/tmp/flowlink"
+    tar czf "$ARCHIVE" -C /tmp flowlink
+    rm -f /tmp/flowlink
+
+    if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+        git tag "$TAG"
+        git push origin "$TAG" 2>/dev/null || true
+    fi
+
+    gh release create "$TAG" "$ARCHIVE" \
+        --title "FlowLink $TAG" \
+        --notes "Release $TAG — $(git rev-parse --short HEAD)" \
+        --target main 2>&1 || echo "   ⚠️  Release already exists"
+    
+    echo "   🔗 https://github.com/braincreator/flowlink/releases/tag/$TAG"
+    rm -f "$ARCHIVE"
+fi
+
+echo ""
+echo "✅ Done!"
