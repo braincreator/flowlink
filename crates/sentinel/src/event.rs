@@ -80,6 +80,7 @@ impl KernelEvent {
 
 
 mod tests {
+    #![allow(dead_code)]
     use super::*;
 
     fn make_event(kind: EventKind) -> KernelEvent {

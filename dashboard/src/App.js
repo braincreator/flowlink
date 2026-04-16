@@ -1,9 +1,10 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Sidebar';
 import { LoadingSkeleton } from './components/Layout';
 import { NotificationProvider } from './hooks/useNotifications';
+import { api } from './api/client';
 import Login from './pages/Login';
 import Onboarding from './pages/Onboarding';
 import Agents from './pages/Agents';
@@ -26,5 +27,22 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Metrics = lazy(() => import('./pages/Metrics'));
 const Shield = lazy(() => import('./pages/Shield'));
 export default function App() {
+    // Handle OAuth callback: extract tokens from URL and store them
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const accessToken = params.get('access_token');
+        const refreshToken = params.get('refresh_token');
+        if (accessToken) {
+            api.setToken(accessToken);
+            if (refreshToken) {
+                localStorage.setItem('flowlink_refresh', refreshToken);
+            }
+            // Clean URL — remove tokens from address bar
+            const clean = new URL(window.location.href);
+            clean.searchParams.delete('access_token');
+            clean.searchParams.delete('refresh_token');
+            window.history.replaceState({}, '', clean.pathname + clean.hash);
+        }
+    }, []);
     return (_jsx(NotificationProvider, { children: _jsx(BrowserRouter, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/login", element: _jsx(Login, {}) }), _jsxs(Route, { element: _jsx(Layout, {}), children: [_jsx(Route, { index: true, element: _jsx(Suspense, { fallback: _jsx(LoadingSkeleton, { lines: 8 }), children: _jsx(Dashboard, {}) }) }), _jsx(Route, { path: "agents", element: _jsx(Agents, {}) }), _jsx(Route, { path: "shield", element: _jsx(Suspense, { fallback: _jsx(LoadingSkeleton, { lines: 8 }), children: _jsx(Shield, {}) }) }), _jsx(Route, { path: "audit", element: _jsx(Audit, {}) }), _jsx(Route, { path: "sessions", element: _jsx(Sessions, {}) }), _jsx(Route, { path: "backups", element: _jsx(Backups, {}) }), _jsx(Route, { path: "policies", element: _jsx(Policies, {}) }), _jsx(Route, { path: "devices", element: _jsx(Devices, {}) }), _jsx(Route, { path: "rbac", element: _jsx(RBAC, {}) }), _jsx(Route, { path: "metrics", element: _jsx(Suspense, { fallback: _jsx(LoadingSkeleton, { lines: 8 }), children: _jsx(Metrics, {}) }) }), _jsx(Route, { path: "onboarding", element: _jsx(Onboarding, {}) }), _jsx(Route, { path: "settings", element: _jsx(Settings, {}) }), _jsx(Route, { path: "billing", element: _jsx(Billing, {}) }), _jsx(Route, { path: "llm", element: _jsx(LLM, {}) }), _jsx(Route, { path: "mcp", element: _jsx(MCP, {}) }), _jsx(Route, { path: "terminal", element: _jsx(TerminalPage, {}) }), _jsx(Route, { path: "terminal/soc", element: _jsx(TerminalSOC, {}) }), _jsx(Route, { path: "terminal/relay", element: _jsx(TerminalRelay, {}) }), _jsx(Route, { path: "terminal/agent/:id", element: _jsx(TerminalAgent, {}) }), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: "/", replace: true }) })] })] }) }) }));
 }

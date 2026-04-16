@@ -42,6 +42,7 @@ pub struct TokenResponse {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
 enum AuthError {
     #[error("Provider error: {0}")]
     Provider(String),

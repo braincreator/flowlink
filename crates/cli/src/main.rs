@@ -222,7 +222,9 @@ async fn main() -> anyhow::Result<()> {
             agent.run().await
         }
         Commands::Relay { config, addr } => {
-            let mut cfg = flowlink_core::config::RelayConfig::load(&config)?; cfg.apply_env_overrides();
+            let mut cfg = flowlink_core::config::RelayConfig::load(&config)?;
+            cfg.apply_env_overrides();
+            cfg.apply_vault_overrides().await;
             if let Some(addr) = addr {
                 cfg.http_addr = addr.parse()?;
             }
@@ -318,7 +320,7 @@ fn cmd_bot(command: BotCommands, config_path: &str) -> anyhow::Result<()> {
         BotCommands::Start { mode, webhook_url, auto_recovery } => {
             println!("🤖 Starting Telegram bot in {} mode...", mode);
             
-            let bot_config = flowlink_relay::tgbot::bot::BotConfig {
+            let _bot_config = flowlink_relay::tgbot::bot::BotConfig {
                 mode: match mode.as_str() {
                     "webhook" => flowlink_relay::tgbot::bot::BotMode::Webhook,
                     _ => flowlink_relay::tgbot::bot::BotMode::Polling,
@@ -337,7 +339,7 @@ fn cmd_bot(command: BotCommands, config_path: &str) -> anyhow::Result<()> {
                 let mut config = flowlink_core::config::RelayConfig::load(config_path)
                     .map_err(|e| anyhow::anyhow!("Config load failed: {e}"))?;
                 config.apply_env_overrides();
-                let mut relay = flowlink_relay::Relay::new(config);
+                let relay = flowlink_relay::Relay::new(config);
                 relay.run().await
                     .map_err(|e| anyhow::anyhow!("Relay start failed: {e}"))
             })?;

@@ -2,7 +2,7 @@
 
 use teloxide::prelude::Requester;
 
-use super::{Category, Notification, NotificationChannel, Severity};
+use super::{Notification, NotificationChannel};
 use async_trait::async_trait;
 
 /// Telegram notification channel.

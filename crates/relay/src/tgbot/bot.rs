@@ -77,7 +77,7 @@ async fn start_polling_mode(bot: Bot, ctx: BotContext, config: BotConfig) {
 }
 
 /// Start bot in webhook mode
-async fn start_webhook_mode(bot: Bot, ctx: BotContext, config: BotConfig, token: String) {
+async fn start_webhook_mode(bot: Bot, ctx: BotContext, config: BotConfig, _token: String) {
     if let Some(webhook_url) = config.webhook_url.clone() {
         log::info!("🔗 Setting up webhook: {}", webhook_url);
         
@@ -124,7 +124,7 @@ async fn run_polling(bot: &Bot, ctx: BotContext) -> Result<(), Box<dyn std::erro
 }
 
 /// Run webhook handler
-async fn run_webhook_handler(bot: Bot, ctx: BotContext, config: BotConfig) {
+async fn run_webhook_handler(_bot: Bot, _ctx: BotContext, _config: BotConfig) {
     log::info!("🌐 Webhook handler active — relay server receives updates via POST /api/tg/webhook");
     // Webhook updates are handled by the relay server's axum endpoint
     // which calls tgbot::handle_update() directly.
@@ -135,7 +135,7 @@ async fn run_webhook_handler(bot: Bot, ctx: BotContext, config: BotConfig) {
 }
 
 /// Health check for bot recovery
-async fn check_bot_health(bot: &Bot, state: &AppState, token: &str) {
+async fn check_bot_health(bot: &Bot, state: &AppState, _token: &str) {
     // Simple bot health check
     match bot.get_me().await {
         Ok(_) => {
@@ -154,7 +154,7 @@ async fn check_bot_health(bot: &Bot, state: &AppState, token: &str) {
 }
 
 /// Emergency stop command
-pub async fn emergency_stop_bot(bot: Bot) {
+pub async fn emergency_stop_bot(_bot: Bot) {
     log::warn!("🚨 EMERGENCY: Stopping Telegram bot...");
     let _message = "🚨 EMERGENCY STOP: Telegram bot is being shut down due to critical system issue.";
     log::info!("🚨 Emergency stop message sent to bot users");
@@ -194,9 +194,9 @@ async fn handle_command(
                             let mut acc = billing.get_or_create_account(&account_id);
                             let _ = billing.change_plan(&mut acc, &plan_id);
                             bot.send_message(msg.chat.id, format!(
-                                "✅ План *{}* активирован!\n\n/use — статистика",
+                                "✅ План <b>{}</b> активирован!\n\n/use — статистика",
                                 plan.name
-                            )).parse_mode(ParseMode::Markdown).await?;
+                            )).parse_mode(ParseMode::Html).await?;
                             return Ok(());
                         }
                     }
@@ -352,8 +352,8 @@ async fn handle_callback(
                                 Ok(_sub) => {
                                     let mut acc = billing.get_or_create_account(&account_id);
                                     let _ = billing.change_plan(&mut acc, new_plan_id);
-                                    bot.send_message(chat_id, format!("✅ План изменён на *{}* (немедленно)", new_p.name))
-                                        .parse_mode(ParseMode::Markdown).await?;
+                                    bot.send_message(chat_id, format!("✅ План изменён на <b>{}</b> (немедленно)", new_p.name))
+                                        .parse_mode(ParseMode::Html).await?;
                                 }
                                 Err(e) => {
                                     bot.send_message(chat_id, format!("❌ Ошибка: {}", e)).await?;
@@ -374,9 +374,9 @@ async fn handle_callback(
                                 .await;
                             }
                             bot.send_message(chat_id, format!(
-                                "✅ Понижение запланировано.\n📦 {} → *{}*\n📅 Вступит в силу в конце текущего периода",
+                                "✅ Понижение запланировано.\n📦 {} → <b>{}</b>\n📅 Вступит в силу в конце текущего периода",
                                 cur.name, new_p.name
-                            )).parse_mode(ParseMode::Markdown).await?;
+                            )).parse_mode(ParseMode::Html).await?;
                         }
                     }
                     _ => {

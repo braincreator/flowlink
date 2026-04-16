@@ -333,6 +333,10 @@ pub struct RelayConfig {
     /// Telegram bot token — when set, starts the TG bot.
     #[serde(default)]
     pub tg_bot_token: Option<String>,
+    /// Telegram webhook URL (e.g. https://example.com/api/tg/webhook).
+    /// When set, bot runs in webhook mode; otherwise polling.
+    #[serde(default)]
+    pub tg_webhook_url: Option<String>,
     /// SMTP configuration for transactional emails
     #[serde(default)]
     pub smtp: SmtpConfig,
@@ -342,6 +346,9 @@ pub struct RelayConfig {
     /// OAuth providers configuration
     #[serde(default)]
     pub oauth: OAuthConfig,
+    /// Public URL for dashboard (used in OAuth redirects). Defaults to http://{http_addr}
+    #[serde(default)]
+    pub dashboard_url: Option<String>,
 }
 
 /// SMTP configuration for transactional emails
@@ -633,6 +640,71 @@ impl AgentConfig {
 }
 
 impl RelayConfig {
+    /// Apply Vault secrets to config fields.
+    ///
+    /// Reads secrets from Vault KV v2 mount at `flowlink/`.
+    /// If Vault is unavailable, silently skips (non-blocking).
+    /// Requires `vault` feature and these env vars:
+    /// - `VAULT_ADDR` (default: https://127.0.0.1:8200)
+    /// - `VAULT_TOKEN` or `VAULT_ROLE_ID`+`VAULT_SECRET_ID`
+    /// - `VAULT_SKIP_VERIFY=true` for self-signed certs
+    #[cfg(feature = "vault")]
+    pub async fn apply_vault_overrides(&mut self) {
+        let mut client = super::vault::VaultClient::from_env();
+        let mut loaded = 0usize;
+
+        macro_rules! vault_set {
+            ($path:expr, $field:expr) => {
+                if let Ok(val) = client.read_secret($path).await {
+                    if !val.is_empty() {
+                        $field = val;
+                        loaded += 1;
+                    }
+                }
+            };
+            ($path:expr, $field:expr, Some) => {
+                if let Ok(val) = client.read_secret($path).await {
+                    if !val.is_empty() {
+                        $field = Some(val);
+                        loaded += 1;
+                    }
+                }
+            };
+        }
+
+        vault_set!("api_token", self.api_token);
+        vault_set!("tg_bot_token", self.tg_bot_token, Some);
+        vault_set!("tg_webhook_url", self.tg_webhook_url, Some);
+        vault_set!("auth/jwt_secret", self.auth.jwt_secret);
+        vault_set!("auth/vk/client_secret", self.oauth.vk.app_secret);
+        vault_set!("auth/yandex/client_secret", self.oauth.yandex.client_secret);
+        vault_set!("auth/github/client_secret", self.oauth.github.client_secret);
+        vault_set!("billing/tochka_jwt_token", self.billing.tochka_jwt_token, Some);
+        vault_set!("billing/tochka_webhook_secret", self.billing.tochka_webhook_secret, Some);
+        vault_set!("smtp/password", self.smtp.password);
+
+        // LLM backends — match by provider name
+        for backend in &mut self.llm.backends {
+            if let Ok(key) = client.read_secret(&format!("llm/{}/api_key", backend.name)).await {
+                if !key.is_empty() {
+                    backend.api_key = Some(key);
+                    loaded += 1;
+                }
+            }
+        }
+
+        if loaded > 0 {
+            println!("[vault] Loaded {loaded} secrets from Vault");
+        } else {
+            println!("[vault] Connected but no secrets loaded (config file values used)");
+        }
+    }
+
+    #[cfg(not(feature = "vault"))]
+    pub async fn apply_vault_overrides(&mut self) {
+        // No-op when vault feature is disabled
+    }
+
     pub fn load(path: &str) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         // Try flat format first (relay.json)
@@ -667,6 +739,7 @@ impl RelayConfig {
             if let Ok(addr) = v.parse() { self.wss_addr = addr; }
         }
         if let Ok(v) = std::env::var("FLOWLINK_TG_BOT_TOKEN") { self.tg_bot_token = Some(v); }
+        if let Ok(v) = std::env::var("FLOWLINK_TG_WEBHOOK_URL") { self.tg_webhook_url = Some(v); }
 
         // ── SMTP ──
         if let Ok(v) = std::env::var("FLOWLINK_SMTP__HOST") { self.smtp.host = v; }
@@ -812,6 +885,7 @@ mod tests {
             database: DatabaseConfig::default(),
             wss_tls: WssTlsConfig::default(),
             tg_bot_token: None,
+            tg_webhook_url: None,
             smtp: SmtpConfig::default(),
             auth: AuthConfig::default(),
             oauth: OAuthConfig::default(),

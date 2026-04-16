@@ -38,7 +38,7 @@ pub fn format_kopecks(kopecks: u64) -> String {
 
 /// /start — greeting, optionally handles Telegram link code
 pub async fn cmd_start(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
-    let name = msg.from()
+    let name = msg.from.as_ref()
         .map(|u| u.first_name.clone())
         .unwrap_or_else(|| "друг".to_string());
     let tg_chat_id = msg.chat.id.0 as i64;
@@ -48,10 +48,10 @@ pub async fn cmd_start(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
         let account_id = format!("tg:{}", tg_chat_id);
         if let Ok(Some(_account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &account_id).await {
             let text = format!(
-                "👋 Привет, *{}*!\n\nАккаунт уже привязан ✅\n\n📊 /status — статус\n💳 /billing — подписка\n🛡 /shield — безопасность\n📢 /settings — уведомления\n\n/help — все команды",
+                "👋 Привет, <b>{}</b>!\n\nАккаунт уже привязан ✅\n\n📊 /status — статус\n💳 /billing — подписка\n🛡 /shield — безопасность\n📢 /settings — уведомления\n\n/help — все команды",
                 name,
             );
-            bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+            bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
             return Ok(());
         }
 
@@ -91,9 +91,9 @@ pub async fn cmd_start(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
                                 account.account_id, tg_chat_id, name
                             );
                             bot.send_message(msg.chat.id, format!(
-                                "✅ Telegram привязан к аккаунту!\n\nПривет, *{}*!\n\n📊 /status — статус\n💳 /billing — подписка\n🛡 /shield — безопасность\n📢 /settings — уведомления",
+                                "✅ Telegram привязан к аккаунту!\n\nПривет, <b>{}</b>!\n\n📊 /status — статус\n💳 /billing — подписка\n🛡 /shield — безопасность\n📢 /settings — уведомления",
                                 name,
-                            )).parse_mode(ParseMode::Markdown).await?;
+                            )).parse_mode(ParseMode::Html).await?;
                         }
                         Err(e) => {
                             log::warn!("TG link failed: {e}");
@@ -115,7 +115,7 @@ pub async fn cmd_start(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
             // No argument — show instructions with a generated code
             // Future: generate random code, store in linking_codes, show to user
             bot.send_message(msg.chat.id, format!(
-                "👋 Привет, *{}*!\n\nПривяжите Telegram к аккаунту FlowLink:\n\n1. Откройте настройки профиля\n2. Скопируйте ваш код привязки\n3. Отправьте: <code>/start &lt;код&gt;</code>\n\n⏳ Код действует 10 минут\n\n💡 Или сгенерируйте код в веб-дашборде:
+                "👋 Привет, <b>{}</b>!\n\nПривяжите Telegram к аккаунту FlowLink:\n\n1. Откройте настройки профиля\n2. Скопируйте ваш код привязки\n3. Отправьте: <code>/start &lt;код&gt;</code>\n\n⏳ Код действует 10 минут\n\n💡 Или сгенерируйте код в веб-дашборде:
 <i>Настройки → Уведомления → Привязать Telegram</i>",
                 name,
             )).parse_mode(ParseMode::Html).await?;
@@ -123,10 +123,10 @@ pub async fn cmd_start(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
     } else {
         // No DB — just greet
         let text = format!(
-            "👋 Привет, *{}*!\n\nБаза данных недоступна.\n/help — команды",
+            "👋 Привет, <b>{}</b>!\n\nБаза данных недоступна.\n/help — команды",
             name,
         );
-        bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+        bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     }
     Ok(())
 }
@@ -159,7 +159,7 @@ pub async fn cmd_help(bot: Bot, msg: Message, _ctx: BotContext) -> ResponseResul
 /config — конфигурация
 /emergency — экстренная остановка";
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -170,7 +170,7 @@ pub async fn cmd_status(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
     let text = if agents.is_empty() {
         "📭 Нет подключённых серверов.".to_string()
     } else {
-        let mut sb = format!("*📊 Статус серверов ({})*\n\n", agents.len());
+        let mut sb = format!("<b>📊 Статус серверов ({})</b>\n\n", agents.len());
         for a in &agents {
             let short = if a.agent_id.len() > 12 { &a.agent_id[..12] } else { &a.agent_id };
             let heartbeat = if a.last_heartbeat > 0 {
@@ -182,14 +182,14 @@ pub async fn cmd_status(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
             } else { "never".to_string() };
 
             sb.push_str(&format!(
-                "*{}* (`{}`)\n  {} | {}\n\n",
+                "<b>{}</b> (<code>{}</code>)\n  {} | {}\n\n",
                 a.hostname, short, a.os, heartbeat,
             ));
         }
         sb
     };
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -200,18 +200,18 @@ pub async fn cmd_servers(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRes
     let text = if agents.is_empty() {
         "📭 Нет подключённых агентов.".to_string()
     } else {
-        let mut sb = format!("*🖥 Серверы ({})*\n\n", agents.len());
+        let mut sb = format!("<b>🖥 Серверы ({})</b>\n\n", agents.len());
         for (i, a) in agents.iter().enumerate() {
             let short = if a.agent_id.len() > 12 { &a.agent_id[..12] } else { &a.agent_id };
             sb.push_str(&format!(
-                "{}. *{}*\n   ID: `{}` | {}\n\n",
+                "{}. <b>{}</b>\n   ID: <code>{}</code> | {}\n\n",
                 i + 1, a.hostname, short, a.os,
             ));
         }
         sb
     };
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -226,9 +226,9 @@ pub async fn cmd_plans(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
         return Ok(());
     }
 
-    let mut sb = String::from("📋 *Тарифные планы FlowLink*\n\n");
+    let mut sb = String::from("📋 <b>Тарифные планы FlowLink</b>\n\n");
     for p in &plans {
-        sb.push_str(&format!("📦 *{}*\n", p.name));
+        sb.push_str(&format!("📦 <b>{}</b>\n", p.name));
         if p.price_kopecks == 0 {
             sb.push_str("   💰 Бесплатно");
             if let Some(days) = p.trial_days {
@@ -236,7 +236,7 @@ pub async fn cmd_plans(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
             }
             sb.push('\n');
         } else {
-            sb.push_str(&format!("   💰 *{} ₽*/мес\n", format_kopecks(p.price_kopecks)));
+            sb.push_str(&format!("   💰 <b>{} ₽</b>/мес\n", format_kopecks(p.price_kopecks)));
         }
         if !p.description.is_empty() {
             sb.push_str(&format!("   📝 {}\n", p.description));
@@ -250,9 +250,9 @@ pub async fn cmd_plans(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
         }
         sb.push('\n');
     }
-    sb.push_str("💡 /subscribe `<plan>` — подписаться");
+    sb.push_str("💡 /subscribe <code><plan></code> — подписаться");
 
-    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -274,7 +274,7 @@ pub async fn cmd_billing(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRes
     let status = if acc.active { "✅ Активна" } else { "❌ Неактивна" };
 
     let text = format!(
-        "💳 *Биллинг*\n\n\
+        "💳 <b>Биллинг</b>\n\n\
          {} Статус: *{}*\n\
          📦 Текущий план: *{}*\n\
          💰 Баланс: *{}*\n\n\
@@ -283,7 +283,7 @@ pub async fn cmd_billing(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRes
         flowlink_billing::payment::PaymentConfig::format_rub(acc.balance_kopecks),
     );
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -307,8 +307,8 @@ pub async fn cmd_myplan(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
         }
     };
 
-    let mut text = format!("📦 *Текущий план: {}*\n\n", plan.name);
-    text.push_str("📏 *Лимиты:*\n");
+    let mut text = format!("📦 <b>Текущий план: {}</b>\n\n", plan.name);
+    text.push_str("📏 <b>Лимиты:</b>\n");
     text.push_str(&format!("  🖥 Серверы: {}\n", plan.limits.max_hosts));
     text.push_str(&format!("  👤 Пользователи: {}\n", plan.limits.max_users));
     text.push_str(&format!(
@@ -323,7 +323,7 @@ pub async fn cmd_myplan(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
     text.push_str(&format!("  🛡 Shield: {}\n", plan.limits.shield_level));
 
     text.push_str("\n💡 /usage — статистика | /plans — сменить план");
-    bot.send_message(msg.chat.id, &text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, &text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -389,10 +389,10 @@ pub async fn cmd_subscribe(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
     ]);
 
     bot.send_message(msg.chat.id, format!(
-        "💳 *Оплата {}*\n\n📦 План: *{}*\n💰 Сумма: *{} ₽*\n\nНажмите кнопку для перехода к оплате:",
+        "💳 <b>Оплата {}</b>\n\n📦 План: <b>{}</b>\n💰 Сумма: <b>{} ₽</b>\n\nНажмите кнопку для перехода к оплате:",
         plan.name, plan.name, format_kopecks(plan.price_kopecks),
     ))
-    .parse_mode(ParseMode::Markdown)
+    .parse_mode(ParseMode::Html)
     .reply_markup(kb)
     .await?;
 
@@ -410,12 +410,12 @@ pub async fn cmd_substatus(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
     let plan = billing.plans().get(&acc.plan_id);
     let plan_name = plan.as_ref().map(|p| p.name.clone()).unwrap_or_default();
 
-    let mut text = format!("💳 *Подписка*\n\n📦 План: *{}*\n", plan_name);
+    let mut text = format!("💳 <b>Подписка</b>\n\n📦 План: <b>{}</b>\n", plan_name);
 
     if let Some(tochka) = &ctx.state.tochka {
         match tochka.get_subscription_by_customer(&account_id).await {
             Ok(sub) => {
-                text.push_str(&format!("🔢 ID: `.{}`\n📊 Статус: *{}*\n💰 Сумма: {} ₽\n",
+                text.push_str(&format!("🔢 ID: <code>.{}</code>\n📊 Статус: <b>{}</b>\n💰 Сумма: {} ₽\n",
                     &sub.subscription_id[..sub.subscription_id.len().min(12)],
                     sub.status,
                     sub.amount / 100,
@@ -431,12 +431,12 @@ pub async fn cmd_substatus(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
     }
 
     text.push_str("\n💡 /subcancel — отменить | /subchange — сменить план");
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
 /// /subcancel — cancel subscription with confirmation
-pub async fn cmd_subcancel(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
+pub async fn cmd_subcancel(bot: Bot, msg: Message, _ctx: BotContext) -> ResponseResult<()> {
     let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(vec![
         vec![
             InlineKeyboardButton::callback("🔴 Да, отменить", "subcancel:confirm".to_string()),
@@ -444,8 +444,8 @@ pub async fn cmd_subcancel(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
         ],
     ]);
     bot.send_message(msg.chat.id,
-        "⚠️ *Отмена подписки*\n\nВы уверены? После отмены доступ к платным функциям прекратится в конце текущего периода.")
-    .parse_mode(ParseMode::Markdown)
+        "⚠️ <b>Отмена подписки</b>\n\nВы уверены? После отмены доступ к платным функциям прекратится в конце текущего периода.")
+    .parse_mode(ParseMode::Html)
     .reply_markup(kb)
     .await?;
     Ok(())
@@ -464,7 +464,7 @@ pub async fn cmd_subchange(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
 
     if new_plan_id.is_empty() {
         cmd_plans(bot.clone(), msg.clone(), ctx.clone()).await?;
-        bot.send_message(msg.chat.id, "💡 Используйте: /subchange `<plan_id>`").parse_mode(ParseMode::Markdown).await?;
+        bot.send_message(msg.chat.id, "💡 Используйте: /subchange <code><plan_id></code>").parse_mode(ParseMode::Html).await?;
         return Ok(());
     }
 
@@ -488,7 +488,7 @@ pub async fn cmd_subchange(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
     let effective = if is_upgrade { "немедленно" } else { "в конце текущего периода" };
 
     let text = format!(
-        "🔄 *Смена плана*\n\n{}: {} → *{}*\n💰 {} → {} ₽/мес\n📅 Вступит в силу: *{}*",
+        "🔄 <b>Смена плана</b>\n\n{}: {} → <b>{}</b>\n💰 {} → {} ₽/мес\n📅 Вступит в силу: <b>{}</b>",
         change_type, current.name, new_plan.name,
         format_kopecks(current.price_kopecks), format_kopecks(new_plan.price_kopecks),
         effective,
@@ -502,7 +502,7 @@ pub async fn cmd_subchange(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
         vec![InlineKeyboardButton::callback("❌ Отмена", "dismiss".to_string())],
     ]);
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).reply_markup(kb).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).reply_markup(kb).await?;
     Ok(())
 }
 
@@ -511,17 +511,17 @@ pub async fn cmd_handle_payment_email(
     bot: Bot,
     msg: Message,
     ctx: BotContext,
-    plan_id: String,
-    email: String,
+    _plan_id: String,
+    _email: String,
 ) -> ResponseResult<()> {
-    let billing = match &ctx.state.billing {
+    let _billing = match &ctx.state.billing {
         Some(b) => b,
         None => {
             bot.send_message(msg.chat.id, "❌ Биллинг не настроен.").await?;
             return Ok(());
         }
     };
-    let tochka = match &ctx.state.tochka {
+    let _tochka = match &ctx.state.tochka {
         Some(t) => t,
         None => {
             bot.send_message(msg.chat.id, "❌ Платёжная система не настроена.").await?;
@@ -564,12 +564,12 @@ pub async fn cmd_handle_payment_email(
             ]);
 
             bot.send_message(msg.chat.id, format!(
-                "💳 *Оплата через СБП*\n\n📦 План: *{}*\n💰 Сумма: *{} ₽*\n📧 Чек: {}\n\nНажмите кнопку ниже для оплаты:",
+                "💳 <b>Оплата через СБП</b>\n\n📦 План: <b>{}</b>\n💰 Сумма: <b>{} ₽</b>\n📧 Чек: {}\n\nНажмите кнопку ниже для оплаты:",
                 plan.name,
                 format_kopecks(plan.price_kopecks),
                 email,
             ))
-            .parse_mode(ParseMode::Markdown)
+            .parse_mode(ParseMode::Html)
             .reply_markup(kb)
             .await?;
 
@@ -604,7 +604,7 @@ pub async fn cmd_invoices(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRe
         return Ok(());
     }
 
-    let mut sb = format!("🧾 *Счета ({})*\n\n", invoices.len());
+    let mut sb = format!("🧾 <b>Счета ({})</b>\n\n", invoices.len());
     for inv in &invoices {
         let short = if inv.id.len() > 8 { &inv.id[..8] } else { &inv.id };
         let status = match inv.status {
@@ -612,10 +612,10 @@ pub async fn cmd_invoices(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRe
             flowlink_billing::invoice::InvoiceStatus::Pending => "⏳",
             _ => "❓",
         };
-        sb.push_str(&format!("{} `{}` — *{}*\n", status, short, format_kopecks(inv.total_kopecks)));
+        sb.push_str(&format!("{} <code>{}</code> — <b>{}</b>\n", status, short, format_kopecks(inv.total_kopecks)));
     }
 
-    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -625,14 +625,14 @@ pub async fn cmd_usage(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
     let all_usage = ctx.state.usage_tracker.get_all_usage().await;
 
     let text = format!(
-        "📊 *Использование*\n\n\
+        "📊 <b>Использование</b>\n\n\
          📈 Запросов сегодня: {}\n\
          🔤 Токенов сегодня: {}\n\
          🖥 Активных агентов: {}",
         daily_requests, daily_tokens, all_usage.len(),
     );
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -645,14 +645,14 @@ pub async fn cmd_devices(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRes
         return Ok(());
     }
 
-    let mut sb = format!("📱 *Устройства ({})*\n\n", devices.len());
+    let mut sb = format!("📱 <b>Устройства ({})</b>\n\n", devices.len());
     for d in &devices {
         let status = if d.active { "✅" } else { "🔒" };
         let short = if d.id.len() > 12 { &d.id[..12] } else { &d.id };
-        sb.push_str(&format!("{} *{}* (`{}`)\n", status, d.name, short));
+        sb.push_str(&format!("{} <b>{}</b> (<code>{}</code>)\n", status, d.name, short));
     }
 
-    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -662,14 +662,14 @@ pub async fn cmd_shield(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
     let all = ctx.state.shield_alerts.list_all();
 
     let text = format!(
-        "🛡 *Shield Status*\n\n\
+        "🛡 <b>Shield Status</b>\n\n\
          📊 Всего оповещений: {}\n\
          ⚠️ Активных: {}\n\
          ✅ Разрешено: {}",
         all.len(), active.len(), all.len() - active.len(),
     );
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -690,14 +690,14 @@ pub async fn cmd_logs(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult
         return Ok(());
     }
 
-    let mut sb = format!("📋 *Последние действия ({})*\n\n", entries.len());
+    let mut sb = format!("📋 <b>Последние действия ({})</b>\n\n", entries.len());
     for e in &entries {
         let short = if e.id.len() > 8 { &e.id[..8] } else { &e.id };
         let ts = if e.timestamp_iso.len() >= 19 { &e.timestamp_iso[..19] } else { &e.timestamp_iso };
-        sb.push_str(&format!("📝 `{}` {} — {}\n", short, ts, format!("{:?}", e.event_type)));
+        sb.push_str(&format!("📝 <code>{}</code> {} — {}\n", short, ts, format!("{:?}", e.event_type)));
     }
 
-    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -710,15 +710,15 @@ pub async fn cmd_approvals(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
         return Ok(());
     }
 
-    let mut sb = format!("⏳ *Ожидают подтверждения ({})*\n\n", approvals.len());
+    let mut sb = format!("⏳ <b>Ожидают подтверждения ({})</b>\n\n", approvals.len());
     for a in &approvals {
         let short = if a.id.len() > 8 { &a.id[..8] } else { &a.id };
         let cmd = if a.command.len() > 40 { format!("{}...", &a.command[..40]) } else { a.command.clone() };
-        sb.push_str(&format!("  `{}` — {} (риск: {})\n", short, cmd, a.risk_level));
+        sb.push_str(&format!("  <code>{}</code> — {} (риск: {})\n", short, cmd, a.risk_level));
     }
     sb.push_str("\n💡 Используйте API: POST /api/approvals/<id>/approve");
 
-    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -733,7 +733,7 @@ pub async fn cmd_config(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
     };
 
     let text = format!(
-        "⚙ *Конфигурация*\n\n\
+        "⚙ <b>Конфигурация</b>\n\n\
          🌐 HTTP: {}\n\
          🔒 WSS: {}\n\
          📦 Биллинг: {}\n\
@@ -744,7 +744,7 @@ pub async fn cmd_config(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
         if config.llm.enabled { "✅" } else { "❌" },
     );
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
@@ -755,9 +755,9 @@ pub async fn cmd_reload(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
             match reloader.reload().await {
                 Ok(result) => {
                     bot.send_message(msg.chat.id, format!(
-                        "🔄 *Конфигурация перезагружена*\n\n✅ {}\n🔄 Перезагрузок: {}\n🖥 Агентов: {}",
+                        "🔄 <b>Конфигурация перезагружена</b>\n\n✅ {}\n🔄 Перезагрузок: {}\n🖥 Агентов: {}",
                         result.message, result.reload_count, result.connected_agents,
-                    )).parse_mode(ParseMode::Markdown).await?;
+                    )).parse_mode(ParseMode::Html).await?;
                 }
                 Err(e) => {
                     bot.send_message(msg.chat.id, format!("❌ Ошибка перезагрузки: {}", e)).await?;
@@ -781,8 +781,8 @@ pub async fn cmd_emergency(bot: Bot, msg: Message, _ctx: BotContext) -> Response
     ]);
 
     bot.send_message(msg.chat.id,
-        "🚨 *ЭКСТРЕННАЯ ОСТАНОВКА*\n\nВсе серверы будут немедленно остановлены.")
-    .parse_mode(ParseMode::Markdown)
+        "🚨 <b>ЭКСТРЕННАЯ ОСТАНОВКА</b>\n\nВсе серверы будут немедленно остановлены.")
+    .parse_mode(ParseMode::Html)
     .reply_markup(kb)
     .await?;
 
@@ -795,13 +795,13 @@ pub async fn cmd_exec(bot: Bot, msg: Message, _ctx: BotContext) -> ResponseResul
                 Используйте: POST /api/exec/`<agent_id>`\n\
                 Или команду: `/exec <server> <cmd>` (в Go-боте)";
 
-    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Markdown).await?;
+    bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
 
 /// /backups — placeholder
 pub async fn cmd_backups(bot: Bot, msg: Message, _ctx: BotContext) -> ResponseResult<()> {
-    bot.send_message(msg.chat.id, "📦 Бэкапы через API агента.\n\n`POST /api/exec/<agent_id>` с командой `flowlink agent backup`").await?;
+    bot.send_message(msg.chat.id, "📦 Бэкапы через API агента.\n\n<code>POST /api/exec/<agent_id></code> с командой <code>flowlink agent backup</code>").await?;
     Ok(())
 }
 

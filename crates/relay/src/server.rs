@@ -5,7 +5,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Json,
     },
-    routing::{get, post, put},
+    routing::{get, post},
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -23,7 +23,7 @@ use crate::handler::RelayHandler;
 use crate::llm::{LlmProxy, LlmRequest};
 use crate::metrics::Metrics;
 use axum::middleware;
-use crate::middleware::{jwt_auth, rate_limit_layer, request_id_middleware, logging_middleware, cors_layer};
+use crate::middleware::{rate_limit_layer, request_id_middleware, logging_middleware, cors_layer};
 use crate::ratelimit::RateLimiter;
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
@@ -282,7 +282,7 @@ async fn account_info(
 
 /// GET /api/account/settings
 async fn account_get_settings(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "name": "",
@@ -333,7 +333,7 @@ async fn account_update_settings(
     // Update notification preferences via NotificationStore
     if let (Some(notifications), Some(ref store)) = (body.get("notifications"), &state.notification_store) {
         if let Some(push_enabled) = notifications.get("push_enabled").and_then(|v| v.as_bool()) {
-            let kind = if push_enabled { "push_enabled" } else { "push_disabled" };
+            let _kind = if push_enabled { "push_enabled" } else { "push_disabled" };
             store.add(&account_id, "settings", "Notification Settings", &format!("Push notifications {}", if push_enabled { "enabled" } else { "disabled" })).await;
         }
     }

@@ -911,7 +911,7 @@ pub async fn tochka_webhook(
 /// GET /api/v1/account/tg-link-code — generate a link code for Telegram binding
 /// Returns the account_id as the code (user sends /start <code> in TG bot)
 pub async fn tg_link_code(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     account: AccountIdExtractor,
 ) -> impl IntoResponse {
     let bot_username = std::env::var("TG_BOT_USERNAME").unwrap_or_else(|_| "flowlink_bot".to_string());

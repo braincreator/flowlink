@@ -7,12 +7,13 @@ import { useAuth } from '../hooks/useAuth';
 import { useSettings, BillingInfo, ServerInfo } from '../hooks/useSettings';
 import { useNotifications } from '../hooks/useNotifications';
 import { useTerminalSettings } from '../hooks/useTerminalSettings';
+import { api } from '../api/client';
 import { getTheme, themes } from '../components/terminal/themes';
 import ThemePreview from '../components/terminal/ThemePreview';
 
 export default function Settings() {
   const { t, i18n } = useTranslation();
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const { data: systemInfo, loading: infoLoading } = useApi(
     () => api.getSystemInfo(),
   );
@@ -25,7 +26,7 @@ export default function Settings() {
     servers,
     usage,
     loading,
-    error,
+    errors: settingsErrors,
     changePlan,
     refresh,
   } = useSettings();

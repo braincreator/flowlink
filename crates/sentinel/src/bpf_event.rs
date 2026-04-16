@@ -81,6 +81,7 @@ fn null_terminated_str(bytes: &[u8]) -> String {
 
 
 mod tests {
+    #![allow(dead_code)]
     use super::*;
 
     fn make_bpf_bytes(event_type: u32, pid: u32) -> Vec<u8> {

@@ -12,12 +12,11 @@
 
 use axum::{
     extract::State,
-    http::StatusCode,
     response::{Html, IntoResponse, Json},
     routing::{get, post},
     Router,
 };
-use flowlink_shield::{AnalysisEngine, Command, ThreatLevel};
+use flowlink_shield::{AnalysisEngine, Command};
 use flowlink_sentinel::SentinelConfig;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -168,6 +167,7 @@ pub struct UnblockRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(non_camel_case_types)]
 pub enum BlockKind {
     command,
     path,
@@ -184,12 +184,14 @@ pub struct WhitelistRequest {
 // ── Response types ─────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
+#[allow(dead_code)]
 struct ApiResponse<T: Serialize> {
     status: &'static str,
     data: T,
 }
 
 #[derive(Serialize)]
+#[allow(dead_code)]
 struct ApiError {
     status: &'static str,
     error: String,
@@ -250,7 +252,7 @@ pub async fn block_item(
         BlockKind::path => ApprovalAction::ProtectPath,
         BlockKind::pid => ApprovalAction::BlockPid,
     };
-    let id = format!("apr_{}{}", &req.value.as_bytes().iter().take(4).map(|b| format!("{:02x}", b)).collect::<String>(), now.chars().take(4).collect::<String>());
+    let _id = format!("apr_{}{}", &req.value.as_bytes().iter().take(4).map(|b| format!("{:02x}", b)).collect::<String>(), now.chars().take(4).collect::<String>());
 
     // Direct API call (from Dashboard/Telegram) — apply immediately
     let item = BlockedItem { value: req.value.clone(), reason: reason.clone(), blocked_at: now };

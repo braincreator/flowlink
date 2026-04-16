@@ -232,6 +232,7 @@ pub struct BackupManager {
     /// Max storage in bytes (0 = unlimited)
     max_storage_bytes: u64,
     /// Enable content-addressed deduplication
+    #[allow(dead_code)]
     deduplication: bool,
     /// Compression algorithm
     compression: CompressionType,
@@ -720,6 +721,7 @@ impl BackupManager {
 
     /// Remove oldest snapshots beyond max_snapshots limit (legacy count-based).
     #[deprecated(note = "Use evict() instead")]
+    #[allow(dead_code)]
     async fn rotate(&self) -> Result<()> {
         self.evict().await
     }

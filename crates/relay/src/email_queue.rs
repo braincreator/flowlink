@@ -70,6 +70,8 @@ impl EmailType {
     }
 }
 
+#[allow(dead_code)]
+#[allow(dead_code)]
 struct ScheduledEmail {
     id: uuid::Uuid,
     account_id: String,

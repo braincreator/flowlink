@@ -1,6 +1,6 @@
 //! Authentication module — JWT tokens + OAuth (VK, Yandex) + API token auth
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
@@ -319,7 +319,7 @@ impl AuthEngine {
         let first_name = user_data["first_name"].as_str().unwrap_or("");
         let last_name = user_data["last_name"].as_str().unwrap_or("");
         let avatar = user_data["avatar"].as_str().map(|s| s.to_string());
-        let phone = user_data["phone"].as_str().map(|s| s.to_string());
+        let _phone = user_data["phone"].as_str().map(|s| s.to_string());
 
         let full_name = format!("{} {}", first_name, last_name).trim().to_string();
 
@@ -594,6 +594,7 @@ impl AuthEngine {
 // User types
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 #[derive(Debug, sqlx::FromRow)]
 struct UserRow {
     id: Uuid,

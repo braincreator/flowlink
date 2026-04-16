@@ -1,4 +1,4 @@
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::http::StatusCode;
 
 /// GET /dashboard/* - serve static dashboard files

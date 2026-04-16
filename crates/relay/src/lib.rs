@@ -78,7 +78,7 @@ impl Relay {
 
         // AuthEngine for JWT tokens (requires jwt_secret + database)
         // Initialized after db setup — see below
-        let auth_engine: Option<Arc<crate::auth::AuthEngine>>;
+        let _auth_engine: Option<Arc<crate::auth::AuthEngine>>;
 
         let data_dir = shellexpand::tilde(&self.config.registry.data_path).to_string();
         let registry = Arc::new(Registry::new(&data_dir)?);

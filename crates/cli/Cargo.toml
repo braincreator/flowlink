@@ -9,7 +9,7 @@ name = "flowlink"
 path = "src/main.rs"
 
 [dependencies]
-flowlink-core = { path = "../core" }
+flowlink-core = { path = "../core", features = ["vault"] }
 flowlink-agent = { path = "../agent" }
 flowlink-relay = { path = "../relay" }
 flowlink-crypto = { path = "../crypto" }

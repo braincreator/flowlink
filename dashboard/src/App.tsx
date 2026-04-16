@@ -1,8 +1,9 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Sidebar';
 import { LoadingSkeleton } from './components/Layout';
 import { NotificationProvider } from './hooks/useNotifications';
+import { api } from './api/client';
 
 import Login from './pages/Login';
 import Onboarding from './pages/Onboarding';
@@ -28,6 +29,24 @@ const Metrics = lazy(() => import('./pages/Metrics'));
 const Shield = lazy(() => import('./pages/Shield'));
 
 export default function App() {
+  // Handle OAuth callback: extract tokens from URL and store them
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+    if (accessToken) {
+      api.setToken(accessToken);
+      if (refreshToken) {
+        localStorage.setItem('flowlink_refresh', refreshToken);
+      }
+      // Clean URL — remove tokens from address bar
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete('access_token');
+      clean.searchParams.delete('refresh_token');
+      window.history.replaceState({}, '', clean.pathname + clean.hash);
+    }
+  }, []);
+
   return (
     <NotificationProvider>
     <BrowserRouter>

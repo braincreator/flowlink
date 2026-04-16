@@ -75,7 +75,8 @@ impl ChannelResponse {
 
 /// Extract account_id from JWT auth middleware.
 /// The auth middleware sets `account_id` in request extensions.
-fn get_account_id(state: &AppState, req_parts: &axum::http::request::Parts) -> Result<String, StatusCode> {
+#[allow(dead_code)]
+fn get_account_id(_state: &AppState, _req_parts: &axum::http::request::Parts) -> Result<String, StatusCode> {
     // Try to get account_id from auth context
     // The JWT middleware stores claims — we access via the auth module
     // For now, extract from the state's auth engine based on the token

@@ -6,6 +6,9 @@ pub mod codes;
 pub mod config;
 pub mod rbac;
 
+#[cfg(feature = "vault")]
+pub mod vault;
+
 use serde::{Deserialize, Serialize};
 
 // ═══════════════════════════════════════════════

@@ -568,7 +568,7 @@ impl McpServer {
     }
 
     fn policy_status(&self) -> String {
-        let policy = self.engine.analyze(&Command {
+        let _policy = self.engine.analyze(&Command {
             raw: String::new(),
             binary: String::new(),
             args: vec![],

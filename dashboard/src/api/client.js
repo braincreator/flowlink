@@ -83,6 +83,29 @@ class ApiClient {
     removeDevice(id) { return this.request('DELETE', `/api/devices/${id}`); }
     // System
     getSystemInfo() { return this.request('GET', '/api/system/info'); }
+    // Billing
+    getBillingInfo() { return this.request('GET', '/api/billing'); }
+    getUsage() { return this.request('GET', '/api/billing/usage'); }
+    getPlans() { return this.request('GET', '/api/plans'); }
+    getBillingPlans() { return this.request('GET', '/api/billing/plans'); }
+    changePlan(planId) { return this.request('POST', '/api/billing/change-plan', { plan_id: planId }); }
+    getInvoices() { return this.request('GET', '/api/billing/invoices'); }
+    getInvoice(id) { return this.request('GET', `/api/billing/invoices/${id}`); }
+    getPaymentMethods() { return this.request('GET', '/api/billing/payments/methods'); }
+    getSubscriptions() { return this.request('GET', '/api/billing/subscriptions'); }
+    createSubscription(data) { return this.request('POST', '/api/billing/subscriptions', data); }
+    cancelSubscription(id) { return this.request('POST', `/api/billing/subscriptions/${id}/cancel`); }
+    getOrders() { return this.request('GET', '/api/billing/orders'); }
+    createOrder(data) { return this.request('POST', '/api/billing/orders', data); }
+    // Control Plane — Agents/Servers
+    getControlPlaneAgents() { return this.request('GET', '/api/v1/agents'); }
+    getControlPlaneAgent(id) { return this.request('GET', `/api/v1/agents/${id}`); }
+    signupAgent(data) { return this.request('POST', '/api/v1/signup', data); }
+    sendHeartbeat(data) { return this.request('POST', '/api/v1/heartbeat', data); }
+    // Config
+    getConfig() { return this.request('GET', '/api/config'); }
+    reloadConfig() { return this.request('POST', '/api/config/reload'); }
+    pushConfig(agentId, config) { return this.request('POST', `/api/config/push/${agentId}`, config); }
     // Metrics
     getMetrics() { return this.requestText('GET', '/metrics'); }
     // SSE URL helper

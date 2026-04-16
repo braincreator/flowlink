@@ -206,11 +206,24 @@ const en = {
         open_terminal_settings: 'Open Terminal Settings',
     },
     billing: {
-        title: 'Billing', plan: 'Free Plan', usage: 'Usage', agents_count: 'Agents Connected',
-        commands_count: 'API Calls', storage: 'Storage Used', upgrade: 'Upgrade to Pro',
-        plan_desc: 'Up to 3 agents · 1,000 API calls/month',
-        coming_soon: 'Billing coming soon',
-        coming_soon_desc: 'Usage tracking, invoices, and plan management will be available in a future update.',
+        title: 'Billing', current_plan: 'Current Plan', current_plan_desc: 'Trial — 7 days',
+        usage: 'Usage', hosts_connected: 'Hosts Connected', team_members: 'Team Members',
+        log_retention: 'Log Retention', upgrade: 'Upgrade',
+        trial_name: 'Trial', trial_price: 'Free · 7 days',
+        trial_features: [
+            '1 host', '1 user', '3 day logs', 'Pattern blocking', 'Manual backup', 'E2EE',
+        ],
+        starter_name: 'Starter', starter_price: '$29/mo',
+        starter_features: [
+            '3 hosts', '3 users', '14 day logs', 'AST analysis', 'Canary honeypots',
+            'Approval workflow', 'Custom policies (up to 10)', 'Smart backup + dedup', 'Device trust', 'MCP protocol',
+        ],
+        pro_name: 'Pro', pro_price: '$79/mo',
+        pro_features: [
+            '20 hosts', '10 users', '90 day logs', 'eBPF kernel-level', 'Policy DSL',
+            'Forensics', 'K8s operator', 'GitOps', 'SIEM export', 'RBAC',
+            'Telegram approval', 'Auto restore', 'LLM failover', 'Global kill switch',
+        ],
     },
     onboarding: {
         welcome: 'Welcome to FlowLink Shield', welcome_desc: 'Real-time command monitoring and policy enforcement for your infrastructure agents. Let\'s get you set up in a few minutes.',
