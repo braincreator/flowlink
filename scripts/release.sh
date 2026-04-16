@@ -1,7 +1,7 @@
 #!/bin/bash
-# FlowLink Release: bump patch, build, deploy, tag, GitHub release
+# FlowLink Release: bump patch, build (linux + macos), deploy, tag, GitHub release
 # Usage: ./scripts/release.sh
-# Bumps 0.1.0 → 0.1.1 (patch only, minor stays)
+# Bumps 0.1.0 → 0.1.1 (patch only)
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -16,46 +16,47 @@ PATCH=$(echo "$CURRENT" | cut -d. -f3)
 NEW_PATCH=$((PATCH + 1))
 NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
 TAG="v${NEW_VERSION}"
+VPS="root@93.93.207.44"
 
 echo "╔══════════════════════════════════╗"
 echo "║   FlowLink Release               ║"
 echo "║   $CURRENT → $NEW_VERSION          ║"
 echo "╚══════════════════════════════════╝"
 
-# Confirm
 read -rp "Release $NEW_VERSION? [y/N] " confirm
 if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
     echo "Cancelled"
     exit 0
 fi
 
-# 1. Bump version in Cargo.toml
+# 1. Bump version
 echo ""
 echo "📝 Bumping version to $NEW_VERSION..."
 sed -i '' "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" Cargo.toml
-
 git add Cargo.toml
 git commit -m "chore: bump version to $NEW_VERSION"
 git push origin main
 
-# 2. Build
+# 2. Build Linux x86_64 (zig cross-compile)
 echo ""
-echo "🔨 Cross-compiling with zig..."
+echo "🔨 Building Linux x86_64..."
 cargo zigbuild --release --bin flowlink --target x86_64-unknown-linux-gnu 2>&1 | grep -E "Compiling|Finished|error" | tail -5
+LINUX_BIN="target/x86_64-unknown-linux-gnu/release/flowlink"
+if [ ! -f "$LINUX_BIN" ]; then echo "❌ Linux build failed!"; exit 1; fi
+echo "   $(du -h "$LINUX_BIN" | cut -f1)"
 
-BIN="target/x86_64-unknown-linux-gnu/release/flowlink"
-if [ ! -f "$BIN" ]; then
-    echo "❌ Build failed!"
-    exit 1
-fi
-echo "   $(du -h "$BIN" | cut -f1)"
+# 3. Build macOS ARM64 (native)
+echo ""
+echo "🔨 Building macOS ARM64..."
+cargo build --release --bin flowlink --target aarch64-apple-darwin 2>&1 | grep -E "Compiling|Finished|error" | tail -5
+MAC_BIN="target/aarch64-apple-darwin/release/flowlink"
+if [ ! -f "$MAC_BIN" ]; then echo "❌ macOS build failed!"; exit 1; fi
+echo "   $(du -h "$MAC_BIN" | cut -f1)"
 
-# 3. Deploy
+# 4. Deploy Linux binary to VPS
 echo ""
 echo "📦 Deploying to VPS..."
-VPS="root@93.93.207.44"
-scp -q "$BIN" "$VPS:/opt/flowlink/bin/flowlink.new"
-
+scp -q "$LINUX_BIN" "$VPS:/opt/flowlink/bin/flowlink.new"
 ssh -o ConnectTimeout=10 "$VPS" '
     kill -9 $(pgrep -f "flowlink relay") 2>/dev/null || true
     sleep 2
@@ -66,24 +67,30 @@ ssh -o ConnectTimeout=10 "$VPS" '
     systemctl is-active --quiet flowlink-relay && echo "✅ Deployed!" || echo "❌ Service failed"
 '
 
-# 4. Tag + GitHub Release
+# 5. Tag + GitHub Release with both binaries
 echo ""
 echo "🏷️  Creating release $TAG..."
 
 git tag "$TAG"
 git push origin "$TAG"
 
-ARCHIVE="/tmp/flowlink-${NEW_VERSION}-linux-amd64.tar.gz"
-cp "$BIN" "/tmp/flowlink"
-tar czf "$ARCHIVE" -C /tmp flowlink
-rm -f /tmp/flowlink
+LINUX_ARCHIVE="/tmp/flowlink-${NEW_VERSION}-linux-amd64.tar.gz"
+MAC_ARCHIVE="/tmp/flowlink-${NEW_VERSION}-macos-arm64.tar.gz"
 
-gh release create "$TAG" "$ARCHIVE" \
+cp "$LINUX_BIN" "/tmp/flowlink" && tar czf "$LINUX_ARCHIVE" -C /tmp flowlink && rm -f /tmp/flowlink
+cp "$MAC_BIN" "/tmp/flowlink" && tar czf "$MAC_ARCHIVE" -C /tmp flowlink && rm -f /tmp/flowlink
+
+gh release create "$TAG" "$LINUX_ARCHIVE" "$MAC_ARCHIVE" \
     --title "FlowLink $TAG" \
-    --notes "Release $TAG — $(git rev-parse --short HEAD)" \
+    --notes "Release $TAG
+
+- **Linux** x86_64 — \`flowlink-${NEW_VERSION}-linux-amd64.tar.gz\`
+- **macOS** ARM64 — \`flowlink-${NEW_VERSION}-macos-arm64.tar.gz\`
+
+Built from $(git rev-parse --short HEAD)" \
     --target main
 
-rm -f "$ARCHIVE"
+rm -f "$LINUX_ARCHIVE" "$MAC_ARCHIVE"
 
 echo ""
 echo "✅ Released!"
