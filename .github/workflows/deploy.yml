@@ -22,6 +22,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Update lockfile for stable toolchain
+        run: cargo update
+
       - name: Build release binary
         run: cargo build --release --bin flowlink
 
@@ -35,47 +38,58 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment: production
+    permissions:
+      contents: read
     steps:
       - name: Download binary
         uses: actions/download-artifact@v4
         with:
           name: flowlink-binary
+          path: ./flowlink
 
-      - name: Deploy to VPS
+      - name: Make binary executable
+        run: chmod +x ./flowlink
+
+      - name: Upload binary to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "flowlink"
+          target: "/usr/local/bin/flowlink"
+          strip_components: 0
+
+      - name: Restart service & health check
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 30s
           script: |
             set -euo pipefail
 
-            # Stop existing service
-            sudo systemctl stop flowlink || true
-
-            # Backup current binary
+            # Backup
             if [ -f /usr/local/bin/flowlink ]; then
               cp /usr/local/bin/flowlink /usr/local/bin/flowlink.bak
             fi
 
-            # Upload new binary
-            sudo mkdir -p /opt/flowlink
-            sudo chown $USER:$USER /opt/flowlink
+            # Stop
+            systemctl stop flowlink || true
+            sleep 1
 
-            echo "Waiting for binary upload..."
-
-            # Restart service
-            sudo systemctl start flowlink
+            # Start
+            systemctl start flowlink
+            sleep 3
 
             # Health check
-            sleep 3
             curl -sf http://localhost:8080/healthz || {
               echo "Health check failed! Rolling back..."
-              sudo systemctl stop flowlink
+              systemctl stop flowlink || true
               if [ -f /usr/local/bin/flowlink.bak ]; then
-                cp /usr/local/bin/flowlink.bak /usr/local/bin/flowlink
-                sudo systemctl start flowlink
+                mv /usr/local/bin/flowlink.bak /usr/local/bin/flowlink
+                systemctl start flowlink
               fi
               exit 1
             }
