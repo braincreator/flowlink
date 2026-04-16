@@ -1,21 +1,21 @@
 #!/bin/bash
-# FlowLink CI: build on VPS → deploy → GitHub release
+# FlowLink CI: zig cross-compile on Mac → deploy to VPS → GitHub release
+# Requires: zig, cargo-zigbuild, gh
 # Usage:
-#   ./scripts/deploy.sh                  # full pipeline
-#   ./scripts/deploy.sh --skip-release   # build + deploy, no release
-#   ./scripts/deploy.sh --skip-build     # deploy cached binary + release
-#   ./scripts/deploy.sh --tag v1.0.0     # custom tag
+#   ./scripts/deploy.sh                    # full: build + deploy + release
+#   ./scripts/deploy.sh --skip-release     # build + deploy only
+#   ./scripts/deploy.sh --deploy-only      # deploy cached binary
+#   ./scripts/deploy.sh --tag v1.0.0       # custom tag
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-SKIP_BUILD=false
-SKIP_RELEASE=false
+MODE="full"
 TAG=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --skip-build)   SKIP_BUILD=true ;;
-        --skip-release) SKIP_RELEASE=true ;;
+        --skip-release) MODE="build-deploy" ;;
+        --deploy-only)  MODE="deploy" ;;
         --tag)          TAG="$2"; shift ;;
     esac
     shift
@@ -24,86 +24,75 @@ done
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
 TAG="${TAG:-v$VERSION}"
 VPS="root@93.93.207.44"
-REMOTE_DIR="/root/fl-build"
+BIN="target/x86_64-unknown-linux-gnu/release/flowlink"
 SERVICE="flowlink-relay"
 
 echo "╔══════════════════════════════════╗"
 echo "║   FlowLink Deploy               ║"
 echo "║   Version: $VERSION               ║"
 echo "║   Tag: $TAG              ║"
+echo "║   Mode: $MODE                    ║"
 echo "╚══════════════════════════════════╝"
 
-# 1. Build on VPS
-if [ "$SKIP_BUILD" = false ]; then
+# ─── BUILD ───
+if [ "$MODE" = "build-deploy" ] || [ "$MODE" = "full" ]; then
     echo ""
-    echo "📦 [1/3] Uploading source to VPS..."
-    tar czf /tmp/fl-src.tar.gz \
-        --exclude="target" --exclude=".git" --exclude="video" \
-        --exclude="website" --exclude="docs" --exclude="scripts" \
-        --exclude='*.md' \
-        Cargo.toml Cargo.lock crates/
-    scp -q /tmp/fl-src.tar.gz "$VPS:/tmp/"
-    rm -f /tmp/fl-src.tar.gz
-
-    echo "🔨 [2/3] Building on VPS..."
-    ssh "$VPS" bash -s << REMOTE
-        set -euo pipefail
-        cd $REMOTE_DIR
-        tar xzf /tmp/fl-src.tar.gz
-        . /root/.cargo/env
-        cargo build --release --bin flowlink
-        echo "✅ Build done: \$(ls -lh target/release/flowlink | awk '{print \$5}')"
-REMOTE
+    echo "🔨 [1/3] Cross-compiling with zig (~1.5 min)..."
+    cargo zigbuild --release --bin flowlink --target x86_64-unknown-linux-gnu 2>&1 | tail -5
+    echo "   ✅ $(du -h "$BIN" | cut -f1) $(file "$BIN" | cut -d: -f2 | xargs)"
 fi
 
-# 2. Deploy
-if [ "$SKIP_BUILD" = true ]; then
-    echo ""
-    echo "🚀 [1/2] Deploying cached binary..."
-else
-    echo ""
-    echo "🚀 [3/3] Deploying..."
-fi
-
-ssh "$VPS" bash -s << REMOTE
-    set -euo pipefail
-    BIN="/opt/flowlink/bin/flowlink"
-    
-    echo "   Stopping $SERVICE..."
-    systemctl stop $SERVICE || true
-    sleep 2
-    kill -9 \$(pgrep -f "flowlink relay") 2>/dev/null || true
-    sleep 1
-    
-    echo "   Replacing binary..."
-    cp "$BIN" "\${BIN}.bak" 2>/dev/null || true
-    cp $REMOTE_DIR/target/release/flowlink "$BIN"
-    chmod +x "$BIN"
-    
-    echo "   Starting $SERVICE..."
-    systemctl start $SERVICE
-    sleep 3
-    
-    if systemctl is-active --quiet $SERVICE; then
-        VERSION=\$(\$BIN --version 2>/dev/null || echo "?")
-        echo "   ✅ Deployed! (\$VERSION)"
-    else
-        echo "   ❌ Failed! Rolling back..."
-        systemctl stop $SERVICE 2>/dev/null || true
-        mv "\${BIN}.bak" "$BIN" 2>/dev/null
-        systemctl start $SERVICE 2>/dev/null
-        journalctl -u $SERVICE --no-pager -n 10
+# ─── DEPLOY ───
+if [ "$MODE" = "deploy" ] || [ "$MODE" = "build-deploy" ] || [ "$MODE" = "full" ]; then
+    if [ "$MODE" = "deploy" ] && [ ! -f "$BIN" ]; then
+        echo "❌ Binary not found: $BIN"
         exit 1
     fi
-REMOTE
 
-# 3. GitHub Release
-if [ "$SKIP_RELEASE" = false ]; then
     echo ""
-    echo "🏷️  Creating release $TAG..."
+    echo "🚀 $([ "$MODE" = "deploy" ] && echo "[1/2]" || echo "[2/3]") Deploying to VPS..."
+
+    scp -q "$BIN" "$VPS:/opt/flowlink/bin/flowlink.new"
+
+    ssh "$VPS" bash -s << 'REMOTE'
+        SERVICE="flowlink-relay"
+        BIN="/opt/flowlink/bin/flowlink"
+        
+        echo "   Stopping..."
+        systemctl stop "$SERVICE" || true
+        sleep 2
+        kill -9 $(pgrep -f "flowlink relay") 2>/dev/null || true
+        sleep 1
+        
+        echo "   Replacing..."
+        cp "$BIN" "${BIN}.bak" 2>/dev/null || true
+        mv "${BIN}.new" "$BIN"
+        chmod +x "$BIN"
+        
+        echo "   Starting..."
+        systemctl start "$SERVICE"
+        sleep 3
+        
+        if systemctl is-active --quiet "$SERVICE"; then
+            echo "   ✅ Deployed! ($($BIN --version 2>/dev/null))"
+        else
+            echo "   ❌ Failed! Rolling back..."
+            systemctl stop "$SERVICE" 2>/dev/null || true
+            mv "${BIN}.bak" "$BIN" 2>/dev/null
+            systemctl start "$SERVICE" 2>/dev/null
+            journalctl -u "$SERVICE" --no-pager -n 5
+            exit 1
+        fi
+REMOTE
+fi
+
+# ─── GITHUB RELEASE ───
+if [ "$MODE" = "full" ]; then
+    echo ""
+    echo "🏷️  [3/3] Creating release $TAG..."
 
     ARCHIVE="/tmp/flowlink-${TAG#v}-linux-amd64.tar.gz"
-    scp -q "$VPS:$REMOTE_DIR/target/release/flowlink" "/tmp/flowlink"
+    cp "$BIN" "/tmp/flowlink"
     tar czf "$ARCHIVE" -C /tmp flowlink
     rm -f /tmp/flowlink
 
@@ -116,7 +105,7 @@ if [ "$SKIP_RELEASE" = false ]; then
         --title "FlowLink $TAG" \
         --notes "Release $TAG — $(git rev-parse --short HEAD)" \
         --target main 2>&1 || echo "   ⚠️  Release already exists"
-    
+
     echo "   🔗 https://github.com/braincreator/flowlink/releases/tag/$TAG"
     rm -f "$ARCHIVE"
 fi
