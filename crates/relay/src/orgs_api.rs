@@ -98,6 +98,8 @@ fn json_row(row: &OrgRow) -> Value {
         "owner_account_id": row.owner_account_id,
         "plan_id": row.plan_id,
         "limits": row.limits,
+        "is_trial": row.is_trial,
+        "trial_ends_at": row.trial_ends_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     })
@@ -433,6 +435,20 @@ pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_i
         Ok(o) => o,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     };
+
+    // Enable trial: 7 days
+    let trial_ends = Utc::now() + chrono::Duration::days(7);
+    if let Err(e) = sqlx::query("UPDATE organizations SET is_trial = true, trial_ends_at = $2 WHERE org_id = $1")
+        .bind(org.org_id)
+        .bind(trial_ends)
+        .execute(pool)
+        .await
+    {
+        log::warn!("Failed to set trial for org {}: {e}", org.org_id);
+    }
+
+    // Refetch to include trial fields
+    let org = OrgRepo::get(pool, org.org_id).await.unwrap_or(Some(org)).unwrap();
 
     let _ = OrgRepo::add_member(pool, org.org_id, &account_id, "owner", None).await;
 

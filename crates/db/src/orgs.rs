@@ -13,6 +13,8 @@ pub struct OrgRow {
     pub owner_account_id: String,
     pub plan_id: String,
     pub limits: serde_json::Value,
+    pub is_trial: bool,
+    pub trial_ends_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -1491,6 +1491,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/2fa/enable", axum::routing::post(crate::auth_2fa::enable_2fa))
         .route("/api/auth/2fa/disable", axum::routing::post(crate::auth_2fa::disable_2fa))
         .route("/api/auth/2fa/status", axum::routing::get(crate::auth_2fa::status_2fa))
+        // Email change (protected)
+        .route("/api/auth/email/change-start", axum::routing::post(crate::email_auth::change_email_start))
+        .route("/api/auth/email/change-confirm", axum::routing::post(crate::email_auth::change_email_confirm))
         // Session management
         .route("/api/auth/sessions", axum::routing::get(crate::auth_oauth::list_sessions))
         .route("/api/auth/sessions", axum::routing::delete(crate::auth_oauth::revoke_other_sessions))

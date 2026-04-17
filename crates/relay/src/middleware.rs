@@ -49,6 +49,27 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for AccountIdExtractor {
     }
 }
 
+/// Extractor for JWT Claims from request extensions.
+/// Returns `None`-equivalent Claims (all Optional fields None) if no JWT was present.
+pub struct ClaimsExtractor(pub crate::auth::Claims);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ClaimsExtractor {
+    type Rejection = axum::http::StatusCode;
+
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        let claims = parts.extensions.get::<crate::auth::Claims>().cloned()
+            .unwrap_or_else(|| crate::auth::Claims {
+                sub: "".into(), account_id: "".into(),
+                email: None, name: None, is_admin: false, org_id: None,
+                iat: 0, exp: 0,
+            });
+        std::future::ready(Ok(ClaimsExtractor(claims)))
+    }
+}
+
 // ── JWT Auth Middleware (validates Bearer token via AuthEngine) ──
 
 /// JWT auth middleware — extracts account_id from Bearer token using AuthEngine.

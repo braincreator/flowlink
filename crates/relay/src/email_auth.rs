@@ -12,6 +12,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey, Header};
 
 use crate::server::AppState;
+use crate::middleware::AccountIdExtractor;
 
 // ═══════════════════════════════════════════════
 // Request / Response types
@@ -131,6 +132,191 @@ pub async fn send_code(
     (StatusCode::OK, Json(json!({
         "ok": true,
         "message": "Code sent"
+    }))).into_response()
+}
+
+/// POST /api/auth/email/change-start
+pub async fn change_email_start(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let new_email = body
+        .get("new_email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+
+    if new_email.is_empty() || !new_email.contains('@') {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "ok": false, "error": "Некорректный email"
+        }))).into_response();
+    }
+
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "ok": false, "error": "База данных недоступна"
+        }))).into_response(),
+    };
+    let pool = db.pool();
+    let account_id = account.0;
+
+    // Check new email isn't already taken by another account
+    match flowlink_db::accounts::AccountRepo::get_by_email(pool, &new_email).await {
+        Ok(Some(other)) if other.account_id != account_id => {
+            return (StatusCode::CONFLICT, Json(json!({
+                "ok": false, "error": "Этот email уже используется"
+            }))).into_response();
+        }
+        _ => {}
+    }
+
+    // Rate limit
+    match flowlink_db::email_verification::EmailVerificationRepo::check_rate_limit(
+        pool, &new_email, "email_change"
+    ).await {
+        Ok(true) => {},
+        Ok(false) => return (StatusCode::TOO_MANY_REQUESTS, Json(json!({
+            "ok": false, "error": "Подождите минуту перед повторным запросом"
+        }))).into_response(),
+        Err(e) => {
+            log::warn!("Rate limit check failed: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false, "error": "Внутренняя ошибка"
+            }))).into_response();
+        }
+    }
+
+    // Generate code
+    let code = format!("{:06}", rand::random::<u32>() % 1_000_000);
+    let expires_at = Utc::now() + Duration::minutes(10);
+
+    if let Err(e) = flowlink_db::email_verification::EmailVerificationRepo::create_code(
+        pool, &new_email, &code, "email_change", expires_at
+    ).await {
+        log::warn!("Failed to save email change code: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+            "ok": false, "error": "Failed to save code"
+        }))).into_response();
+    }
+
+    // Store pending_email
+    if let Err(e) = sqlx::query("UPDATE accounts SET pending_email = $1 WHERE account_id = $2")
+        .bind(&new_email)
+        .bind(&account_id)
+        .execute(pool)
+        .await
+    {
+        log::warn!("Failed to set pending_email: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+            "ok": false, "error": "Failed to save"
+        }))).into_response();
+    }
+
+    // Send verification email
+    let send_result = if let Some(ref email_svc) = state.email_service {
+        email_svc.send_verification_code(&new_email, &code).await
+    } else {
+        log::info!("📧 Dev mode (no SMTP): email change code for {new_email}: {code}");
+        Ok(())
+    };
+
+    if let Err(e) = send_result {
+        log::warn!("Failed to send email change code to {new_email}: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+            "ok": false, "error": "Failed to send email"
+        }))).into_response();
+    }
+
+    log::info!("📧 Email change code sent to {new_email} for account {account_id}");
+    (StatusCode::OK, Json(json!({
+        "ok": true,
+        "message": "Код отправлен"
+    }))).into_response()
+}
+
+/// POST /api/auth/email/change-confirm
+pub async fn change_email_confirm(
+    State(state): State<AppState>,
+    account: AccountIdExtractor,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let email = body.get("email").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+    let code = body.get("code").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let account_id = account.0;
+
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "ok": false, "error": "База данных недоступна"
+        }))).into_response(),
+    };
+    let pool = db.pool();
+
+    // Verify and consume code
+    match flowlink_db::email_verification::EmailVerificationRepo::verify_and_consume_code(
+        pool, &email, code, "email_change"
+    ).await {
+        Ok(Some(_)) => {},
+        Ok(None) => return (StatusCode::UNAUTHORIZED, Json(json!({
+            "ok": false, "error": "Неверный или просроченный код"
+        }))).into_response(),
+        Err(e) => {
+            log::warn!("Email change code verification failed: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false, "error": "Внутренняя ошибка"
+            }))).into_response();
+        }
+    }
+
+    // Update email: set email = pending_email, clear pending_email
+    if let Err(e) = sqlx::query("UPDATE accounts SET email = pending_email, pending_email = NULL WHERE account_id = $1 AND pending_email = $2")
+        .bind(&account_id)
+        .bind(&email)
+        .execute(pool)
+        .await
+    {
+        log::warn!("Failed to update email for {account_id}: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+            "ok": false, "error": "Failed to update email"
+        }))).into_response();
+    }
+
+    // Issue new tokens with updated email
+    if let Some(ref engine) = state.auth_engine {
+        let is_admin = flowlink_db::accounts::AccountRepo::get(pool, &account_id)
+            .await.ok().flatten().map(|a| a.is_admin).unwrap_or(false);
+
+        match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin, None) {
+            Ok(tokens) => {
+                log::info!("✅ Email changed for {account_id} → {email}");
+                return (StatusCode::OK, Json(json!({
+                    "ok": true,
+                    "access_token": tokens.access_token,
+                    "refresh_token": tokens.refresh_token,
+                    "expires_in": tokens.expires_in,
+                    "token_type": "Bearer",
+                    "user": {
+                        "account_id": account_id,
+                        "email": email,
+                    }
+                }))).into_response();
+            }
+            Err(e) => {
+                log::warn!("JWT generation failed: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                    "ok": false, "error": "Failed to generate token"
+                }))).into_response();
+            }
+        }
+    }
+
+    log::info!("✅ Email changed for {account_id} → {email}");
+    (StatusCode::OK, Json(json!({
+        "ok": true,
+        "message": "Email изменён"
     }))).into_response()
 }
 

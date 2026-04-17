@@ -13,8 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::middleware::AccountIdExtractor;
+use crate::middleware::{AccountIdExtractor, ClaimsExtractor};
 use crate::server::AppState;
+use flowlink_db::orgs::OrgRow;
 
 // ═══════════════════════════════════════════════
 // Request / Response types
@@ -61,6 +62,9 @@ pub struct BillingInfo {
     pub usage: Value,
     pub limits: Value,
     pub available_plans: Vec<Value>,
+    pub is_trial: Option<bool>,
+    pub trial_ends_at: Option<String>,
+    pub trial_days_remaining: Option<i64>,
 }
 
 // ═══════════════════════════════════════════════
@@ -91,6 +95,27 @@ fn const_eq(a: &str, b: &str) -> bool {
     result == 0
 }
 
+/// Trial status helper
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum TrialStatus {
+    None,
+    Active { days_remaining: i64 },
+    Expired,
+}
+
+pub fn check_trial_status(org: &OrgRow) -> TrialStatus {
+    match (org.is_trial, org.trial_ends_at) {
+        (false, _) => TrialStatus::None,
+        (true, Some(end)) if end < chrono::Utc::now() => TrialStatus::Expired,
+        (true, Some(end)) => {
+            let remaining = (end - chrono::Utc::now()).num_days();
+            TrialStatus::Active { days_remaining: remaining }
+        }
+        _ => TrialStatus::None,
+    }
+}
+
 // ═══════════════════════════════════════════════
 // Handlers — Existing billing endpoints
 // ═══════════════════════════════════════════════
@@ -99,11 +124,24 @@ fn const_eq(a: &str, b: &str) -> bool {
 pub async fn get_billing_info(
     State(state): State<AppState>,
     account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let billing_engine = match get_billing_engine(&state) {
         Ok(e) => e,
         Err(r) => return r,
     };
+
+    // Org-scoped billing
+    let mut org: Option<OrgRow> = None;
+    if let Some(ref org_id_str) = claims.0.org_id {
+        if let Ok(uuid) = uuid::Uuid::parse_str(org_id_str) {
+            if let Some(db) = &state.db {
+                if let Ok(Some(o)) = flowlink_db::orgs::OrgRepo::get(db.pool(), uuid).await {
+                    org = Some(o);
+                }
+            }
+        }
+    }
 
     // Ensure account exists in DB
     if let Some(db) = &state.db {
@@ -114,8 +152,13 @@ pub async fn get_billing_info(
         }
     }
 
+    // Use org's plan_id if org-scoped
+    let effective_plan_id = org.as_ref().map(|o| o.plan_id.clone()).unwrap_or_else(|| {
+        billing_engine.get_or_create_account(&account.0).plan_id.clone()
+    });
+
     let account_billing = billing_engine.get_or_create_account(&account.0);
-    let plan = billing_engine.plans().get(&account_billing.plan_id);
+    let plan = billing_engine.plans().get(&effective_plan_id);
     let usage = billing_engine.usage().get_snapshot(&account.0);
 
     let plan_name = plan.as_ref().map(|p| p.name.clone()).unwrap_or_default();
@@ -132,8 +175,17 @@ pub async fn get_billing_info(
 
     let plan_limits = plan.as_ref().map(|p| serde_json::to_value(&p.limits).unwrap_or(json!(null))).unwrap_or(json!(null));
 
+    // Trial info from org
+    let (is_trial, trial_ends_at, trial_days_remaining) = match &org {
+        Some(o) if o.is_trial => {
+            let remaining = o.trial_ends_at.map(|end| (end - chrono::Utc::now()).num_days()).unwrap_or(0);
+            (Some(true), o.trial_ends_at.map(|t| t.to_rfc3339()), Some(remaining.max(0)))
+        }
+        _ => (None, None, None),
+    };
+
     let info = BillingInfo {
-        plan_id: account_billing.plan_id.clone(),
+        plan_id: effective_plan_id,
         plan_name,
         active: account_billing.active,
         balance_rub: flowlink_billing::payment::PaymentConfig::format_rub(
@@ -143,6 +195,9 @@ pub async fn get_billing_info(
         usage: serde_json::to_value(&usage).unwrap_or(json!(null)),
         limits: plan_limits,
         available_plans,
+        is_trial,
+        trial_ends_at,
+        trial_days_remaining,
     };
 
     (StatusCode::OK, Json(info)).into_response()
@@ -201,6 +256,7 @@ pub async fn list_plans(State(state): State<AppState>) -> impl IntoResponse {
 pub async fn change_plan(
     State(state): State<AppState>,
     account: AccountIdExtractor,
+    claims: ClaimsExtractor,
     Json(body): Json<ChangePlanRequest>,
 ) -> impl IntoResponse {
     let billing_engine = match get_billing_engine(&state) {
@@ -217,6 +273,16 @@ pub async fn change_plan(
                     db.pool(), &account.0, &body.plan_id,
                 ).await {
                     log::warn!("Failed to persist plan change to DB: {e}");
+                }
+                // Update org plan if org-scoped
+                if let Some(ref org_id_str) = claims.0.org_id {
+                    if let Ok(uuid) = uuid::Uuid::parse_str(org_id_str) {
+                        if let Err(e) = sqlx::query("UPDATE organizations SET plan_id = $2, updated_at = NOW() WHERE org_id = $1")
+                            .bind(uuid).bind(&body.plan_id).execute(db.pool()).await
+                        {
+                            log::warn!("Failed to update org plan: {e}");
+                        }
+                    }
                 }
                 if let Some(ref inv) = created_invoice {
                     let row = flowlink_db::invoices::InvoiceRow {
@@ -280,13 +346,14 @@ pub async fn change_plan(
 pub async fn list_invoices(
     State(state): State<AppState>,
     account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let billing_engine = match get_billing_engine(&state) {
         Ok(e) => e,
         Err(r) => return r,
     };
-
     let invoices = billing_engine.invoices().list_for_account(&account.0);
+    let _ = claims; // may be used for org filtering later
     (StatusCode::OK, Json(invoices)).into_response()
 }
 
@@ -633,11 +700,26 @@ pub async fn change_subscription_plan(
 pub async fn list_subscriptions(
     State(state): State<AppState>,
     account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let db = match &state.db {
         Some(db) => db,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
     };
+    // If org-scoped, try filtering by org_id
+    if let Some(ref org_id_str) = claims.0.org_id {
+        if let Ok(uuid) = uuid::Uuid::parse_str(org_id_str) {
+            match sqlx::query_as::<_, (serde_json::Value,)>(
+                "SELECT row_to_json(row) as val FROM (SELECT * FROM subscriptions WHERE org_id = $1 ORDER BY created_at DESC) row"
+            ).bind(uuid).fetch_all(db.pool()).await {
+                Ok(rows) => {
+                    let subs: Vec<serde_json::Value> = rows.into_iter().map(|r| r.0).collect();
+                    return (StatusCode::OK, Json(json!(subs))).into_response();
+                }
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+            }
+        }
+    }
     match flowlink_db::subscriptions::SubscriptionRepo::list_for_account(db.pool(), &account.0).await {
         Ok(subs) => (StatusCode::OK, Json(json!(subs))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
@@ -687,11 +769,26 @@ pub async fn create_order(
 pub async fn list_orders(
     State(state): State<AppState>,
     account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let db = match &state.db {
         Some(db) => db,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
     };
+    if let Some(ref org_id_str) = claims.0.org_id {
+        if let Ok(uuid) = uuid::Uuid::parse_str(org_id_str) {
+            // For orgs, list orders by matching org's subscriptions
+            match sqlx::query_as::<_, (serde_json::Value,)>(
+                "SELECT row_to_json(row) as val FROM (SELECT o.* FROM orders o JOIN subscriptions s ON o.account_id = s.account_id WHERE s.org_id = $1 ORDER BY o.created_at DESC) row"
+            ).bind(uuid).fetch_all(db.pool()).await {
+                Ok(rows) => {
+                    let orders: Vec<serde_json::Value> = rows.into_iter().map(|r| r.0).collect();
+                    return (StatusCode::OK, Json(json!(orders))).into_response();
+                }
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+            }
+        }
+    }
     match flowlink_db::orders::OrderRepo::list_for_account(db.pool(), &account.0).await {
         Ok(orders) => (StatusCode::OK, Json(json!(orders))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
@@ -953,6 +1050,9 @@ mod tests {
             usage: json!(null),
             limits: json!(null),
             available_plans: vec![],
+            is_trial: None,
+            trial_ends_at: None,
+            trial_days_remaining: None,
         };
         let json_str = serde_json::to_string(&info).unwrap();
         assert!(json_str.contains("trial"));
