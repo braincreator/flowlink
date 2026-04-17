@@ -214,7 +214,7 @@ fn dashboard_redirect(config: &RelayConfig, access_token: &str, refresh_token: &
         None => format!("http://{}", config.http_addr),
     };
     Redirect::temporary(&format!(
-        "{}/dashboard?access_token={}&refresh_token={}",
+        "{}/auth/callback?access_token={}&refresh_token={}",
         base, access_token, refresh_token
     ))
 }

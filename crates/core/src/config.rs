@@ -889,6 +889,7 @@ mod tests {
             smtp: SmtpConfig::default(),
             auth: AuthConfig::default(),
             oauth: OAuthConfig::default(),
+            dashboard_url: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: RelayConfig = serde_json::from_str(&json).unwrap();

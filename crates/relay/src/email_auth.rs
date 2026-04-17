@@ -323,10 +323,23 @@ pub async fn change_email_confirm(
 /// POST /api/auth/email/verify
 pub async fn verify_code(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<VerifyCodeRequest>,
 ) -> impl IntoResponse {
     let email = req.email.trim().to_lowercase();
     let code = req.code.trim();
+
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or(s).trim())
+        .unwrap_or("unknown")
+        .to_string();
+    let _client_ua = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
 
     let db = match &state.db {
         Some(db) => db,
@@ -379,6 +392,36 @@ pub async fn verify_code(
         match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin, None) {
             Ok(tokens) => {
                 log::info!("✅ Email auth success: {email} → {account_id}");
+
+                // Schedule login notification email (skip if sent in last 5 min)
+                if let Some(ref queue) = state.email_queue.get() {
+                    let recent = sqlx::query_scalar::<_, i64>(
+                        r#"SELECT COUNT(*) FROM email_queue
+                           WHERE account_id = $1 AND email_type = 'new_login'
+                           AND created_at > NOW() - INTERVAL '5 minutes'"#,
+                    )
+                    .bind(&account_id)
+                    .fetch_one(pool)
+                    .await
+                    .unwrap_or(0);
+
+                    if recent == 0 {
+                        let mut vars = std::collections::HashMap::new();
+                        vars.insert("name".into(), email.split('@').next().unwrap_or(&email).into());
+                        vars.insert("ip".into(), client_ip.clone());
+                        vars.insert("time".into(), chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string());
+                        if let Err(e) = queue.schedule(
+                            &account_id,
+                            crate::email_queue::EmailType::NewLogin,
+                            &email,
+                            chrono::Utc::now(),
+                            vars,
+                        ).await {
+                            log::warn!("Failed to schedule login notification: {e}");
+                        }
+                    }
+                }
+
                 return (StatusCode::OK, Json(json!({
                     "access_token": tokens.access_token,
                     "refresh_token": tokens.refresh_token,

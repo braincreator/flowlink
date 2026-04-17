@@ -1,0 +1,9 @@
+[Unit]
+Description=Run FlowLink expiry checker daily at 03:00 MSK
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Europe/Moscow
+Persistent=true
+
+[Install]
+WantedBy=timers.target

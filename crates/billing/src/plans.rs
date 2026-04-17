@@ -440,4 +440,59 @@ mod tests {
         assert_eq!(PlanId::Starter.to_string(), "starter");
         assert_eq!(PlanId::Pro.to_string(), "pro");
     }
+
+    #[test]
+    fn test_plan_limits_default() {
+        let limits = PlanLimits::default();
+        assert_eq!(limits.max_hosts, 0);
+        assert_eq!(limits.max_users, 0);
+        assert_eq!(limits.backup_storage_mb, 0);
+        assert_eq!(limits.max_snapshots, 0);
+        assert_eq!(limits.retention_days, 0);
+        assert!(limits.shield_level.is_empty());
+        assert_eq!(limits.rate_limit_requests, 0);
+        assert_eq!(limits.rate_limit_window_secs, 0);
+    }
+
+    #[test]
+    fn test_is_unlimited() {
+        assert!(Plan::is_unlimited(0));
+        assert!(!Plan::is_unlimited(1));
+        assert!(!Plan::is_unlimited(999));
+    }
+
+    #[test]
+    fn test_tier_ordering() {
+        let trial = Plan::trial();
+        let starter = Plan::starter();
+        let pro = Plan::pro();
+        assert!(trial.tier < starter.tier);
+        assert!(starter.tier < pro.tier);
+    }
+
+    #[test]
+    fn test_annual_discount() {
+        let starter = Plan::starter();
+        let annual = starter.annual_price_kopecks.unwrap();
+        let monthly_x12 = starter.price_kopecks * 12;
+        assert!(annual < monthly_x12, "Annual should be cheaper than 12 months");
+
+        let pro = Plan::pro();
+        let pro_annual = pro.annual_price_kopecks.unwrap();
+        let pro_monthly_x12 = pro.price_kopecks * 12;
+        assert!(pro_annual < pro_monthly_x12);
+    }
+
+    #[test]
+    fn test_format_monthly() {
+        assert_eq!(Plan::trial().format_monthly(), "0.00 ₽");
+        assert_eq!(Plan::starter().format_monthly(), "1990.00 ₽");
+        assert_eq!(Plan::pro().format_monthly(), "4990.00 ₽");
+    }
+
+    #[test]
+    fn test_default_registry() {
+        let registry = PlanRegistry::default();
+        assert_eq!(registry.list_available().len(), 3);
+    }
 }

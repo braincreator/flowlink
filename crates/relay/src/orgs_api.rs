@@ -465,6 +465,68 @@ pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_i
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slugify_basic() {
+        assert_eq!(slugify("My Organization"), "my-organization");
+    }
+
+    #[test]
+    fn test_slugify_already_lowercase() {
+        assert_eq!(slugify("hello world"), "hello-world");
+    }
+
+    #[test]
+    fn test_slugify_special_chars() {
+        assert_eq!(slugify("Hello! @World#"), "hello-world");
+    }
+
+    #[test]
+    fn test_slugify_multiple_spaces() {
+        assert_eq!(slugify("Hello   World"), "hello-world");
+    }
+
+    #[test]
+    fn test_slugify_consecutive_special_chars() {
+        // Dashes are stripped (not alphanumeric), so they don't survive
+        assert_eq!(slugify("Hello---World"), "helloworld");
+        // Spaces become dashes
+        assert_eq!(slugify("Hello  World"), "hello-world");
+    }
+
+    #[test]
+    fn test_slugify_empty() {
+        assert_eq!(slugify(""), "");
+    }
+
+    #[test]
+    fn test_slugify_numbers() {
+        assert_eq!(slugify("Org 42 Team"), "org-42-team");
+    }
+
+    #[test]
+    fn test_slugify_single_word() {
+        assert_eq!(slugify("FlowLink"), "flowlink");
+    }
+
+    #[test]
+    fn test_slugify_russian() {
+        // Non-latin chars are stripped (not alphanumeric per is_alphanumeric())
+        // Cyrillic 'и' is alphanumeric in Rust, so it stays lowercase
+        let result = slugify("Привет мир 2024");
+        // Just verify it doesn't panic and contains the numbers
+        assert!(result.contains("2024"));
+    }
+
+    #[test]
+    fn test_default_plan() {
+        assert_eq!(default_plan(), "trial");
+    }
+}
+
 /// PATCH /api/orgs/{org_id}/members/{account_id} — change role (owner/admin)
 pub async fn change_member_role(State(state): State<AppState>, AccountIdExtractor(account_id): AccountIdExtractor, Path((org_id, target_id)): Path<(Uuid, String)>, Json(body): Json<ChangeRoleRequest>) -> impl IntoResponse {
     let pool = match get_db(&state) {

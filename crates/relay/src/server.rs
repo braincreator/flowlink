@@ -62,6 +62,7 @@ pub struct AppState {
     pub notification_router: std::sync::OnceLock<std::sync::Arc<crate::notifications::NotificationRouter>>,
     pub notification_store: Option<Arc<crate::preferences_api::NotificationStore>>,
     pub rbac: Arc<crate::rbac_manager::RbacManager>,
+    pub auth_rate_limiter: Arc<crate::auth_rate_limiter::AuthRateLimiter>,
 }
 
 // ═══════════════════════════════════════════════
@@ -1384,7 +1385,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         // Auth endpoints
         .route("/api/auth/email/send-code", axum::routing::post(crate::email_auth::send_code))
+            .route_layer(axum::middleware::from_fn_with_state(state.clone(), crate::auth_rate_middleware::email_auth_rate_limit))
         .route("/api/auth/email/verify", axum::routing::post(crate::email_auth::verify_code))
+            .route_layer(axum::middleware::from_fn_with_state(state.clone(), crate::auth_rate_middleware::email_auth_rate_limit))
         // OAuth URL generation (frontend never sees client_secret)
         .route("/api/auth/oauth-url", axum::routing::get(crate::auth_oauth::oauth_url))
         // OAuth callbacks
@@ -1495,6 +1498,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/2fa/status", axum::routing::get(crate::auth_2fa::status_2fa))
         // Email change (protected)
         .route("/api/auth/email/change-start", axum::routing::post(crate::email_auth::change_email_start))
+            .route_layer(axum::middleware::from_fn_with_state(state.clone(), crate::auth_rate_middleware::change_email_rate_limit))
         .route("/api/auth/email/change-confirm", axum::routing::post(crate::email_auth::change_email_confirm))
         // Session management
         .route("/api/auth/sessions", axum::routing::get(crate::auth_oauth::list_sessions))
@@ -1623,6 +1627,7 @@ mod tests {
             tochka: None,
             notification_store: None,
             rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
+            auth_rate_limiter: Arc::new(crate::auth_rate_limiter::AuthRateLimiter::new()),
         }
     }
 

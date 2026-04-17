@@ -343,6 +343,7 @@ mod tests {
             arch: Some("amd64".into()),
             version: Some("0.1.0".into()),
             public_key: Some("test_key_base64".into()),
+            org_id: None,
         };
 
         let agent = registry.register(&req, "acct_test").await;
@@ -358,6 +359,7 @@ mod tests {
         let req = SignupRequest {
             agent_id: "hb-agent".into(),
             os: None, arch: None, version: None, public_key: None,
+            org_id: None,
         };
         registry.register(&req, "acct_hb").await;
 
@@ -402,6 +404,7 @@ mod tests {
             let req = SignupRequest {
                 agent_id: format!("agent-{i}"),
                 os: None, arch: None, version: None, public_key: None,
+            org_id: None,
             };
             registry.register(&req, &format!("acct-{i}")).await;
         }
@@ -417,12 +420,14 @@ mod tests {
         let req1 = SignupRequest {
             agent_id: "online-agent".into(),
             os: None, arch: None, version: None, public_key: None,
+            org_id: None,
         };
         registry.register(&req1, "acct_on").await;
 
         let req2 = SignupRequest {
             agent_id: "offline-agent".into(),
             os: None, arch: None, version: None, public_key: None,
+            org_id: None,
         };
         registry.register(&req2, "acct_off").await;
 
@@ -447,6 +452,7 @@ mod tests {
         let req = SignupRequest {
             agent_id: "dup-agent".into(),
             os: None, arch: None, version: None, public_key: None,
+            org_id: None,
         };
         registry.register(&req, "acct_dup").await;
         registry.register(&req, "acct_dup2").await; // overwrites

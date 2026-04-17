@@ -6,6 +6,8 @@ pub mod handler;
 pub mod eventbus;
 pub mod approval;
 pub mod ratelimit;
+pub mod auth_rate_limiter;
+pub mod auth_rate_middleware;
 pub mod audit;
 pub mod registry;
 pub mod llm;
@@ -270,6 +272,7 @@ impl Relay {
             notification_router: std::sync::OnceLock::new(),
             notification_store: Some(Arc::new(crate::preferences_api::NotificationStore::new())),
             rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
+            auth_rate_limiter: Arc::new(crate::auth_rate_limiter::AuthRateLimiter::new()),
         };
 
         // Email queue worker (requires both email_service and db)

@@ -70,6 +70,7 @@ impl NotificationChannel for TelegramChannel {
 mod tests {
     use super::*;
     use crate::notifications::Notification;
+    use crate::notifications::Severity;
 
     #[test]
     fn test_format_shield_alert() {
