@@ -140,7 +140,7 @@ impl OrgRepo {
     }
 
     pub async fn transfer_ownership(pool: &PgPool, org_id: Uuid, from_account_id: &str, to_account_id: &str) -> Result<bool> {
-        let tx = pool.begin().await?;
+        let mut tx = pool.begin().await?;
         sqlx::query("UPDATE org_members SET role = 'member' WHERE org_id = $1 AND account_id = $2 AND role = 'owner'")
             .bind(org_id).bind(from_account_id).execute(&mut *tx).await?;
         sqlx::query("UPDATE org_members SET role = 'owner' WHERE org_id = $1 AND account_id = $2")

@@ -350,7 +350,7 @@ pub async fn accept_invite(State(state): State<AppState>, AccountIdExtractor(acc
                 "ok": true,
                 "org_id": org_id,
                 "role": role,
-                "org": org.map(json_row),
+                "org": org.map(|r| json_row(&r)),
             })).into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "invitation not found or expired"}))).into_response(),
