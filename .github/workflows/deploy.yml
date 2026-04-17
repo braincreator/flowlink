@@ -1,58 +1,64 @@
-name: Deploy to VPS
+# Deploy FlowLink backend to VPS
+#
+# Required secrets (add in GitHub → Settings → Secrets and variables → Actions):
+#   HOST      - VPS IP address (e.g. 93.93.207.44)
+#   SSH_KEY   - Private SSH key with access to the VPS
+#   SSH_PORT  - SSH port (default: 22)
+#   USERNAME  - SSH username on the VPS
+
+name: Deploy Backend
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y \
-            libssl-dev pkg-config libclang-dev
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build release binary
-        env:
-          OPENSSL_NO_VENDOR: "1"
-        run: cargo build --release --bin flowlink
-
-      - name: Stop service on VPS
-        uses: appleboy/ssh-action@v1
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            systemctl stop flowlink-relay || true
-            sleep 2
-            kill -9 $(pgrep -f "flowlink relay") 2>/dev/null || true
+          version: 0.13.0
 
-      - name: Upload binary to VPS
+      - name: Install cargo-zigbuild
+        run: |
+          curl -L https://github.com/rust-cross/cargo-zigbuild/releases/latest/download/cargo-zigbuild-x86_64-unknown-linux-musl.tar.gz | tar xz -C /usr/local/bin
+
+      - name: Build
+        run: cargo zigbuild --release --bin flowlink --target x86_64-unknown-linux-gnu
+
+      - name: Run tests
+        run: cargo test --lib
+
+      - name: Copy binary to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "target/release/flowlink"
-          target: "/opt/flowlink/bin/"
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          source: "target/x86_64-unknown-linux-gnu/release/flowlink"
+          target: "/opt/flowlink/bin/flowlink"
+          strip_components: 3
 
-      - name: Start service & verify
-        uses: appleboy/ssh-action@v1
+      - name: Restart service
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
           script: |
             chmod +x /opt/flowlink/bin/flowlink
-            systemctl start flowlink-relay
-            sleep 3
-            systemctl is-active flowlink-relay && echo "Deploy successful!" || exit 1
+            sudo systemctl restart flowlink
+            sleep 2
+            sudo systemctl is-active flowlink
