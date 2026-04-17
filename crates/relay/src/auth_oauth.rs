@@ -339,7 +339,7 @@ async fn issue_tokens_or_2fa(
         admin
     } else { false };
 
-    match engine.create_tokens(user_id, account_id, email, name, is_admin) {
+    match engine.create_tokens(user_id, account_id, email, name, is_admin, None) {
         Ok(tokens) => {
             let config = state.config_reloader.as_ref()?.get_config().await;
             Some(dashboard_redirect(&config, &tokens.access_token, &tokens.refresh_token).into_response())
@@ -513,7 +513,7 @@ pub async fn refresh_token(
 
     match engine.validate_refresh_token(&req.refresh_token) {
         Ok(claims) => {
-            match engine.create_tokens(&claims.sub, &claims.account_id, claims.email.as_deref(), claims.name.as_deref(), claims.is_admin) {
+            match engine.create_tokens(&claims.sub, &claims.account_id, claims.email.as_deref(), claims.name.as_deref(), claims.is_admin, claims.org_id.as_deref()) {
                 Ok(tokens) => (StatusCode::OK, Json(json!({
                     "access_token": tokens.access_token,
                     "refresh_token": tokens.refresh_token,

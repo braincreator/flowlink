@@ -190,7 +190,7 @@ pub async fn verify_code(
             admin
         } else { false };
 
-        match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin) {
+        match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin, None) {
             Ok(tokens) => {
                 log::info!("✅ Email auth success: {email} → {account_id}");
                 return (StatusCode::OK, Json(json!({

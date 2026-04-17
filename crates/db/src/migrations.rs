@@ -357,6 +357,58 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false
         "#,
         ),
+        (
+            "020_organizations",
+            r#"
+            CREATE TABLE IF NOT EXISTS organizations (
+                org_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(255) NOT NULL,
+                slug VARCHAR(100) NOT NULL,
+                owner_account_id TEXT NOT NULL REFERENCES accounts(account_id),
+                plan_id TEXT NOT NULL DEFAULT 'trial',
+                limits JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_orgs_slug ON organizations(slug);
+            CREATE INDEX IF NOT EXISTS idx_orgs_owner ON organizations(owner_account_id);
+            CREATE INDEX IF NOT EXISTS idx_orgs_plan ON organizations(plan_id);
+        "#,
+        ),
+        (
+            "021_org_members",
+            r#"
+            CREATE TABLE IF NOT EXISTS org_members (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+                account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE CASCADE,
+                role VARCHAR(20) NOT NULL DEFAULT 'member' CHECK (role IN ('owner','admin','member','viewer')),
+                invited_by TEXT REFERENCES accounts(account_id),
+                joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_org_members_unique ON org_members(org_id, account_id);
+            CREATE INDEX IF NOT EXISTS idx_org_members_account ON org_members(account_id);
+        "#,
+        ),
+        (
+            "022_org_invitations",
+            r#"
+            CREATE TABLE IF NOT EXISTS org_invitations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+                email VARCHAR(255),
+                role VARCHAR(20) NOT NULL DEFAULT 'member' CHECK (role IN ('owner','admin','member','viewer')),
+                token TEXT NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                accepted_by TEXT REFERENCES accounts(account_id),
+                accepted_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_org_invitations_token ON org_invitations(token);
+            CREATE INDEX IF NOT EXISTS idx_org_invitations_org ON org_invitations(org_id);
+        "#,
+        ),
     ]
 }
 
@@ -367,7 +419,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 19);
+        assert_eq!(migrations.len(), 22);
     }
 
     #[test]
@@ -392,6 +444,10 @@ mod tests {
             "016_user_notification_channels",
             "017_linking_codes",
             "018_accounts_totp",
+            "019_accounts_admin",
+            "020_organizations",
+            "021_org_members",
+            "022_org_invitations",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(

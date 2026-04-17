@@ -25,6 +25,7 @@ pub mod notifications;
 pub mod email_queue;
 pub mod preferences_api;
 pub mod notifications_api;
+pub mod orgs_api;
 pub mod dashboard;
 
 pub mod config_reload;

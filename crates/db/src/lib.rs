@@ -25,6 +25,7 @@ pub mod orders;
 pub mod plans;
 pub mod pool;
 pub mod subscriptions;
+pub mod orgs;
 pub mod usage;
 
 pub use pool::DbPool;

@@ -355,6 +355,7 @@ pub async fn complete_2fa(
         temp_claims.email.as_deref(),
         temp_claims.name.as_deref(),
         temp_claims.is_admin,
+        None,
     ) {
         Ok(tokens) => {
             // Update last login

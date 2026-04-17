@@ -1533,10 +1533,22 @@ pub fn build_router(state: AppState) -> Router {
             }
         }));
 
+    // ── Organizations routes (require JWT auth) ──
+    let org_routes = Router::new()
+        .route("/api/orgs", axum::routing::get(crate::orgs_api::list_my_orgs).post(crate::orgs_api::create_org))
+        .route("/api/orgs/switch", axum::routing::post(crate::orgs_api::switch_org))
+        .route("/api/orgs/{org_id}", axum::routing::get(crate::orgs_api::get_org).put(crate::orgs_api::update_org).delete(crate::orgs_api::delete_org))
+        .route("/api/orgs/{org_id}/members", axum::routing::get(crate::orgs_api::list_members))
+        .route("/api/orgs/{org_id}/invites", axum::routing::get(crate::orgs_api::list_invites).post(crate::orgs_api::invite_member))
+        .route("/api/orgs/invites/accept", axum::routing::post(crate::orgs_api::accept_invite))
+        .route("/api/orgs/{org_id}/members/{account_id}", axum::routing::delete(crate::orgs_api::remove_member).patch(crate::orgs_api::change_member_role))
+        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
+
     Router::new()
         .merge(public_routes)
         .merge(protected_routes)
         .merge(admin_routes)
+        .merge(org_routes)
         // Dashboard SPA (stateless routes)
         .route("/dashboard", get(crate::dashboard::serve_dashboard_root))
         .route("/dashboard/", get(crate::dashboard::serve_dashboard_root))
