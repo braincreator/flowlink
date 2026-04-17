@@ -459,6 +459,14 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_webhooks_org ON webhooks(org_id);
         "#,
         ),
+        (
+            "028_account_deletion",
+            r#"
+            ALTER TABLE accounts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+            ALTER TABLE accounts ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ;
+            CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at) WHERE deleted_at IS NOT NULL;
+            "#,
+        ),
     ]
 }
 
@@ -469,7 +477,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 27);
+        assert_eq!(migrations.len(), 28);
     }
 
     #[test]
@@ -503,6 +511,7 @@ mod tests {
             "025_accounts_pending_email",
             "026_organizations_grace_period",
             "027_audit_org_columns_and_webhooks",
+            "028_account_deletion",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(

@@ -1,0 +1,14 @@
+[Unit]
+Description=FlowLink PostgreSQL Backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/flowlink/scripts/backup-db.sh
+User=root
+WorkingDirectory=/opt/flowlink
+
+# Security
+ProtectSystem=strict
+ReadWritePaths=/opt/flowlink/backups
+PrivateTmp=yes

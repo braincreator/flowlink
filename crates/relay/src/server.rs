@@ -279,7 +279,9 @@ async fn account_info(
                         "email": acc.email.unwrap_or_default()
                     },
                     "created_at": acc.created_at.timestamp(),
-                    "last_login": acc.last_login.map(|t| t.timestamp()).unwrap_or(0)
+                    "last_login": acc.last_login.map(|t| t.timestamp()).unwrap_or(0),
+                    "deletion_requested_at": acc.deletion_requested_at.map(|t| t.to_rfc3339()),
+                    "deleted_at": acc.deleted_at.map(|t| t.to_rfc3339()),
                 }))).into_response();
             }
             Ok(None) => return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "account not found"}))).into_response(),
@@ -1426,6 +1428,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/billing/webhook/tochka", axum::routing::post(crate::billing_api::tochka_webhook))
         // Billing expiry check (cron-callable, internal)
         .route("/api/billing/check-expiry", axum::routing::post(crate::billing_api::check_expiry))
+        // GDPR deletion cleanup (cron-callable, internal)
+        .route("/api/billing/cleanup-expired-deletions", axum::routing::post(crate::account_deletion_api::cleanup_expired_deletions))
         // Shield ingest (external agent reporting)
         .route("/api/shield/ingest", post(shield_ingest_alert))
         // Audit ingest (external)
@@ -1492,7 +1496,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agents/{id}", axum::routing::get(crate::control_plane::get_agent))
         // Account
         .route("/api/account/info", axum::routing::get(account_info))
-        .route("/api/account", axum::routing::delete(crate::auth_oauth::delete_account))
+        .route("/api/account", axum::routing::delete(crate::account_deletion_api::request_deletion))
+        .route("/api/account/cancel-deletion", axum::routing::post(crate::account_deletion_api::cancel_deletion))
+        .route("/api/account/hard", axum::routing::delete(crate::account_deletion_api::hard_delete))
         .route("/api/account/settings", axum::routing::get(account_get_settings))
         .route("/api/account/settings", axum::routing::put(account_update_settings))
         .route("/api/account/notifications", axum::routing::get(crate::preferences_api::get_notifications))

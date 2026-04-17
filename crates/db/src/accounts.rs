@@ -8,6 +8,8 @@ use sqlx::PgPool;
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AccountRow {
     pub account_id: String,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub deletion_requested_at: Option<DateTime<Utc>>,
     pub plan_id: String,
     pub active: bool,
     pub balance_kopecks: i64,
@@ -33,7 +35,7 @@ impl AccountRepo {
     /// Get account by ID
     pub async fn get(pool: &PgPool, account_id: &str) -> Result<Option<AccountRow>> {
         let row = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, plan_id, active, balance_kopecks, payment_method,
+            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method,
                     activated_at, expires_at, cycle_start, created_at, updated_at
              FROM accounts WHERE account_id = $1",
         )
@@ -121,7 +123,7 @@ impl AccountRepo {
     /// List all accounts
     pub async fn list(pool: &PgPool) -> Result<Vec<AccountRow>> {
         let rows = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, plan_id, active, balance_kopecks, payment_method,
+            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method,
                     activated_at, expires_at, cycle_start, created_at, updated_at
              FROM accounts ORDER BY created_at",
         )
@@ -133,7 +135,7 @@ impl AccountRepo {
     /// List all accounts with full details (admin)
     pub async fn list_admin(pool: &PgPool) -> Result<Vec<AccountRow>> {
         let rows = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, plan_id, active, balance_kopecks, payment_method, tg_id, email,
+            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method, tg_id, email,
                     totp_secret, totp_enabled, last_login, activated_at, expires_at, cycle_start, created_at, updated_at
              FROM accounts ORDER BY created_at DESC",
         )
@@ -165,7 +167,7 @@ impl AccountRepo {
     /// Get account by email
     pub async fn get_by_email(pool: &PgPool, email: &str) -> Result<Option<AccountRow>> {
         let row = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, plan_id, active, balance_kopecks, payment_method, tg_id,
+            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method, tg_id,
                     activated_at, expires_at, cycle_start, created_at, updated_at
              FROM accounts WHERE email = $1",
         )
@@ -217,7 +219,7 @@ impl AccountRepo {
     /// Get account by Telegram ID
     pub async fn get_by_tg_id(pool: &PgPool, tg_id: i64) -> Result<Option<AccountRow>> {
         let row = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, plan_id, active, balance_kopecks, payment_method, tg_id,
+            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method, tg_id,
                     activated_at, expires_at, cycle_start, created_at, updated_at
              FROM accounts WHERE tg_id = $1",
         )
@@ -286,6 +288,62 @@ impl AccountRepo {
         .await?;
         Ok(())
     }
+
+    // ── GDPR Account Deletion ──
+
+    /// Request soft deletion (30-day grace period)
+    pub async fn request_deletion(pool: &PgPool, account_id: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE accounts SET deletion_requested_at = NOW(), deleted_at = NOW() + INTERVAL '30 days', updated_at = NOW() WHERE account_id = $1",
+        )
+        .bind(account_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Cancel pending deletion
+    pub async fn cancel_deletion(pool: &PgPool, account_id: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE accounts SET deletion_requested_at = NULL, deleted_at = NULL, updated_at = NOW() WHERE account_id = $1 AND deletion_requested_at IS NOT NULL",
+        )
+        .bind(account_id)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Hard delete an account and all related data
+    pub async fn hard_delete(pool: &PgPool, account_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM audit_log WHERE account_id = $1")
+            .bind(account_id).execute(pool).await?;
+        sqlx::query("DELETE FROM auth_sessions WHERE account_id = $1")
+            .bind(account_id).execute(pool).await?;
+        sqlx::query("DELETE FROM email_queue WHERE account_id = $1")
+            .bind(account_id).execute(pool).await?;
+        sqlx::query("DELETE FROM email_verification_codes WHERE account_id = $1")
+            .bind(account_id).execute(pool).await?;
+        sqlx::query("DELETE FROM org_invitations WHERE invited_account_id = $1")
+            .bind(account_id).execute(pool).await?;
+        sqlx::query("DELETE FROM org_members WHERE account_id = $1")
+            .bind(account_id).execute(pool).await?;
+        // Transfer org ownership or delete ownerless orgs
+        sqlx::query("DELETE FROM organizations WHERE owner_id = $1")
+            .bind(account_id).execute(pool).await?;
+        sqlx::query("DELETE FROM accounts WHERE account_id = $1")
+            .bind(account_id).execute(pool).await?;
+        Ok(())
+    }
+
+    /// Find accounts past their deletion date
+    pub async fn find_expired_deletions(pool: &PgPool) -> Result<Vec<String>> {
+        sqlx::query_scalar(
+            "SELECT account_id FROM accounts WHERE deleted_at IS NOT NULL AND deleted_at < NOW()",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(Into::into)
+    }
 }
 
 #[cfg(test)]
@@ -297,6 +355,8 @@ mod tests {
         let now = Utc::now();
         AccountRow {
             account_id: "acc-123".into(),
+            deleted_at: None,
+            deletion_requested_at: None,
             plan_id: "starter".into(),
             active: true,
             balance_kopecks: 10_000,
@@ -347,6 +407,8 @@ mod tests {
         let now = Utc::now();
         let acc = AccountRow {
             account_id: "free-acc".into(),
+            deleted_at: None,
+            deletion_requested_at: None,
             plan_id: "trial".into(),
             active: false,
             balance_kopecks: 0,

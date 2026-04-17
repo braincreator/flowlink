@@ -1,6 +1,6 @@
 #!/bin/bash
-# FlowLink — Daily subscription expiry checker
-# Calls POST /api/billing/check-expiry to process expiring subscriptions
+# FlowLink — Daily subscription expiry checker + GDPR deletion cleanup
+# Calls POST /api/billing/check-expiry and /api/billing/cleanup-expired-deletions
 #
 # INSTALL:
 #   sudo cp check-expiry.sh /opt/flowlink/scripts/check-expiry.sh
@@ -15,3 +15,4 @@
 #   sudo journalctl -u flowlink-expiry.service
 
 curl -sf -X POST http://localhost:8080/api/billing/check-expiry > /dev/null 2>&1
+curl -sf -X POST http://localhost:8080/api/billing/cleanup-expired-deletions > /dev/null 2>&1
