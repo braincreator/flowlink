@@ -13,6 +13,7 @@ use jsonwebtoken::{encode, EncodingKey, Header};
 
 use crate::server::AppState;
 use crate::middleware::AccountIdExtractor;
+use flowlink_db::audit;
 
 // ═══════════════════════════════════════════════
 // Request / Response types
@@ -292,6 +293,7 @@ pub async fn change_email_confirm(
         match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin, None) {
             Ok(tokens) => {
                 log::info!("✅ Email changed for {account_id} → {email}");
+                let _ = audit::log_event(pool, None, &account_id, "auth.email_changed", Some("account"), Some(&account_id), json!({"new_email": &email}), None).await;
                 return (StatusCode::OK, Json(json!({
                     "ok": true,
                     "access_token": tokens.access_token,
@@ -392,6 +394,7 @@ pub async fn verify_code(
         match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin, None) {
             Ok(tokens) => {
                 log::info!("✅ Email auth success: {email} → {account_id}");
+                let _ = audit::log_event(pool, None, &account_id, "auth.login", Some("account"), Some(&account_id), json!({"email": &email, "ip": &client_ip}), Some(&client_ip)).await;
 
                 // Schedule login notification email (skip if sent in last 5 min)
                 if let Some(ref queue) = state.email_queue.get() {

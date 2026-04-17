@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::middleware::{AccountIdExtractor, ClaimsExtractor};
 use crate::server::AppState;
+use flowlink_db::audit;
 use flowlink_db::orgs::OrgRow;
 
 // ═══════════════════════════════════════════════
@@ -266,6 +267,7 @@ pub async fn change_plan(
 
     let mut account_billing = billing_engine.get_or_create_account(&account.0);
 
+    let current_plan_id = account_billing.plan_id.clone();
     match billing_engine.change_plan(&mut account_billing, &body.plan_id) {
         Ok(created_invoice) => {
             if let Some(db) = &state.db {
@@ -313,6 +315,10 @@ pub async fn change_plan(
             });
             if let Some(inv) = created_invoice {
                 resp["invoice"] = serde_json::to_value(&inv).unwrap_or(json!(null));
+            }
+            // Audit log
+            if let Some(db) = &state.db {
+                let _ = audit::log_event(db.pool(), claims.0.org_id.as_deref(), &account.0, "plan.changed", Some("subscription"), None, json!({"old_plan": &current_plan_id, "new_plan": &body.plan_id}), None).await;
             }
             // Send plan changed email
             if let Some(email_svc) = &state.email_service {
@@ -446,6 +452,7 @@ pub async fn subscribe(
         Ok(sub) => {
             // Persist to DB
             if let Some(db) = &state.db {
+                let _ = audit::log_event(db.pool(), None, &account.0, "plan.changed", Some("subscription"), Some(&sub.subscription_id), json!({"plan_id": &body.plan_id, "amount": amount}), None).await;
                 let period_str = period.as_str().to_string();
                 if let Err(e) = flowlink_db::subscriptions::SubscriptionRepo::create(
                     db.pool(), &sub.subscription_id, &account.0, &body.plan_id,
@@ -572,6 +579,7 @@ pub async fn cancel_tochka_subscription(
     match tochka.cancel_subscription(&sub.subscription_id).await {
         Ok(cancelled) => {
             if let Some(db) = &state.db {
+                let _ = audit::log_event(db.pool(), None, &account.0, "subscription.cancelled", Some("subscription"), Some(&sub.subscription_id), json!({}), None).await;
                 let _ = flowlink_db::subscriptions::SubscriptionRepo::cancel(
                     db.pool(), &sub.subscription_id,
                 ).await;
@@ -737,7 +745,10 @@ pub async fn cancel_subscription(
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
     };
     match flowlink_db::subscriptions::SubscriptionRepo::cancel(db.pool(), &id).await {
-        Ok(()) => (StatusCode::OK, Json(json!({"cancelled": true}))).into_response(),
+        Ok(()) => {
+            let _ = audit::log_event(db.pool(), None, &_account.0, "subscription.cancelled", Some("subscription"), Some(&id), json!({}), None).await;
+            (StatusCode::OK, Json(json!({"cancelled": true}))).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
 }
@@ -1021,6 +1032,11 @@ pub async fn check_expiry(
     let mut errors = 0i64;
     let mut grace_entered = 0i64;
     let mut downgraded = 0i64;
+
+    // 0. Cleanup expired email verification codes (15 min)
+    if let Err(e) = flowlink_db::email_verification::EmailVerificationRepo::cleanup_expired(db.pool(), 15).await {
+        log::warn!("check_expiry: email cleanup failed: {e}");
+    }
 
     // 1. Find orgs with expired trials but no grace period set yet
     match sqlx::query(

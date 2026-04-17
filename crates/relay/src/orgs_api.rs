@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::middleware::AccountIdExtractor;
 use crate::server::AppState;
+use flowlink_db::audit;
 use flowlink_db::orgs::{OrgInvitationRow, OrgMemberRow, OrgRepo, OrgRow};
 
 // ═══════════════════════════════════════════════
@@ -190,6 +191,7 @@ pub async fn create_org(State(state): State<AppState>, AccountIdExtractor(accoun
         Ok(org) => {
             // Auto-add creator as owner member
             let _ = OrgRepo::add_member(pool, org.org_id, &account_id, "owner", None).await;
+            let _ = audit::log_event(pool, Some(&org.org_id.to_string()), &account_id, "org.created", Some("organization"), Some(&org.org_id.to_string()), json!({"name": &body.name}), None).await;
             (StatusCode::CREATED, Json(json_row(&org))).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
@@ -241,7 +243,10 @@ pub async fn update_org(State(state): State<AppState>, AccountIdExtractor(accoun
     }
 
     match OrgRepo::update(pool, org_id, body.name.as_deref(), body.slug.as_deref()).await {
-        Ok(Some(org)) => Json(json_row(&org)).into_response(),
+        Ok(Some(org)) => {
+            let _ = audit::log_event(pool, Some(&org_id.to_string()), &account_id, "org.updated", Some("organization"), Some(&org_id.to_string()), json!({"name": body.name, "slug": body.slug}), None).await;
+            Json(json_row(&org)).into_response()
+        }
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "organization not found"}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
@@ -259,7 +264,10 @@ pub async fn delete_org(State(state): State<AppState>, AccountIdExtractor(accoun
     }
 
     match OrgRepo::delete(pool, org_id).await {
-        Ok(true) => Json(json!({"ok": true, "message": "organization deleted"})).into_response(),
+        Ok(true) => {
+            let _ = audit::log_event(pool, Some(&org_id.to_string()), &account_id, "org.deleted", Some("organization"), Some(&org_id.to_string()), json!({}), None).await;
+            Json(json!({"ok": true, "message": "organization deleted"})).into_response()
+        }
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "organization not found"}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
@@ -341,7 +349,10 @@ pub async fn invite_member(State(state): State<AppState>, AccountIdExtractor(acc
     let expires_at = Utc::now() + chrono::Duration::days(7);
 
     match OrgRepo::create_invitation(pool, org_id, body.email.as_deref(), &body.role, &token, expires_at).await {
-        Ok(inv) => Json(json_invitation(&inv)).into_response(),
+        Ok(inv) => {
+            let _ = audit::log_event(pool, Some(&org_id.to_string()), &account_id, "member.invited", Some("invitation"), Some(&inv.id.to_string()), json!({"email": body.email, "role": &body.role}), None).await;
+            Json(json_invitation(&inv)).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
 }
@@ -356,6 +367,7 @@ pub async fn accept_invite(State(state): State<AppState>, AccountIdExtractor(acc
     match OrgRepo::accept_invitation(pool, &body.token, &account_id).await {
         Ok(Some((org_id, role))) => {
             let org = OrgRepo::get(pool, org_id).await.unwrap_or(None);
+            let _ = audit::log_event(pool, Some(&org_id.to_string()), &account_id, "member.joined", Some("organization"), Some(&org_id.to_string()), json!({"role": &role}), None).await;
             Json(json!({
                 "ok": true,
                 "org_id": org_id,
@@ -397,7 +409,10 @@ pub async fn remove_member(State(state): State<AppState>, AccountIdExtractor(acc
     }
 
     match OrgRepo::remove_member(pool, org_id, &target_id).await {
-        Ok(true) => Json(json!({"ok": true, "message": "member removed"})).into_response(),
+        Ok(true) => {
+            let _ = audit::log_event(pool, Some(&org_id.to_string()), &account_id, "member.removed", Some("member"), Some(&target_id), json!({}), None).await;
+            Json(json!({"ok": true, "message": "member removed"})).into_response()
+        }
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "member not found or is owner"}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
@@ -543,7 +558,10 @@ pub async fn change_member_role(State(state): State<AppState>, AccountIdExtracto
     }
 
     match OrgRepo::change_role(pool, org_id, &target_id, &body.role).await {
-        Ok(true) => Json(json!({"ok": true, "account_id": target_id, "new_role": body.role})).into_response(),
+        Ok(true) => {
+            let _ = audit::log_event(pool, Some(&org_id.to_string()), &account_id, "member.role_changed", Some("member"), Some(&target_id), json!({"new_role": &body.role}), None).await;
+            Json(json!({"ok": true, "account_id": target_id, "new_role": body.role})).into_response()
+        }
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "member not found or is owner"}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
