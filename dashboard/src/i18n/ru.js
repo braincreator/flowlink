@@ -2,7 +2,7 @@ const ru = {
     nav: {
         dashboard: 'Дашборд', agents: 'Агенты', shield: 'Щит', audit: 'Аудит',
         sessions: 'Сессии', backups: 'Резервные копии', policies: 'Политики', devices: 'Устройства',
-        rbac: 'Управление доступом', metrics: 'Метрики', settings: 'Настройки', profile: 'Профиль', terminal: 'Терминал',
+        rbac: 'Управление доступом', metrics: 'Метрики', settings: 'Настройки', profile: 'Профиль', terminal: 'Терминал', security: 'Безопасность',
         billing: 'Тарифы', llm: 'LLM Прокси', mcp: 'MCP Инструменты', onboarding: 'Начало работы',
         terminal_soc: 'Оперативный центр', terminal_relay: 'Консоль релея', admin: 'Админ-панель',
     },

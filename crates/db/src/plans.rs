@@ -44,6 +44,20 @@ pub struct DbPlan {
 }
 
 impl DbPlan {
+    /// Get all plans ordered by sort_order
+    pub async fn list_all(pool: &PgPool) -> Result<Vec<Self>> {
+        let rows = sqlx::query_as::<_, PlanRow>(
+            "SELECT id, name, description, tier, price_kopecks, annual_price_kopecks,
+                    period, currency, limits, features, is_active, sort_order, trial_days,
+                    created_at, updated_at
+             FROM plans ORDER BY sort_order ASC",
+        )
+        .fetch_all(pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|r| r.into()).collect())
+    }
+
     /// Get all active plans ordered by sort_order
     pub async fn list_active(pool: &PgPool) -> Result<Vec<Self>> {
         let rows = sqlx::query_as::<_, PlanRow>(
@@ -116,14 +130,20 @@ impl DbPlan {
         Ok(())
     }
 
-    /// Deactivate a plan
-    pub async fn deactivate(pool: &PgPool, id: &str) -> Result<bool> {
+    /// Set active status of a plan
+    pub async fn set_active(pool: &PgPool, id: &str, active: bool) -> Result<bool> {
         let result =
-            sqlx::query("UPDATE plans SET is_active = false, updated_at = NOW() WHERE id = $1")
+            sqlx::query("UPDATE plans SET is_active = $1, updated_at = NOW() WHERE id = $2")
+                .bind(active)
                 .bind(id)
                 .execute(pool)
                 .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Deactivate a plan
+    pub async fn deactivate(pool: &PgPool, id: &str) -> Result<bool> {
+        Self::set_active(pool, id, false).await
     }
 }
 

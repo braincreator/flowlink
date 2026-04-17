@@ -39,12 +39,18 @@ export default function Login() {
     const [emailSent, setEmailSent] = useState(false);
     const [resendTimer, setResendTimer] = useState(0);
     const [twoFATempToken, setTwoFATempToken] = useState(null);
-    // Check for OAuth 2FA redirect
+    // Check for OAuth 2FA redirect (URL params or window variable)
     useEffect(() => {
-        const t = window.__twofa_temp_token;
-        if (t) {
+        const params = new URLSearchParams(window.location.search);
+        const urlToken = params.get('temp_token');
+        const winToken = window.__twofa_temp_token;
+        if (urlToken) {
+            window.history.replaceState({}, '', '/dashboard/login');
+            setTwoFATempToken(urlToken);
+        }
+        else if (winToken) {
             delete window.__twofa_temp_token;
-            setTwoFATempToken(t);
+            setTwoFATempToken(winToken);
         }
     }, []);
     useEffect(() => {

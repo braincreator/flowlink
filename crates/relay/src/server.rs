@@ -1161,6 +1161,220 @@ async fn admin_dashboard_stats(State(state): State<AppState>, Query(params): Que
     }))).into_response()
 }
 
+async fn admin_list_plans(State(state): State<AppState>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
+    };
+    match flowlink_db::plans::DbPlan::list_all(db.pool()).await {
+        Ok(plans) => (StatusCode::OK, Json(serde_json::json!({ "plans": plans }))).into_response(),
+        Err(e) => {
+            log::error!("Admin list plans failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct CreatePlanBody {
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: String,
+    tier: i32,
+    price_kopecks: i64,
+    annual_price_kopecks: Option<i64>,
+    period: String,
+    currency: String,
+    limits: Option<serde_json::Value>,
+    features: Option<Vec<String>>,
+    #[serde(default = "default_true")]
+    is_active: bool,
+    sort_order: i32,
+    #[serde(default)]
+    trial_days: i32,
+}
+
+fn default_true() -> bool { true }
+
+async fn admin_create_plan(State(state): State<AppState>, Json(body): Json<CreatePlanBody>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
+    };
+    let limits: flowlink_db::plans::PlanLimits = body.limits
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let features = body.features.unwrap_or_default();
+    let plan = flowlink_db::plans::DbPlan {
+        id: body.id,
+        name: body.name,
+        description: body.description,
+        tier: body.tier,
+        price_kopecks: body.price_kopecks,
+        annual_price_kopecks: body.annual_price_kopecks,
+        period: body.period,
+        currency: body.currency,
+        limits,
+        features,
+        is_active: body.is_active,
+        sort_order: body.sort_order,
+        trial_days: body.trial_days,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    match flowlink_db::plans::DbPlan::upsert(db.pool(), &plan).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true, "id": plan.id}))).into_response(),
+        Err(e) => {
+            log::error!("Admin create plan: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
+async fn admin_update_plan(State(state): State<AppState>, Path(id): Path<String>, Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
+    };
+    // Fetch existing plan, merge fields, then upsert
+    let existing = match flowlink_db::plans::DbPlan::get_by_id(db.pool(), &id).await {
+        Ok(Some(p)) => p,
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Plan not found"}))).into_response(),
+        Err(e) => {
+            log::error!("Admin update plan: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response();
+        }
+    };
+    let mut plan = existing;
+    if let Some(name) = body.get("name").and_then(|v| v.as_str()) { plan.name = name.to_string(); }
+    if let Some(desc) = body.get("description").and_then(|v| v.as_str()) { plan.description = desc.to_string(); }
+    if let Some(tier) = body.get("tier").and_then(|v| v.as_i64()) { plan.tier = tier as i32; }
+    if let Some(price) = body.get("price_kopecks").and_then(|v| v.as_i64()) { plan.price_kopecks = price; }
+    if let Some(price) = body.get("annual_price_kopecks").and_then(|v| v.as_i64()) { plan.annual_price_kopecks = Some(price); }
+    if let Some(period) = body.get("period").and_then(|v| v.as_str()) { plan.period = period.to_string(); }
+    if let Some(currency) = body.get("currency").and_then(|v| v.as_str()) { plan.currency = currency.to_string(); }
+    if let Some(limits) = body.get("limits") {
+        if let Ok(l) = serde_json::from_value(limits.clone()) { plan.limits = l; }
+    }
+    if let Some(features) = body.get("features") {
+        if let Ok(f) = serde_json::from_value(features.clone()) { plan.features = f; }
+    }
+    if let Some(active) = body.get("is_active").and_then(|v| v.as_bool()) { plan.is_active = active; }
+    if let Some(sort) = body.get("sort_order").and_then(|v| v.as_i64()) { plan.sort_order = sort as i32; }
+    if let Some(trial) = body.get("trial_days").and_then(|v| v.as_i64()) { plan.trial_days = trial as i32; }
+    match flowlink_db::plans::DbPlan::upsert(db.pool(), &plan).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response(),
+        Err(e) => {
+            log::error!("Admin update plan: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
+async fn admin_delete_plan(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
+    };
+    match flowlink_db::plans::DbPlan::set_active(db.pool(), &id, false).await {
+        Ok(true) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Plan not found"}))).into_response(),
+        Err(e) => {
+            log::error!("Admin delete plan: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
+async fn admin_list_subscriptions(State(state): State<AppState>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
+    };
+    match sqlx::query_as::<_, flowlink_db::subscriptions::SubscriptionRow>(
+        r#"SELECT s.id, s.account_id, s.plan_id, s.status, s.period, s.amount_kopecks,
+                  s.tochka_subscription_id, s.payment_method, s.started_at, s.expires_at,
+                  s.trial_ends_at, s.next_billing_at, s.cancelled_at, s.created_at, s.updated_at
+           FROM subscriptions s
+           ORDER BY s.created_at DESC LIMIT 200"#
+    )
+    .fetch_all(db.pool())
+    .await
+    {
+        Ok(rows) => {
+            // Fetch emails for all accounts in one query
+            let account_ids: Vec<&str> = rows.iter().map(|r| r.account_id.as_str()).collect();
+            let mut emails: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            if !account_ids.is_empty() {
+                if let Ok(accs) = sqlx::query_as::<_, (String, String)>(
+                    "SELECT account_id, COALESCE(email, '') FROM accounts WHERE account_id = ANY($1)"
+                ).bind(&account_ids).fetch_all(db.pool()).await {
+                    for (aid, email) in accs { emails.insert(aid, email); }
+                }
+            }
+            let data: Vec<_> = rows.into_iter().map(|r| serde_json::json!({
+                "id": r.id, "account_id": r.account_id,
+                "email": emails.get(&r.account_id).cloned().unwrap_or_default(),
+                "plan_id": r.plan_id, "status": r.status, "period": r.period,
+                "amount_kopecks": r.amount_kopecks,
+                "tochka_subscription_id": r.tochka_subscription_id,
+                "started_at": r.started_at.to_rfc3339(),
+                "expires_at": r.expires_at.map(|d| d.to_rfc3339()),
+                "created_at": r.created_at.to_rfc3339(),
+            })).collect();
+            (StatusCode::OK, Json(serde_json::json!({ "subscriptions": data }))).into_response()
+        }
+        Err(e) => {
+            log::error!("Admin list subscriptions: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
+async fn admin_list_orders(State(state): State<AppState>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
+    };
+    match sqlx::query_as::<_, flowlink_db::orders::OrderRow>(
+        r#"SELECT id, account_id, invoice_id, amount_kopecks, description,
+                  status, payment_method, tochka_payment_id, payment_url,
+                  plan_id, paid_at, failed_at, created_at
+           FROM orders
+           ORDER BY created_at DESC LIMIT 200"#
+    )
+    .fetch_all(db.pool())
+    .await
+    {
+        Ok(rows) => {
+            let account_ids: Vec<&str> = rows.iter().map(|r| r.account_id.as_str()).collect();
+            let mut emails: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            if !account_ids.is_empty() {
+                if let Ok(accs) = sqlx::query_as::<_, (String, String)>(
+                    "SELECT account_id, COALESCE(email, '') FROM accounts WHERE account_id = ANY($1)"
+                ).bind(&account_ids).fetch_all(db.pool()).await {
+                    for (aid, email) in accs { emails.insert(aid, email); }
+                }
+            }
+            let data: Vec<_> = rows.into_iter().map(|r| serde_json::json!({
+                "id": r.id, "account_id": r.account_id,
+                "email": emails.get(&r.account_id).cloned().unwrap_or_default(),
+                "plan_id": r.plan_id, "status": r.status, "amount_kopecks": r.amount_kopecks,
+                "description": r.description, "payment_method": r.payment_method,
+                "tochka_payment_id": r.tochka_payment_id, "paid_at": r.paid_at.map(|d| d.to_rfc3339()),
+                "created_at": r.created_at.to_rfc3339(),
+            })).collect();
+            (StatusCode::OK, Json(serde_json::json!({ "orders": data }))).into_response()
+        }
+        Err(e) => {
+            log::error!("Admin list orders: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     let rate_limiter = state.rate_limiter.clone();
 
@@ -1301,6 +1515,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/admin/accounts/{id}/plan", axum::routing::put(admin_change_plan))
         .route("/api/admin/accounts/{id}/toggle", axum::routing::post(admin_toggle_active))
         .route("/api/admin/dashboard-stats", axum::routing::get(admin_dashboard_stats))
+        // Plans CRUD
+        .route("/api/admin/plans", axum::routing::get(admin_list_plans).post(admin_create_plan))
+        .route("/api/admin/plans/{id}", axum::routing::put(admin_update_plan).delete(admin_delete_plan))
+        // Subscriptions & Orders listing
+        .route("/api/admin/subscriptions", axum::routing::get(admin_list_subscriptions))
+        .route("/api/admin/orders", axum::routing::get(admin_list_orders))
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth))
         .layer(axum::middleware::from_fn(|req: axum::extract::Request, next: axum::middleware::Next| {
             async move {

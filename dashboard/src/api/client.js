@@ -169,6 +169,10 @@ class ApiClient {
     getAccountInfo() { return this.request('GET', '/api/account/info'); }
     linkEmail(email) { return this.request('POST', '/api/auth/link-email', { email }); }
     deleteAccount() { return this.request('DELETE', '/api/account'); }
+    // Auth sessions (JWT)
+    getAuthSessions() { return this.request('GET', '/api/auth/sessions'); }
+    revokeAuthSession(id) { return this.request('DELETE', `/api/auth/sessions/${id}`); }
+    revokeOtherAuthSessions() { return this.request('DELETE', '/api/auth/sessions'); }
     // 2FA
     setup2FA() { return this.request('POST', '/api/auth/2fa/setup'); }
     enable2FA(code) { return this.request('POST', '/api/auth/2fa/enable', { code }); }
@@ -269,6 +273,15 @@ class ApiClient {
     adminToggleActive(id) {
         return this.request('POST', `/api/admin/accounts/${id}/toggle`);
     }
+    // Admin plans CRUD
+    adminGetPlans() { return this.request('GET', '/api/admin/plans'); }
+    adminCreatePlan(plan) { return this.request('POST', '/api/admin/plans', plan); }
+    adminUpdatePlan(id, plan) { return this.request('PUT', `/api/admin/plans/${id}`, plan); }
+    adminDeletePlan(id) { return this.request('DELETE', `/api/admin/plans/${id}`); }
+    // Admin invoices & subscriptions
+    adminGetSubscriptions() { return this.request('GET', '/api/admin/subscriptions'); }
+    adminGetOrders() { return this.request('GET', '/api/admin/orders'); }
+    adminGetInvoices() { return this.request('GET', '/api/admin/invoices'); }
     // Metrics
     getMetrics() { return this.requestText('GET', '/metrics'); }
     // SSE URL helper

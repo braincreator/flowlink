@@ -183,6 +183,11 @@ class ApiClient {
   linkEmail(email: string) { return this.request<{ ok: boolean; email: string }>('POST', '/api/auth/link-email', { email }); }
   deleteAccount() { return this.request<{ ok: boolean; message: string }>('DELETE', '/api/account'); }
 
+  // Auth sessions (JWT)
+  getAuthSessions() { return this.request<any>('GET', '/api/auth/sessions'); }
+  revokeAuthSession(id: string) { return this.request<any>('DELETE', `/api/auth/sessions/${id}`); }
+  revokeOtherAuthSessions() { return this.request<any>('DELETE', '/api/auth/sessions'); }
+
   // 2FA
   setup2FA() { return this.request<{ secret: string; otpauth_uri: string }>('POST', '/api/auth/2fa/setup'); }
   enable2FA(code: string) { return this.request<{ ok: boolean; enabled: boolean }>('POST', '/api/auth/2fa/enable', { code }); }
@@ -301,6 +306,17 @@ class ApiClient {
   adminToggleActive(id: string) {
     return this.request<any>('POST', `/api/admin/accounts/${id}/toggle`);
   }
+
+  // Admin plans CRUD
+  adminGetPlans() { return this.request<any[]>('GET', '/api/admin/plans'); }
+  adminCreatePlan(plan: any) { return this.request<any>('POST', '/api/admin/plans', plan); }
+  adminUpdatePlan(id: string, plan: any) { return this.request<any>('PUT', `/api/admin/plans/${id}`, plan); }
+  adminDeletePlan(id: string) { return this.request<any>('DELETE', `/api/admin/plans/${id}`); }
+
+  // Admin invoices & subscriptions
+  adminGetSubscriptions() { return this.request<any[]>('GET', '/api/admin/subscriptions'); }
+  adminGetOrders() { return this.request<any[]>('GET', '/api/admin/orders'); }
+  adminGetInvoices() { return this.request<any[]>('GET', '/api/admin/invoices'); }
 
   // Metrics
   getMetrics() { return this.requestText('GET', '/metrics'); }

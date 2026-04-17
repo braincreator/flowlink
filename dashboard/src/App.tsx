@@ -30,6 +30,7 @@ import TerminalSOC from './pages/TerminalSOC';
 import TerminalRelay from './pages/TerminalRelay';
 import TerminalAgent from './pages/TerminalAgent';
 import Admin from './pages/Admin';
+import Security from './pages/Security';
 
 // Recharts-heavy pages — lazy loaded for smaller initial bundle
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="onboarding" element={<Onboarding />} />
           <Route path="settings" element={<Settings />} />
           <Route path="profile" element={<Profile />} />
+          <Route path="security" element={<Security />} />
           <Route path="settings/2fa" element={<TwoFASetup />} />
           <Route path="billing" element={<Billing />} />
           <Route path="llm" element={<LLM />} />

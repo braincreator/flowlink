@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { isAdmin } from '../api/client';
 import {
   LayoutDashboard, Bot, Shield, FileText, MonitorPlay, HardDrive,
-  FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare, Radio, UserCircle, ShieldCheck
+  FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare, Radio, UserCircle, ShieldCheck, ShieldAlert
 } from 'lucide-react';
 import { version } from '../../package.json';
 
@@ -64,6 +64,7 @@ const navGroups: NavGroup[] = [
   },
   {
     items: [
+      { to: '/security', icon: ShieldAlert, labelKey: 'nav.security' },
       { to: '/profile', icon: UserCircle, labelKey: 'nav.profile' },
       { to: '/admin', icon: ShieldCheck, labelKey: 'nav.admin' },
       { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
