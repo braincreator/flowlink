@@ -35,6 +35,8 @@ pub struct SignupRequest {
     pub version: Option<String>,
     /// Public key for E2EE (base64 X25519)
     pub public_key: Option<String>,
+    /// Organization ID (optional, for org-scoped agents)
+    pub org_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

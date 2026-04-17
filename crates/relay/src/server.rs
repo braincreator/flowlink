@@ -1535,6 +1535,7 @@ pub fn build_router(state: AppState) -> Router {
 
     // ── Organizations routes (require JWT auth) ──
     let org_routes = Router::new()
+        .route("/api/orgs/onboard", axum::routing::post(crate::orgs_api::onboard))
         .route("/api/orgs", axum::routing::get(crate::orgs_api::list_my_orgs).post(crate::orgs_api::create_org))
         .route("/api/orgs/switch", axum::routing::post(crate::orgs_api::switch_org))
         .route("/api/orgs/{org_id}", axum::routing::get(crate::orgs_api::get_org).put(crate::orgs_api::update_org).delete(crate::orgs_api::delete_org))

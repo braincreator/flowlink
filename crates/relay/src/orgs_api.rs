@@ -55,6 +55,12 @@ pub struct ChangeRoleRequest {
     pub role: String,
 }
 
+#[derive(Deserialize)]
+pub struct OnboardRequest {
+    pub org_name: String,
+    pub slug: Option<String>,
+}
+
 fn default_plan() -> String { "trial".to_string() }
 
 // ═══════════════════════════════════════════════
@@ -389,6 +395,54 @@ pub async fn remove_member(State(state): State<AppState>, AccountIdExtractor(acc
     match OrgRepo::remove_member(pool, org_id, &target_id).await {
         Ok(true) => Json(json!({"ok": true, "message": "member removed"})).into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "member not found or is owner"}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+/// POST /api/orgs/onboard — create first org with JWT tokens
+pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_id): AccountIdExtractor, Json(body): Json<OnboardRequest>) -> impl IntoResponse {
+    let pool = match get_db(&state) {
+        Ok(p) => p,
+        Err(e) => return e.into_response(),
+    };
+
+    let engine = match &state.auth_engine {
+        Some(e) => e,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "auth not configured"}))).into_response(),
+    };
+
+    // Generate slug
+    let slug = if let Some(s) = &body.slug {
+        s.clone()
+    } else {
+        let base = slugify(&body.org_name);
+        match OrgRepo::get_by_slug(pool, &base).await {
+            Ok(None) => base,
+            _ => {
+                let suffix: String = Uuid::new_v4().to_string()[..4].to_string();
+                format!("{}-{}", base, suffix)
+            }
+        }
+    };
+
+    if let Ok(Some(_)) = OrgRepo::get_by_slug(pool, &slug).await {
+        return (StatusCode::CONFLICT, Json(json!({"error": "slug already exists"}))).into_response();
+    }
+
+    let org = match OrgRepo::create(pool, &body.org_name, &slug, &account_id, "trial").await {
+        Ok(o) => o,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    };
+
+    let _ = OrgRepo::add_member(pool, org.org_id, &account_id, "owner", None).await;
+
+    match engine.create_org_tokens(&account_id, &account_id, None, None, false, &org.org_id.to_string(), "owner") {
+        Ok(tokens) => Json(json!({
+            "org": json_row(&org),
+            "access_token": tokens.access_token,
+            "refresh_token": tokens.refresh_token,
+            "expires_in": tokens.expires_in,
+        })).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
 }

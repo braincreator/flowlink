@@ -409,6 +409,13 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_org_invitations_org ON org_invitations(org_id);
         "#,
         ),
+        (
+            "023_agents_org_id",
+            r#"
+            ALTER TABLE agents ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organizations(org_id) ON DELETE SET NULL;
+            CREATE INDEX IF NOT EXISTS idx_agents_org ON agents(org_id);
+        "#,
+        ),
     ]
 }
 
@@ -419,7 +426,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 22);
+        assert_eq!(migrations.len(), 23);
     }
 
     #[test]
@@ -448,6 +455,7 @@ mod tests {
             "020_organizations",
             "021_org_members",
             "022_org_invitations",
+            "023_agents_org_id",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(
