@@ -3,10 +3,15 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Sidebar';
 import { LoadingSkeleton } from './components/Layout';
 import { NotificationProvider } from './hooks/useNotifications';
-import { api } from './api/client';
-
+import { ToastProvider } from './hooks/useToast';
+import { api, isAdmin } from './api/client';
 import Login from './pages/Login';
 import Onboarding from './pages/Onboarding';
+
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  if (!isAdmin()) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 import Agents from './pages/Agents';
 import Audit from './pages/Audit';
 import Sessions from './pages/Sessions';
@@ -15,6 +20,8 @@ import Policies from './pages/Policies';
 import Devices from './pages/Devices';
 import RBAC from './pages/RBAC';
 import Settings from './pages/Settings';
+import Profile from './pages/Profile';
+import TwoFASetup from './pages/2FASetup';
 import Billing from './pages/Billing';
 import LLM from './pages/LLM';
 import MCP from './pages/MCP';
@@ -22,6 +29,7 @@ import TerminalPage from './pages/Terminal';
 import TerminalSOC from './pages/TerminalSOC';
 import TerminalRelay from './pages/TerminalRelay';
 import TerminalAgent from './pages/TerminalAgent';
+import Admin from './pages/Admin';
 
 // Recharts-heavy pages — lazy loaded for smaller initial bundle
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -34,21 +42,28 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const accessToken = params.get('access_token');
     const refreshToken = params.get('refresh_token');
+    const requires2FA = params.get('requires_2fa');
+    const tempToken = params.get('temp_token');
     if (accessToken) {
-      api.setToken(accessToken);
-      if (refreshToken) {
-        localStorage.setItem('flowlink_refresh', refreshToken);
-      }
+      api.setTokens(accessToken, refreshToken, 900); // default 15min
       // Clean URL — remove tokens from address bar
       const clean = new URL(window.location.href);
       clean.searchParams.delete('access_token');
       clean.searchParams.delete('refresh_token');
+      window.history.replaceState({}, '', clean.pathname + clean.hash);
+    } else if (requires2FA === '1' && tempToken) {
+      // Store temp token for 2FA verification
+      (window as any).__twofa_temp_token = tempToken;
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete('requires_2fa');
+      clean.searchParams.delete('temp_token');
       window.history.replaceState({}, '', clean.pathname + clean.hash);
     }
   }, []);
 
   return (
     <NotificationProvider>
+    <ToastProvider>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -65,6 +80,8 @@ export default function App() {
           <Route path="metrics" element={<Suspense fallback={<LoadingSkeleton lines={8} />}><Metrics /></Suspense>} />
           <Route path="onboarding" element={<Onboarding />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="settings/2fa" element={<TwoFASetup />} />
           <Route path="billing" element={<Billing />} />
           <Route path="llm" element={<LLM />} />
           <Route path="mcp" element={<MCP />} />
@@ -72,10 +89,12 @@ export default function App() {
           <Route path="terminal/soc" element={<TerminalSOC />} />
           <Route path="terminal/relay" element={<TerminalRelay />} />
           <Route path="terminal/agent/:id" element={<TerminalAgent />} />
+          <Route path="admin" element={<RequireAdmin><Admin /></RequireAdmin>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>
+    </ToastProvider>
     </NotificationProvider>
   );
 }

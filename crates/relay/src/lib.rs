@@ -1,6 +1,7 @@
 pub mod pool;
 pub mod auth;
 pub mod auth_oauth;
+pub mod auth_2fa;
 pub mod handler;
 pub mod eventbus;
 pub mod approval;

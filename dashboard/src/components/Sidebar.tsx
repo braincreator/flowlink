@@ -2,9 +2,10 @@ import { useState, useEffect, createContext, useContext, type ReactNode } from '
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useTranslation } from 'react-i18next';
+import { isAdmin } from '../api/client';
 import {
   LayoutDashboard, Bot, Shield, FileText, MonitorPlay, HardDrive,
-  FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare, Radio
+  FileCode, Smartphone, Users, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, X, Brain, Puzzle, CreditCard, Sun, Moon, Globe, GraduationCap, TerminalSquare, Radio, UserCircle, ShieldCheck
 } from 'lucide-react';
 import { version } from '../../package.json';
 
@@ -63,6 +64,8 @@ const navGroups: NavGroup[] = [
   },
   {
     items: [
+      { to: '/profile', icon: UserCircle, labelKey: 'nav.profile' },
+      { to: '/admin', icon: ShieldCheck, labelKey: 'nav.admin' },
       { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
       { to: '/onboarding', icon: GraduationCap, labelKey: 'nav.onboarding' },
     ],
@@ -171,7 +174,7 @@ export function Layout() {
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-dim)]">{group.label}</span>
                   </div>
                 )}
-                {group.items.map(item => (
+                {group.items.filter(item => item.to !== '/admin' || isAdmin()).map(item => (
                   <NavLink key={item.to} to={item.to} end={item.to === '/'}
                     onClick={() => setMobileOpen(false)}
                     title={collapsed ? t(item.labelKey) : undefined}

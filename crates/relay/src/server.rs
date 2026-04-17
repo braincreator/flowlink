@@ -999,6 +999,168 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
 // Router Builder
 // ═══════════════════════════════════════════════
 
+// ── Admin account management ──
+
+async fn admin_list_accounts(State(state): State<AppState>, Query(params): Query<std::collections::HashMap<String, String>>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
+    };
+    let mut query = String::from(
+        "SELECT account_id, plan_id, active, email, tg_id, totp_enabled, last_login, created_at FROM accounts WHERE 1=1"
+    );
+    if let Some(plan) = params.get("plan") { query.push_str(&format!(" AND plan_id = '{}'", plan)); }
+    if let Some(active) = params.get("active") { query.push_str(&format!(" AND active = {}", active)); }
+    if let Some(search) = params.get("search") { query.push_str(&format!(" AND (email ILIKE '%{}%' OR account_id ILIKE '%{}%')", search, search)); }
+    if let Some(from) = params.get("from") { query.push_str(&format!(" AND created_at >= '{}'", from)); }
+    if let Some(to) = params.get("to") { query.push_str(&format!(" AND created_at <= '{}'", to)); }
+    query.push_str(" ORDER BY created_at DESC LIMIT 100");
+    match sqlx::query_as::<_, flowlink_db::accounts::AccountRow>(&query)
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(accounts) => {
+            let data: Vec<_> = accounts.into_iter().map(|a| serde_json::json!({
+                "account_id": a.account_id, "plan_id": a.plan_id, "active": a.active,
+                "email": a.email, "tg_id": a.tg_id, "totp_enabled": a.totp_enabled,
+                "last_login": a.last_login.map(|d| d.to_rfc3339()), "created_at": a.created_at.to_rfc3339(),
+            })).collect();
+            (StatusCode::OK, Json(serde_json::json!({ "accounts": data }))).into_response()
+        }
+        Err(e) => {
+            log::error!("Admin list accounts failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
+async fn admin_change_plan(State(state): State<AppState>, Path(account_id): Path<String>, Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+    let plan_id = match body.get("plan_id").and_then(|v| v.as_str()) {
+        Some(p) => p.to_string(),
+        None => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "plan_id required"}))).into_response(),
+    };
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No DB"}))).into_response(),
+    };
+    match flowlink_db::accounts::AccountRepo::update_plan(db.pool(), &account_id, &plan_id).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true, "plan_id": plan_id}))).into_response(),
+        Err(e) => {
+            log::error!("Admin change plan: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
+async fn admin_toggle_active(State(state): State<AppState>, Path(account_id): Path<String>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No DB"}))).into_response(),
+    };
+    match flowlink_db::accounts::AccountRepo::get(db.pool(), &account_id).await {
+        Ok(Some(acc)) => {
+            match flowlink_db::accounts::AccountRepo::set_active(db.pool(), &account_id, !acc.active).await {
+                Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true, "active": !acc.active}))).into_response(),
+                Err(e) => {
+                    log::error!("Admin toggle: {}", e);
+                    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+                }
+            }
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Not found"}))).into_response(),
+        Err(e) => {
+            log::error!("Admin get: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
+        }
+    }
+}
+
+// ── Admin Analytics ──
+
+async fn admin_dashboard_stats(State(state): State<AppState>, Query(params): Query<std::collections::HashMap<String, String>>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No DB"}))).into_response(),
+    };
+    let pool = db.pool();
+
+    // Parse date range filters
+    let date_from = params.get("from").cloned();
+    let date_to = params.get("to").cloned();
+
+    // Date filter clause
+    let date_clause = match (&date_from, &date_to) {
+        (Some(f), Some(t)) => format!("WHERE created_at >= '{}' AND created_at <= '{}'", f, t),
+        (Some(f), None) => format!("WHERE created_at >= '{}'", f),
+        (None, Some(t)) => format!("WHERE created_at <= '{}'", t),
+        _ => String::new(),
+    };
+
+    // Total users
+    let total_users: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM accounts {}", date_clause))
+        .fetch_one(pool).await.unwrap_or(0);
+
+    // Active users
+    let active_users: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM accounts WHERE active = true {}", if date_clause.is_empty() { String::new() } else { "AND ".to_string() + &date_clause.replace("WHERE ", "") }))
+        .fetch_one(pool).await.unwrap_or(0);
+
+    // Users with 2FA
+    let users_2fa: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE totp_enabled = true")
+        .fetch_one(pool).await.unwrap_or(0);
+
+    // Total paid orders
+    let total_revenue_kop: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_kopecks), 0) FROM orders WHERE status = 'paid'"
+    ).fetch_one(pool).await.unwrap_or(0);
+
+    // MRR = sum of active subscriptions monthly amounts
+    let mrr_kop: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_kopecks), 0) FROM subscriptions WHERE status = 'active' AND period = 'monthly'"
+    ).fetch_one(pool).await.unwrap_or(0);
+
+    // ARR = MRR * 12
+    let arr_kop: i64 = mrr_kop * 12;
+
+    // Active subscriptions
+    let active_subs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM subscriptions WHERE status = 'active'"
+    ).fetch_one(pool).await.unwrap_or(0);
+
+    // Churned (cancelled) subscriptions this month
+    let churned_subs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM subscriptions WHERE status = 'cancelled' AND cancelled_at >= date_trunc('month', NOW())"
+    ).fetch_one(pool).await.unwrap_or(0);
+
+    // Plan distribution
+    let plan_dist: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT plan_id, COUNT(*) as cnt FROM accounts GROUP BY plan_id ORDER BY cnt DESC"
+    ).fetch_all(pool).await.unwrap_or_default();
+
+    // New users per day (last 30 days)
+    let new_users_chart: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT DATE(created_at) as d, COUNT(*) as cnt FROM accounts WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY d ORDER BY d"
+    ).fetch_all(pool).await.unwrap_or_default();
+
+    // Revenue per month (last 12 months)
+    let revenue_chart: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT to_char(created_at, 'YYYY-MM') as m, SUM(amount_kopecks) as total FROM orders WHERE status = 'paid' AND created_at >= NOW() - INTERVAL '12 months' GROUP BY m ORDER BY m"
+    ).fetch_all(pool).await.unwrap_or_default();
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "total_users": total_users,
+        "active_users": active_users,
+        "users_2fa": users_2fa,
+        "total_revenue_rub": total_revenue_kop as f64 / 100.0,
+        "mrr_rub": mrr_kop as f64 / 100.0,
+        "arr_rub": arr_kop as f64 / 100.0,
+        "active_subscriptions": active_subs,
+        "churned_this_month": churned_subs,
+        "plan_distribution": plan_dist.iter().map(|(p, c)| serde_json::json!({"plan": p, "count": c})).collect::<Vec<_>>(),
+        "new_users_chart": new_users_chart.iter().map(|(d, c)| serde_json::json!({"date": d, "count": c})).collect::<Vec<_>>(),
+        "revenue_chart": revenue_chart.iter().map(|(m, v)| serde_json::json!({"month": m, "revenue_rub": *v as f64 / 100.0})).collect::<Vec<_>>(),
+    }))).into_response()
+}
+
 pub fn build_router(state: AppState) -> Router {
     let rate_limiter = state.rate_limiter.clone();
 
@@ -1009,11 +1171,15 @@ pub fn build_router(state: AppState) -> Router {
         // Auth endpoints
         .route("/api/auth/email/send-code", axum::routing::post(crate::email_auth::send_code))
         .route("/api/auth/email/verify", axum::routing::post(crate::email_auth::verify_code))
+        // OAuth URL generation (frontend never sees client_secret)
+        .route("/api/auth/oauth-url", axum::routing::get(crate::auth_oauth::oauth_url))
         // OAuth callbacks
         .route("/api/auth/vk/callback", axum::routing::get(crate::auth_oauth::vk_callback))
         .route("/api/auth/yandex/callback", axum::routing::get(crate::auth_oauth::yandex_callback))
         .route("/api/auth/github/callback", axum::routing::get(crate::auth_oauth::github_callback))
         .route("/api/auth/refresh", axum::routing::post(crate::auth_oauth::refresh_token))
+        // 2FA (public: setup done authed, but complete is public for temp_token flow)
+        .route("/api/auth/2fa/complete", axum::routing::post(crate::auth_2fa::complete_2fa))
         // Auth providers listing
         .route("/api/auth/providers", axum::routing::get(crate::auth_oauth::list_providers))
         // Public plans
@@ -1086,6 +1252,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agents/{id}", axum::routing::get(crate::control_plane::get_agent))
         // Account
         .route("/api/account/info", axum::routing::get(account_info))
+        .route("/api/account", axum::routing::delete(crate::auth_oauth::delete_account))
         .route("/api/account/settings", axum::routing::get(account_get_settings))
         .route("/api/account/settings", axum::routing::put(account_update_settings))
         .route("/api/account/notifications", axum::routing::get(crate::preferences_api::get_notifications))
@@ -1104,6 +1271,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/me", axum::routing::get(crate::auth_oauth::auth_me))
         .route("/api/auth/logout", axum::routing::post(crate::auth_oauth::logout))
         .route("/api/auth/account", axum::routing::get(crate::auth_oauth::account_info))
+        .route("/api/auth/link-email", axum::routing::post(crate::auth_oauth::link_email))
+        // 2FA management (protected)
+        .route("/api/auth/2fa/setup", axum::routing::post(crate::auth_2fa::setup_2fa))
+        .route("/api/auth/2fa/enable", axum::routing::post(crate::auth_2fa::enable_2fa))
+        .route("/api/auth/2fa/disable", axum::routing::post(crate::auth_2fa::disable_2fa))
+        .route("/api/auth/2fa/status", axum::routing::get(crate::auth_2fa::status_2fa))
+        // Session management
+        .route("/api/auth/sessions", axum::routing::get(crate::auth_oauth::list_sessions))
+        .route("/api/auth/sessions", axum::routing::delete(crate::auth_oauth::revoke_other_sessions))
+        .route("/api/auth/sessions/{id}", axum::routing::delete(crate::auth_oauth::revoke_session))
         // Apply JWT auth + rate limiting to protected routes
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
@@ -1119,12 +1296,20 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/admin/shield/stats", axum::routing::get(shield_stats))
         .route("/api/admin/llm/backends", axum::routing::get(llm_backends))
         .route("/api/admin/llm/health", axum::routing::get(llm_health))
+        // Account management
+        .route("/api/admin/accounts", axum::routing::get(admin_list_accounts))
+        .route("/api/admin/accounts/{id}/plan", axum::routing::put(admin_change_plan))
+        .route("/api/admin/accounts/{id}/toggle", axum::routing::post(admin_toggle_active))
+        .route("/api/admin/dashboard-stats", axum::routing::get(admin_dashboard_stats))
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth))
         .layer(axum::middleware::from_fn(|req: axum::extract::Request, next: axum::middleware::Next| {
             async move {
-                // RBAC enforcement: check admin permission
-                // In dev mode (no users configured), all requests pass through
-                next.run(req).await
+                // RBAC: extract claims from extensions (set by jwt_auth middleware)
+                let claims = req.extensions().get::<crate::auth::Claims>();
+                match claims {
+                    Some(c) if c.is_admin => next.run(req).await,
+                    _ => axum::http::StatusCode::FORBIDDEN.into_response(),
+                }
             }
         }));
 
@@ -1132,6 +1317,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(public_routes)
         .merge(protected_routes)
         .merge(admin_routes)
+        // Dashboard SPA (stateless routes)
+        .route("/dashboard", get(crate::dashboard::serve_dashboard_root))
+        .route("/dashboard/", get(crate::dashboard::serve_dashboard_root))
+        .route("/dashboard/{*path}", get(crate::dashboard::serve_dashboard))
         .with_state(state)
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))

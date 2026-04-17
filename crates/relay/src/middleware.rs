@@ -79,7 +79,8 @@ pub async fn jwt_auth(
 
     match auth_engine.validate_access_token(token) {
         Ok(claims) => {
-            req.extensions_mut().insert(AccountId(claims.account_id));
+            req.extensions_mut().insert(AccountId(claims.account_id.clone()));
+            req.extensions_mut().insert(claims);
             next.run(req).await
         }
         Err(_) => json_error(StatusCode::UNAUTHORIZED, "token_invalid", "Invalid or expired token"),

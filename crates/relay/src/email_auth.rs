@@ -172,7 +172,48 @@ pub async fn verify_code(
         log::warn!("Failed to update last_login: {e}");
     }
 
-    // Generate JWT token
+    // Use AuthEngine for proper token pair (access 15min + refresh 30d)
+    if let Some(ref engine) = state.auth_engine {
+        // Fetch account info (is_admin) and check 2FA
+        let is_admin = if let Some(ref db) = state.db {
+            let admin = flowlink_db::accounts::AccountRepo::get(db.pool(), &account_id)
+                .await.ok().flatten().map(|a| a.is_admin).unwrap_or(false);
+            // Check if 2FA is enabled
+            if let Ok((totp_enabled, _)) = flowlink_db::accounts::AccountRepo::get_totp(db.pool(), &account_id).await {
+                if totp_enabled {
+                    if let Some(response) = crate::auth_2fa::check_2fa(&account_id, Some(&email), None, admin) {
+                        log::info!("🔐 2FA required for {email} → {account_id}");
+                        return (StatusCode::OK, Json(response)).into_response();
+                    }
+                }
+            }
+            admin
+        } else { false };
+
+        match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin) {
+            Ok(tokens) => {
+                log::info!("✅ Email auth success: {email} → {account_id}");
+                return (StatusCode::OK, Json(json!({
+                    "access_token": tokens.access_token,
+                    "refresh_token": tokens.refresh_token,
+                    "expires_in": tokens.expires_in,
+                    "token_type": "Bearer",
+                    "user": {
+                        "account_id": account_id,
+                        "email": email,
+                    }
+                }))).into_response();
+            }
+            Err(e) => {
+                log::warn!("JWT generation failed: {e}");
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                    "ok": false, "error": "Failed to generate token"
+                }))).into_response();
+            }
+        }
+    }
+
+    // Fallback: raw JWT without AuthEngine (dev mode)
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "flowlink-dev-secret".to_string());
     let now = Utc::now();
     let claims = Claims {
@@ -181,10 +222,9 @@ pub async fn verify_code(
         exp: (now + Duration::days(30)).timestamp() as usize,
         iat: now.timestamp() as usize,
     };
-
     match encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes())) {
         Ok(token) => {
-            log::info!("✅ Email auth success: {email} → {account_id}");
+            log::info!("✅ Email auth success (dev mode): {email} → {account_id}");
             (StatusCode::OK, Json(json!({
                 "token": token,
                 "user": {

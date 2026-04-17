@@ -2,9 +2,9 @@ const en = {
   nav: {
     dashboard: 'Dashboard', agents: 'Agents', shield: 'Shield', audit: 'Audit',
     sessions: 'Sessions', backups: 'Backups', policies: 'Policies', devices: 'Devices',
-    rbac: 'RBAC', metrics: 'Metrics', settings: 'Settings', terminal: 'Terminal',
+    rbac: 'RBAC', metrics: 'Metrics', settings: 'Settings', profile: 'Profile', terminal: 'Terminal',
     billing: 'Billing', llm: 'LLM Proxy', mcp: 'MCP Tools', onboarding: 'Onboarding',
-    terminal_soc: 'Operations Center', terminal_relay: 'Relay Console',
+    terminal_soc: 'Operations Center', terminal_relay: 'Relay Console', admin: 'Admin Panel',
   },
   dashboard: {
     title: 'Dashboard', agents_online: 'Total Agents', active_alerts: 'Active Alerts',

@@ -1,12 +1,21 @@
 use axum::response::Response;
 use axum::http::StatusCode;
 
-/// GET /dashboard/* - serve static dashboard files
+/// GET /dashboard - serve index.html
+pub async fn serve_dashboard_root() -> Response {
+    serve_file("index.html")
+}
+
+/// GET /dashboard/* - serve static dashboard files (SPA with index.html fallback)
 pub async fn serve_dashboard(
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Response {
+    serve_file(&path)
+}
+
+fn serve_file(path: &str) -> Response {
     let dashboard_dir = std::path::Path::new("/opt/flowlink/dashboard");
-    let file_path = dashboard_dir.join(&path);
+    let file_path = dashboard_dir.join(path);
 
     if let Ok(content) = std::fs::read(&file_path) {
         let mime_type = mime_guess(&path);

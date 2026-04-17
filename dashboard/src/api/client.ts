@@ -7,12 +7,24 @@ import type {
 
 const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8080';
 
+// Redirect URL — saved before login, restored after
+let _redirectAfterLogin: string | null = null;
+export function setRedirectAfterLogin(url: string | null) { _redirectAfterLogin = url; }
+export function getRedirectAfterLogin() { const r = _redirectAfterLogin; _redirectAfterLogin = null; return r; }
+
 class ApiClient {
   private token: string | null = null;
+  private refreshToken: string | null = null;
+  private refreshPromise: Promise<string | null> | null = null;
+  private expiresAt: number = 0;
 
   constructor() {
     const stored = localStorage.getItem('flowlink_token');
     if (stored) this.token = stored;
+    const storedRefresh = localStorage.getItem('flowlink_refresh_token');
+    if (storedRefresh) this.refreshToken = storedRefresh;
+    const storedExp = localStorage.getItem('flowlink_token_expires_at');
+    if (storedExp) this.expiresAt = parseInt(storedExp, 10);
   }
 
   getToken() { return this.token; }
@@ -23,18 +35,105 @@ class ApiClient {
     else localStorage.removeItem('flowlink_token');
   }
 
+  setTokens(access: string, refresh: string | null, expiresIn: number) {
+    this.token = access;
+    localStorage.setItem('flowlink_token', access);
+    if (refresh) {
+      this.refreshToken = refresh;
+      localStorage.setItem('flowlink_refresh_token', refresh);
+    }
+    // Set expiry with 30s buffer
+    this.expiresAt = Date.now() + (expiresIn * 1000) - 30000;
+    localStorage.setItem('flowlink_token_expires_at', String(this.expiresAt));
+  }
+
+  clearTokens() {
+    this.token = null;
+    this.refreshToken = null;
+    this.expiresAt = 0;
+    localStorage.removeItem('flowlink_token');
+    localStorage.removeItem('flowlink_refresh_token');
+    localStorage.removeItem('flowlink_token_expires_at');
+  }
+
+  private isTokenExpired(): boolean {
+    return Date.now() > this.expiresAt;
+  }
+
+  private async refreshAccessToken(): Promise<string | null> {
+    if (!this.refreshToken) return null;
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: this.refreshToken }),
+      });
+      if (!res.ok) {
+        this.clearTokens();
+        return null;
+      }
+      const data = await res.json();
+      this.setTokens(data.access_token, data.refresh_token, data.expires_in);
+      return this.token;
+    } catch {
+      return null;
+    }
+  }
+
+  private async getValidToken(): Promise<string | null> {
+    // If token is fresh, use it
+    if (this.token && !this.isTokenExpired()) return this.token;
+    // If refresh in progress, wait for it
+    if (this.refreshPromise) return this.refreshPromise;
+    // Try to refresh
+    this.refreshPromise = this.refreshAccessToken().finally(() => { this.refreshPromise = null; });
+    return this.refreshPromise;
+  }
+
   private headers(): Record<string, string> {
     const h: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.token) h['Authorization'] = `Bearer ${this.token}`;
     return h;
   }
 
-  private async request<T>(method: string, path: string, body?: any): Promise<T> {
+  private async request<T>(method: string, path: string, body?: any, retry = true): Promise<T> {
+    // Try to get a valid token before the request
+    const validToken = await this.getValidToken();
+    const h: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (validToken) h['Authorization'] = `Bearer ${validToken}`;
+
     const res = await fetch(`${API_BASE}${path}`, {
       method,
-      headers: this.headers(),
+      headers: h,
       body: body ? JSON.stringify(body) : undefined,
     });
+
+    // On 401, try refresh once
+    if (res.status === 401 && retry && this.refreshToken) {
+      const newToken = await this.refreshAccessToken();
+      if (newToken) {
+        const retryHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+        retryHeaders['Authorization'] = `Bearer ${newToken}`;
+        const retryRes = await fetch(`${API_BASE}${path}`, {
+          method,
+          headers: retryHeaders,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        if (!retryRes.ok) {
+          const error = await retryRes.json().catch(() => ({ error: retryRes.statusText }));
+          throw new Error(error.error || `HTTP ${retryRes.status}`);
+        }
+        return retryRes.json();
+      }
+      // Refresh failed — redirect to login with return_to
+      const currentPath = window.location.pathname + window.location.search;
+      if (currentPath !== '/dashboard/login' && currentPath !== '/login') {
+        setRedirectAfterLogin(currentPath);
+      }
+      window.location.href = '/dashboard/login';
+      throw new Error('Session expired');
+    }
+
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(error.error || `HTTP ${res.status}`);
@@ -43,9 +142,64 @@ class ApiClient {
   }
 
   private async requestText(method: string, path: string): Promise<string> {
-    const res = await fetch(`${API_BASE}${path}`, { method, headers: this.headers() });
+    const validToken = await this.getValidToken();
+    const h: Record<string, string> = {};
+    if (validToken) h['Authorization'] = `Bearer ${validToken}`;
+
+    const res = await fetch(`${API_BASE}${path}`, { method, headers: h });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.text();
+  }
+
+  // ── Auth ──
+  async sendEmailCode(email: string) {
+    const res = await fetch(`${API_BASE}/api/auth/email/send-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    return res.json();
+  }
+
+  async verifyEmailCode(email: string, code: string) {
+    const res = await fetch(`${API_BASE}/api/auth/email/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code }),
+    });
+    const data = await res.json();
+    if (res.ok && data.access_token) {
+      this.setTokens(data.access_token, data.refresh_token, data.expires_in);
+    }
+    return data;
+  }
+
+  getProviders() { return this.request<{ providers: string[] }>('GET', '/api/auth/providers'); }
+  getOAuthUrl(provider: string, redirect: string) {
+    return this.request<{ url: string; state: string }>('GET', `/api/auth/oauth-url?provider=${provider}&redirect=${encodeURIComponent(redirect)}`);
+  }
+  getAuthMe() { return this.request<any>('GET', '/api/auth/me'); }
+  getAccountInfo() { return this.request<any>('GET', '/api/account/info'); }
+  linkEmail(email: string) { return this.request<{ ok: boolean; email: string }>('POST', '/api/auth/link-email', { email }); }
+  deleteAccount() { return this.request<{ ok: boolean; message: string }>('DELETE', '/api/account'); }
+
+  // 2FA
+  setup2FA() { return this.request<{ secret: string; otpauth_uri: string }>('POST', '/api/auth/2fa/setup'); }
+  enable2FA(code: string) { return this.request<{ ok: boolean; enabled: boolean }>('POST', '/api/auth/2fa/enable', { code }); }
+  disable2FA(code: string) { return this.request<{ ok: boolean; enabled: boolean }>('POST', '/api/auth/2fa/disable', { code }); }
+  get2FAStatus() { return this.request<{ enabled: boolean; configured: boolean }>('GET', '/api/auth/2fa/status'); }
+  complete2FA(tempToken: string, code: string) {
+    return fetch(`${API_BASE}/api/auth/2fa/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ temp_token: tempToken, code }),
+    }).then(async (res) => {
+      const data = await res.json();
+      if (res.ok && data.access_token) {
+        this.setTokens(data.access_token, data.refresh_token, data.expires_in);
+      }
+      return data;
+    });
   }
 
   // Health
@@ -132,6 +286,22 @@ class ApiClient {
   reloadConfig() { return this.request<any>('POST', '/api/config/reload'); }
   pushConfig(agentId: string, config: any) { return this.request<any>('POST', `/api/config/push/${agentId}`, config); }
 
+  // Admin
+  getAdminStats(from?: string, to?: string) {
+    const qs = from ? `?from=${from}&to=${to || ''}` : '';
+    return this.request<any>('GET', `/api/admin/dashboard-stats${qs}`);
+  }
+  getAdminAccounts(filters?: Record<string, string>) {
+    const qs = new URLSearchParams(filters || {}).toString();
+    return this.request<any>('GET', `/api/admin/accounts${qs ? '?' + qs : ''}`);
+  }
+  adminChangePlan(id: string, planId: string) {
+    return this.request<any>('PUT', `/api/admin/accounts/${id}/plan`, { plan_id: planId });
+  }
+  adminToggleActive(id: string) {
+    return this.request<any>('POST', `/api/admin/accounts/${id}/toggle`);
+  }
+
   // Metrics
   getMetrics() { return this.requestText('GET', '/metrics'); }
 
@@ -146,3 +316,13 @@ class ApiClient {
 }
 
 export const api = new ApiClient();
+
+/** Check if current user has admin role (from JWT claims) */
+export function isAdmin(): boolean {
+  try {
+    const t = api.getToken();
+    if (!t) return false;
+    const payload = JSON.parse(atob(t.split('.')[1]));
+    return payload.is_admin === true;
+  } catch { return false; }
+}

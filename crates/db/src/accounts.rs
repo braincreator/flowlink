@@ -14,6 +14,11 @@ pub struct AccountRow {
     pub payment_method: Option<String>,
     pub tg_id: Option<i64>,
     pub email: Option<String>,
+    #[allow(dead_code)]
+    pub totp_secret: Option<String>,
+    #[allow(dead_code)]
+    pub totp_enabled: bool,
+    pub is_admin: bool,
     pub last_login: Option<DateTime<Utc>>,
     pub activated_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
@@ -125,6 +130,18 @@ impl AccountRepo {
         Ok(rows)
     }
 
+    /// List all accounts with full details (admin)
+    pub async fn list_admin(pool: &PgPool) -> Result<Vec<AccountRow>> {
+        let rows = sqlx::query_as::<_, AccountRow>(
+            "SELECT account_id, plan_id, active, balance_kopecks, payment_method, tg_id, email,
+                    totp_secret, totp_enabled, last_login, activated_at, expires_at, cycle_start, created_at, updated_at
+             FROM accounts ORDER BY created_at DESC",
+        )
+        .fetch_all(pool)
+        .await?;
+        Ok(rows)
+    }
+
     /// Count accounts by plan
     pub async fn count_by_plan(pool: &PgPool) -> Result<Vec<(String, i64)>> {
         let rows = sqlx::query_as::<_, (String, i64)>(
@@ -185,6 +202,18 @@ impl AccountRepo {
         Ok(())
     }
 
+    /// Update account email
+    pub async fn update_email(pool: &PgPool, account_id: &str, email: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE accounts SET email = $2, updated_at = NOW() WHERE account_id = $1",
+        )
+        .bind(account_id)
+        .bind(email)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     /// Get account by Telegram ID
     pub async fn get_by_tg_id(pool: &PgPool, tg_id: i64) -> Result<Option<AccountRow>> {
         let row = sqlx::query_as::<_, AccountRow>(
@@ -212,6 +241,51 @@ impl AccountRepo {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Account disappeared after create"))
     }
+
+    /// Get TOTP secret and enabled status for an account
+    pub async fn get_totp(pool: &PgPool, account_id: &str) -> Result<(bool, Option<String>)> {
+        let row = sqlx::query_as::<_, (bool, Option<String>)>(
+            "SELECT totp_enabled, totp_secret FROM accounts WHERE account_id = $1",
+        )
+        .bind(account_id)
+        .fetch_optional(pool)
+        .await?;
+        Ok(row.map(|(e, s)| (e, s)).unwrap_or((false, None)))
+    }
+
+    /// Set TOTP secret for an account
+    pub async fn set_totp_secret(pool: &PgPool, account_id: &str, secret: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE accounts SET totp_secret = $1, updated_at = NOW() WHERE account_id = $2",
+        )
+        .bind(secret)
+        .bind(account_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Enable TOTP for an account
+    pub async fn enable_totp(pool: &PgPool, account_id: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE accounts SET totp_enabled = TRUE, updated_at = NOW() WHERE account_id = $1",
+        )
+        .bind(account_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Disable TOTP for an account
+    pub async fn disable_totp(pool: &PgPool, account_id: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE accounts SET totp_enabled = FALSE, totp_secret = NULL, updated_at = NOW() WHERE account_id = $1",
+        )
+        .bind(account_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -229,6 +303,8 @@ mod tests {
             payment_method: Some("card".into()),
             tg_id: None,
             email: None,
+            totp_secret: None,
+            totp_enabled: false,
             last_login: None,
             activated_at: now,
             expires_at: Some(now + Duration::days(30)),
@@ -276,6 +352,8 @@ mod tests {
             payment_method: None,
             tg_id: None,
             email: None,
+            totp_secret: None,
+            totp_enabled: false,
             last_login: None,
             activated_at: now,
             expires_at: None,

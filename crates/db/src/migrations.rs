@@ -344,6 +344,19 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_lc_expires ON linking_codes(expires_at) WHERE used_at IS NULL
         "#,
         ),
+        (
+            "018_accounts_totp",
+            r#"
+            ALTER TABLE accounts ADD COLUMN IF NOT EXISTS totp_secret TEXT;
+            ALTER TABLE accounts ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE
+        "#,
+        ),
+        (
+            "019_accounts_admin",
+            r#"
+            ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_admin boolean NOT NULL DEFAULT false
+        "#,
+        ),
     ]
 }
 
@@ -354,7 +367,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 17);
+        assert_eq!(migrations.len(), 19);
     }
 
     #[test]
@@ -378,6 +391,7 @@ mod tests {
             "015_email_queue",
             "016_user_notification_channels",
             "017_linking_codes",
+            "018_accounts_totp",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(

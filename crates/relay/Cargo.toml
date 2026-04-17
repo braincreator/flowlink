@@ -46,6 +46,8 @@ notify = "7"
 teloxide = { version = "0.14", features = ["macros"], optional = true }
 jsonwebtoken = "9"
 url = "2"
+totp-rs = { version = "5", default-features = false, features = ["gen_secret", "otpauth"] }
+base64 = "0.22"
 lettre = { version = "0.11", features = ["tokio1-native-tls", "builder"] }
 
 [dev-dependencies]

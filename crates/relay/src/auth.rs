@@ -81,6 +81,8 @@ pub struct Claims {
     pub email: Option<String>,
     /// Name
     pub name: Option<String>,
+    /// Is admin
+    pub is_admin: bool,
     /// Issued at
     pub iat: i64,
     /// Expiration
@@ -136,26 +138,45 @@ pub struct TokenPair {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: i64,
+    pub session_id: String,
 }
 
 // ---------------------------------------------------------------------------
 // Auth engine
 // ---------------------------------------------------------------------------
 
+/// Active session tracking
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionInfo {
+    pub session_id: String,
+    pub account_id: String,
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+    pub created_at: i64,
+    pub last_seen: i64,
+    pub email: Option<String>,
+    pub name: Option<String>,
+}
+
 pub struct AuthEngine {
     config: AuthConfig,
     db: PgPool,
     /// PKCE code_verifier storage: state -> code_verifier
     pkce_store: Arc<DashMap<String, String>>,
+    /// Token blacklist: token -> expiry instant
+    token_blacklist: Arc<DashMap<String, std::time::Instant>>,
+    /// Active sessions: account_id -> Vec<SessionInfo>
+    sessions: Arc<DashMap<String, Vec<SessionInfo>>>,
 }
 
 impl AuthEngine {
     pub fn new(config: AuthConfig, db: PgPool) -> Self {
-        Self { config, db, pkce_store: Arc::new(DashMap::new()) }
+        Self { config, db, pkce_store: Arc::new(DashMap::new()), token_blacklist: Arc::new(DashMap::new()), sessions: Arc::new(DashMap::new()) }
     }
 
-    /// Generate JWT access + refresh token pair
-    pub fn create_tokens(&self, user_id: &str, account_id: &str, email: Option<&str>, name: Option<&str>) -> Result<TokenPair> {
+    /// Generate JWT access + refresh token pair.
+    /// If is_admin is None, queries the DB.
+    pub fn create_tokens(&self, user_id: &str, account_id: &str, email: Option<&str>, name: Option<&str>, is_admin: bool) -> Result<TokenPair> {
         let now = Utc::now();
         let access_exp = now + Duration::minutes(self.config.access_token_ttl_min);
         let refresh_exp = now + Duration::days(self.config.refresh_token_ttl_days);
@@ -165,6 +186,7 @@ impl AuthEngine {
             account_id: account_id.to_string(),
             email: email.map(|s| s.to_string()),
             name: name.map(|s| s.to_string()),
+            is_admin,
             iat: now.timestamp(),
             exp: access_exp.timestamp(),
         };
@@ -181,6 +203,7 @@ impl AuthEngine {
             account_id: account_id.to_string(),
             email: None,
             name: None,
+            is_admin,
             iat: now.timestamp(),
             exp: refresh_exp.timestamp(),
         };
@@ -191,15 +214,20 @@ impl AuthEngine {
             &EncodingKey::from_secret(self.config.jwt_secret.as_bytes()),
         )?;
 
+        let session_id = Uuid::new_v4().to_string();
         Ok(TokenPair {
             access_token,
             refresh_token,
             expires_in: self.config.access_token_ttl_min * 60,
+            session_id,
         })
     }
 
-    /// Validate access token and return claims
+    /// Validate access token (with blacklist check)
     pub fn validate_access_token(&self, token: &str) -> Result<Claims> {
+        if self.token_blacklist.contains_key(token) {
+            return Err(anyhow::anyhow!("Token has been revoked"));
+        }
         let token_data = decode::<Claims>(
             token,
             &DecodingKey::from_secret(self.config.jwt_secret.as_bytes()),
@@ -208,14 +236,76 @@ impl AuthEngine {
         Ok(token_data.claims)
     }
 
-    /// Validate refresh token
+    /// Validate refresh token (with blacklist check)
     pub fn validate_refresh_token(&self, token: &str) -> Result<Claims> {
+        if self.token_blacklist.contains_key(token) {
+            return Err(anyhow::anyhow!("Token has been revoked"));
+        }
         let token_data = decode::<Claims>(
             token,
             &DecodingKey::from_secret(self.config.jwt_secret.as_bytes()),
             &Validation::default(),
         )?;
         Ok(token_data.claims)
+    }
+
+    /// Add token to blacklist (revokes it)
+    pub fn blacklist_token(&self, token: &str) {
+        self.token_blacklist.insert(token.to_string(), std::time::Instant::now() + std::time::Duration::from_secs(30 * 24 * 3600));
+        if self.token_blacklist.len() > 10000 {
+            let now = std::time::Instant::now();
+            self.token_blacklist.retain(|_, exp| *exp > now);
+        }
+    }
+
+    // ---- Session management ----
+
+    /// Register a new session for an account
+    pub fn create_session(&self, account_id: &str, session_id: &str, ip: Option<&str>, user_agent: Option<&str>, email: Option<&str>, name: Option<&str>) {
+        let now = Utc::now().timestamp();
+        let session = SessionInfo {
+            session_id: session_id.to_string(),
+            account_id: account_id.to_string(),
+            ip: ip.map(|s| s.to_string()),
+            user_agent: user_agent.map(|s| s.to_string()),
+            created_at: now,
+            last_seen: now,
+            email: email.map(|s| s.to_string()),
+            name: name.map(|s| s.to_string()),
+        };
+        let mut sessions = self.sessions.entry(account_id.to_string()).or_default();
+        // Keep max 20 sessions per account
+        sessions.retain(|s| s.session_id != session_id);
+        sessions.push(session);
+        sessions.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
+        sessions.truncate(20);
+    }
+
+    /// List sessions for an account
+    pub fn list_sessions(&self, account_id: &str) -> Vec<SessionInfo> {
+        self.sessions.get(account_id).map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// Revoke a specific session
+    pub fn revoke_session(&self, account_id: &str, session_id: &str) -> bool {
+        let mut sessions = match self.sessions.get_mut(account_id) {
+            Some(s) => s,
+            None => return false,
+        };
+        let before = sessions.len();
+        sessions.retain(|s| s.session_id != session_id);
+        sessions.len() < before
+    }
+
+    /// Revoke all sessions except the current one
+    pub fn revoke_other_sessions(&self, account_id: &str, keep_session_id: &str) -> usize {
+        let mut sessions = match self.sessions.get_mut(account_id) {
+            Some(s) => s,
+            None => return 0,
+        };
+        let before = sessions.len();
+        sessions.retain(|s| s.session_id == keep_session_id);
+        before - sessions.len()
     }
 
     // ---- OAuth flows ----
