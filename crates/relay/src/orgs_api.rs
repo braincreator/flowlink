@@ -111,6 +111,7 @@ fn json_member(row: &OrgMemberRow) -> Value {
         "id": row.id,
         "org_id": row.org_id,
         "account_id": row.account_id,
+        "email": row.email,
         "role": row.role,
         "invited_by": row.invited_by,
         "joined_at": row.joined_at,

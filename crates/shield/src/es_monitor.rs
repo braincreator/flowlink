@@ -42,6 +42,7 @@ pub struct EsMonitor {
 }
 
 impl EsMonitor {
+    #[allow(dead_code)]
     pub fn new(config: EsConfig) -> Self {
         Self {
             config,
@@ -146,6 +147,7 @@ impl ProcessMonitor for EsMonitor {
 
 /// Create an ES monitor, falling back to None if ES is unavailable.
 /// This is the recommended way to create the monitor.
+#[allow(dead_code)]
 pub fn try_create_es_monitor(config: EsConfig) -> Option<EsMonitor> {
     let mut monitor = EsMonitor::new(config);
     match monitor.start(Box::new(|_| {})) {

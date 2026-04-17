@@ -29,6 +29,7 @@ pub struct OrgMemberRow {
     pub invited_by: Option<String>,
     pub joined_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -112,7 +113,10 @@ impl OrgRepo {
 
     pub async fn list_members(pool: &PgPool, org_id: Uuid) -> Result<Vec<OrgMemberRow>> {
         let rows = sqlx::query_as::<_, OrgMemberRow>(
-            "SELECT * FROM org_members WHERE org_id = $1 ORDER BY joined_at"
+            "SELECT om.id, om.org_id, om.account_id, om.role, om.invited_by, om.joined_at, om.created_at, a.email
+             FROM org_members om
+             LEFT JOIN accounts a ON a.account_id = om.account_id
+             WHERE om.org_id = $1 ORDER BY om.joined_at"
         )
         .bind(org_id).fetch_all(pool).await?;
         Ok(rows)
