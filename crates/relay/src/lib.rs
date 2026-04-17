@@ -28,6 +28,7 @@ pub mod email_queue;
 pub mod preferences_api;
 pub mod notifications_api;
 pub mod orgs_api;
+pub mod webhooks_api;
 pub mod dashboard;
 
 pub mod config_reload;
@@ -185,6 +186,7 @@ impl Relay {
         };
 
         let state = AppState {
+            start_time: std::time::Instant::now(),
             pool, approvals, eventbus, handler, registry,
             device_manager: Arc::new(DeviceManager::new(devices::PushConfig::default())),
             llm_proxy,

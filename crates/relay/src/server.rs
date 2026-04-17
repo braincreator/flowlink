@@ -36,6 +36,7 @@ use crate::audit::{AuditStore, AuditFilter, SiemFormat};
 
 #[derive(Clone)]
 pub struct AppState {
+    pub start_time: std::time::Instant,
     pub pool: Arc<AgentPool>,
     pub approvals: Arc<ApprovalQueue>,
     pub eventbus: Arc<EventBus>,
@@ -72,7 +73,10 @@ pub struct AppState {
 #[derive(Serialize)]
 struct HealthResponse {
     status: String,
-    agents: usize,
+    version: String,
+    uptime_seconds: u64,
+    db: String,
+    timestamp: String,
 }
 
 #[derive(Serialize)]
@@ -203,9 +207,22 @@ impl ShieldAlertManager {
 // ═══════════════════════════════════════════════
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    let db_status = match &state.db {
+        Some(pool) => match sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(pool.pool()).await {
+            Ok(_) => "ok".to_string(),
+            Err(e) => {
+                log::error!("Health DB check failed: {}", e);
+                "error".to_string()
+            }
+        },
+        None => "disabled".to_string(),
+    };
     Json(HealthResponse {
         status: "ok".to_string(),
-        agents: state.pool.count(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        uptime_seconds: state.start_time.elapsed().as_secs(),
+        db: db_status,
+        timestamp: chrono::Utc::now().to_rfc3339(),
     })
 }
 
@@ -1534,11 +1551,13 @@ pub fn build_router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth))
         .layer(axum::middleware::from_fn(|req: axum::extract::Request, next: axum::middleware::Next| {
             async move {
+                // Dev mode: no claims in extensions means jwt_auth was skipped (no auth_engine)
                 // RBAC: extract claims from extensions (set by jwt_auth middleware)
                 let claims = req.extensions().get::<crate::auth::Claims>();
                 match claims {
                     Some(c) if c.is_admin => next.run(req).await,
-                    _ => axum::http::StatusCode::FORBIDDEN.into_response(),
+                    Some(_) => axum::http::StatusCode::FORBIDDEN.into_response(),
+                    None => next.run(req).await, // dev mode — no auth_engine, allow
                 }
             }
         }));
@@ -1553,18 +1572,46 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/invites", axum::routing::get(crate::orgs_api::list_invites).post(crate::orgs_api::invite_member))
         .route("/api/orgs/invites/accept", axum::routing::post(crate::orgs_api::accept_invite))
         .route("/api/orgs/{org_id}/members/{account_id}", axum::routing::delete(crate::orgs_api::remove_member).patch(crate::orgs_api::change_member_role))
+        // Audit log + Webhooks
+        .route("/api/orgs/{org_id}/audit", axum::routing::get(crate::webhooks_api::list_org_audit))
+        .route("/api/orgs/{org_id}/webhooks", axum::routing::get(crate::webhooks_api::list_webhooks).post(crate::webhooks_api::create_webhook))
+        .route("/api/orgs/{org_id}/webhooks/{id}", axum::routing::delete(crate::webhooks_api::delete_webhook))
+        .route("/api/orgs/{org_id}/webhooks/{id}/test", axum::routing::post(crate::webhooks_api::test_webhook))
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
-    Router::new()
+    let api_routes = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
         .merge(admin_routes)
-        .merge(org_routes)
+        .merge(org_routes);
+
+    Router::new()
+        .merge(api_routes)
         // Dashboard SPA (stateless routes)
         .route("/dashboard", get(crate::dashboard::serve_dashboard_root))
         .route("/dashboard/", get(crate::dashboard::serve_dashboard_root))
         .route("/dashboard/{*path}", get(crate::dashboard::serve_dashboard))
         .with_state(state)
+        // API versioning: rewrite /api/v1/* → /api/*
+        .layer(axum::middleware::from_fn(
+            |req: axum::extract::Request, next: axum::middleware::Next| async move {
+                let path = req.uri().path().to_string();
+                if let Some(rest) = path.strip_prefix("/api/v1") {
+                    let new_path = if rest.is_empty() { "/api".to_string() } else { format!("/api{}", rest) };
+                    let new_uri = if let Some(q) = req.uri().query() {
+                        format!("{}?{}", new_path, q).parse::<axum::http::Uri>().unwrap()
+                    } else {
+                        new_path.parse::<axum::http::Uri>().unwrap()
+                    };
+                    let (mut parts, body) = req.into_parts();
+                    parts.uri = new_uri;
+                    let new_req: axum::extract::Request = axum::http::Request::from_parts(parts, body);
+                    next.run(new_req).await
+                } else {
+                    next.run(req).await
+                }
+            }
+        ))
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))
         .layer(axum::middleware::from_fn(request_id_middleware))
@@ -1596,6 +1643,7 @@ mod tests {
 
     fn test_state() -> AppState {
         AppState {
+            start_time: std::time::Instant::now(),
             pool: Arc::new(AgentPool::new()),
             approvals: Arc::new(ApprovalQueue::new()),
             eventbus: Arc::new(EventBus::new()),
@@ -1639,7 +1687,7 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["status"], "ok");
-        assert_eq!(json["agents"], 0);
+        assert_eq!(json["db"], "disabled");
     }
 
     #[tokio::test]

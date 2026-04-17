@@ -27,5 +27,6 @@ pub mod pool;
 pub mod subscriptions;
 pub mod orgs;
 pub mod usage;
+pub mod webhooks;
 
 pub use pool::DbPool;

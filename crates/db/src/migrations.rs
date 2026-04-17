@@ -437,6 +437,28 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             ALTER TABLE organizations ADD COLUMN IF NOT EXISTS grace_ends_at TIMESTAMPTZ;
         "#,
         ),
+        (
+            "027_audit_org_columns_and_webhooks",
+            r#"
+            ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS org_id TEXT;
+            ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS resource_type TEXT;
+            ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS resource_id TEXT;
+            ALTER TABLE audit_log RENAME COLUMN source_ip TO ip_address;
+            CREATE INDEX IF NOT EXISTS idx_audit_org ON audit_log(org_id, timestamp DESC);
+
+            CREATE TABLE IF NOT EXISTS webhooks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id TEXT NOT NULL REFERENCES organizations(org_id),
+                url TEXT NOT NULL,
+                secret TEXT NOT NULL,
+                events TEXT[] NOT NULL DEFAULT '{}',
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_triggered_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_webhooks_org ON webhooks(org_id);
+        "#,
+        ),
     ]
 }
 
@@ -447,7 +469,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 26);
+        assert_eq!(migrations.len(), 27);
     }
 
     #[test]
@@ -480,6 +502,7 @@ mod tests {
             "024_subscriptions_org_and_trial",
             "025_accounts_pending_email",
             "026_organizations_grace_period",
+            "027_audit_org_columns_and_webhooks",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(

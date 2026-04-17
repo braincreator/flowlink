@@ -1388,8 +1388,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "hmac",
+ "log",
+ "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tracing",

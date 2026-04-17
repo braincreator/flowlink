@@ -73,7 +73,7 @@ fn get_db(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, Json<Value>)> 
         .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "database not configured"}))))
 }
 
-async fn require_org_role(
+pub async fn require_org_role(
     pool: &sqlx::PgPool,
     org_id: Uuid,
     account_id: &str,

@@ -1,16 +1,45 @@
 use axum::response::Response;
 use axum::http::StatusCode;
 
-/// GET /dashboard - serve index.html
+/// GET /dashboard - serve index.html with deprecation banner
 pub async fn serve_dashboard_root() -> Response {
-    serve_file("index.html")
+    serve_file_with_banner("index.html")
 }
 
 /// GET /dashboard/* - serve static dashboard files (SPA with index.html fallback)
 pub async fn serve_dashboard(
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Response {
-    serve_file(&path)
+    if path == "index.html" {
+        serve_file_with_banner("index.html")
+    } else {
+        serve_file(&path)
+    }
+}
+
+const DEPRECATION_BANNER: &str = r#"<div style="background:#2563eb;color:#fff;text-align:center;padding:10px 20px;font-family:system-ui,sans-serif;font-size:14px;">
+  ⚠️ Этот интерфейс устарел. Новый интерфейс доступен на <a href="https://flowlink.flow-masters.ru" style="color:#fff;text-decoration:underline;font-weight:bold;">flowlink.flow-masters.ru</a>
+</div>"#;
+
+fn serve_file_with_banner(path: &str) -> Response {
+    let dashboard_dir = std::path::Path::new("/opt/flowlink/dashboard");
+    let file_path = dashboard_dir.join(path);
+
+    if let Ok(content) = std::fs::read(&file_path) {
+        let html = String::from_utf8_lossy(&content);
+        let modified = html.replacen("<body", &format!("<body\n{}\n", DEPRECATION_BANNER), 1);
+
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html")
+            .body(axum::body::Body::from(modified))
+            .unwrap_or_else(|_| Response::new(axum::body::Body::from("Internal error")));
+
+        log::info!("Served dashboard file (with banner): {}", path);
+        return response;
+    }
+
+    serve_file(path)
 }
 
 fn serve_file(path: &str) -> Response {

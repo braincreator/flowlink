@@ -36,6 +36,84 @@ pub struct AuditFilter {
 
 pub struct AuditRepo;
 
+/// High-level helper: log an org-scoped audit event.
+pub async fn log_event(
+    pool: &PgPool,
+    org_id: Option<&str>,
+    account_id: &str,
+    action: &str,
+    resource_type: Option<&str>,
+    resource_id: Option<&str>,
+    details: serde_json::Value,
+    ip: Option<&str>,
+) -> Result<i64> {
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO audit_log (org_id, account_id, action, resource_type, resource_id, details, ip_address)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id",
+    )
+    .bind(org_id)
+    .bind(account_id)
+    .bind(action)
+    .bind(resource_type)
+    .bind(resource_id)
+    .bind(details)
+    .bind(ip)
+    .fetch_one(pool)
+    .await?;
+    Ok(id)
+}
+
+/// Query org audit log (paginated, with optional action filter).
+pub async fn query_org_audit(
+    pool: &PgPool,
+    org_id: &str,
+    page: i64,
+    limit: i64,
+    action_filter: Option<&str>,
+) -> Result<(Vec<OrgAuditRow>, i64)> {
+    let offset = (page - 1) * limit;
+    let where_clause = match action_filter {
+        Some(_a) => format!("WHERE org_id = $1 AND action = $2"),
+        None => "WHERE org_id = $1".to_string(),
+    };
+    let count_sql = format!("SELECT COUNT(*) FROM audit_log {}", where_clause);
+    let data_sql = format!(
+        "SELECT id, org_id, account_id, action, resource_type, resource_id, details, ip_address, timestamp
+         FROM audit_log {} ORDER BY timestamp DESC LIMIT ${} OFFSET ${}",
+        where_clause,
+        if action_filter.is_some() { 4 } else { 3 },
+        if action_filter.is_some() { 5 } else { 4 },
+    );
+
+    let count: i64 = if let Some(a) = action_filter {
+        sqlx::query_scalar(&count_sql).bind(org_id).bind(a).fetch_one(pool).await?
+    } else {
+        sqlx::query_scalar(&count_sql).bind(org_id).fetch_one(pool).await?
+    };
+
+    let mut query = sqlx::query_as::<_, OrgAuditRow>(&data_sql).bind(org_id);
+    if let Some(a) = action_filter {
+        query = query.bind(a);
+    }
+    query = query.bind(limit).bind(offset);
+    let rows = query.fetch_all(pool).await?;
+    Ok((rows, count))
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct OrgAuditRow {
+    pub id: i64,
+    pub org_id: Option<String>,
+    pub account_id: String,
+    pub action: String,
+    pub resource_type: Option<String>,
+    pub resource_id: Option<String>,
+    pub details: Option<serde_json::Value>,
+    pub ip_address: Option<String>,
+    pub timestamp: DateTime<Utc>,
+}
+
 /// Build the WHERE clause and return the number of filter bindings used.
 /// This is pure logic, testable without a database.
 pub fn build_where_clause(filter: &AuditFilter) -> (String, u32) {

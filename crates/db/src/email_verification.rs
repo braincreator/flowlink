@@ -62,6 +62,19 @@ impl EmailVerificationRepo {
         Ok(account_id)
     }
 
+    /// Delete all expired and used codes older than `max_age_minutes`.
+    /// Designed for periodic cron cleanup.
+    pub async fn cleanup_expired(pool: &PgPool, max_age_minutes: i64) -> Result<u64> {
+        let result = sqlx::query(
+            "DELETE FROM email_verification_codes
+             WHERE expires_at < NOW() - INTERVAL '1 minute' * $1"
+        )
+        .bind(max_age_minutes)
+        .execute(pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     /// Check rate limit: returns true if a new code can be sent (no code in the last minute)
     pub async fn check_rate_limit(pool: &PgPool, email: &str, purpose: &str) -> Result<bool> {
         let count: i64 = sqlx::query_scalar(
