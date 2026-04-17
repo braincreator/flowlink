@@ -1,24 +1,69 @@
-// Auth rate-limit middleware — wraps axum routes to enforce IP-based brute-force protection.
+// Auth rate-limit middleware — wraps axum routes with tiered, plan-aware brute-force protection.
+// Uses the unified TieredRateLimiter with internal bypass and plan-based limits.
 
 use axum::{
     body::Body,
     extract::Request,
-    http::{StatusCode, header},
+    http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Json, Response},
 };
 
-use crate::auth_rate_limiter;
+use crate::rate_limiter::{
+    extract_client_ip, is_internal_request, RateLimitCategory, RateLimitTier,
+    FREE_TIER, STARTER_TIER,
+};
 use crate::server::AppState;
 
+/// Resolve rate limit tier from request parts headers.
+fn resolve_tier_from_parts(parts: &axum::http::request::Parts) -> &'static RateLimitTier {
+    if parts.headers.get(header::AUTHORIZATION).is_some() {
+        &STARTER_TIER
+    } else {
+        &FREE_TIER
+    }
+}
+
+/// Extract client IP from request parts.
+fn extract_client_ip_from_parts(parts: &axum::http::request::Parts) -> String {
+    if let Some(forwarded) = parts.headers.get("forwarded") {
+        if let Ok(val) = forwarded.to_str() {
+            for part in val.split(';') {
+                let part = part.trim();
+                if let Some(ip) = part.strip_prefix("for=") {
+                    let ip = ip.trim();
+                    let ip = ip.trim_matches('"').split(':').next().unwrap_or(ip);
+                    return ip.to_string();
+                }
+            }
+        }
+    }
+    if let Some(xff) = parts.headers.get("x-forwarded-for") {
+        if let Ok(val) = xff.to_str() {
+            if let Some(ip) = val.split(',').next() {
+                return ip.trim().to_string();
+            }
+        }
+    }
+    if let Some(real_ip) = parts.headers.get("x-real-ip") {
+        if let Ok(val) = real_ip.to_str() {
+            return val.trim().to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
 /// Apply rate limits for email auth endpoints (send-code, verify-code).
-/// Limits: 5 attempts per email/5min, 10 attempts per IP/5min.
+/// Uses plan-based limits when JWT present, FREE tier for anonymous.
+/// Internal requests are bypassed.
 pub async fn email_auth_rate_limit(
     axum::extract::State(state): axum::extract::State<AppState>,
     req: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let ip = auth_rate_limiter::extract_client_ip(&req);
+    if is_internal_request(&req) {
+        return next.run(req).await;
+    }
 
     let (parts, body) = req.into_parts();
     let bytes = match axum::body::to_bytes(body, 64 * 1024).await {
@@ -32,23 +77,26 @@ pub async fn email_auth_rate_limit(
         }
     };
 
-    let email_key = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(v) => v
-            .get("email")
-            .and_then(|e| e.as_str())
-            .map(|e| format!("auth_email:{e}"))
-            .unwrap_or_default(),
+    let email = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(v) => v.get("email").and_then(|e| e.as_str()).unwrap_or("").to_string(),
         Err(_) => String::new(),
     };
 
-    let rl = &state.auth_rate_limiter;
+    // Resolve tier from original headers (before body consumption)
+    let tier = resolve_tier_from_parts(&parts);
+    let ip = extract_client_ip_from_parts(&parts);
+    let rl = &state.tiered_rate_limiter;
+
     let mut worst_retry = 0u64;
 
-    if let Err(secs) = rl.check(&format!("auth_ip:{ip}"), 10, 300) {
+    // IP-based check (auth category)
+    if let Err(secs) = rl.check_tiered(&ip, RateLimitCategory::AuthLogin, tier) {
         worst_retry = worst_retry.max(secs);
     }
-    if !email_key.is_empty() {
-        if let Err(secs) = rl.check(&email_key, 5, 300) {
+
+    // Email-based check
+    if !email.is_empty() {
+        if let Err(secs) = rl.check_tiered(&email, RateLimitCategory::AuthLogin, tier) {
             worst_retry = worst_retry.max(secs);
         }
     }
@@ -70,16 +118,25 @@ pub async fn email_auth_rate_limit(
 }
 
 /// Apply rate limits for change-email endpoint.
-/// Limits: 10 attempts per IP per hour.
+/// Uses plan-based limits; internal requests bypassed.
 pub async fn change_email_rate_limit(
     axum::extract::State(state): axum::extract::State<AppState>,
     req: axum::extract::Request,
     next: Next,
 ) -> Response {
-    let ip = auth_rate_limiter::extract_client_ip(&req);
-    let rl = &state.auth_rate_limiter;
+    if is_internal_request(&req) {
+        return next.run(req).await;
+    }
 
-    if let Err(secs) = rl.check(&format!("change_email:ip:{ip}"), 10, 3600) {
+    let ip = extract_client_ip(&req);
+    let tier = if req.headers().get(header::AUTHORIZATION).is_some() {
+        &STARTER_TIER
+    } else {
+        &FREE_TIER
+    };
+    let rl = &state.tiered_rate_limiter;
+
+    if let Err(secs) = rl.check_tiered(&ip, RateLimitCategory::EmailChange, tier) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             [(header::RETRY_AFTER, secs.to_string())],

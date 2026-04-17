@@ -8,6 +8,7 @@ pub mod approval;
 pub mod ratelimit;
 pub mod auth_rate_limiter;
 pub mod auth_rate_middleware;
+pub mod rate_limiter;
 pub mod audit;
 pub mod registry;
 pub mod llm;
@@ -275,6 +276,7 @@ impl Relay {
             notification_store: Some(Arc::new(crate::preferences_api::NotificationStore::new())),
             rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
             auth_rate_limiter: Arc::new(crate::auth_rate_limiter::AuthRateLimiter::new()),
+            tiered_rate_limiter: Arc::new(crate::rate_limiter::TieredRateLimiter::new()),
         };
 
         // Email queue worker (requires both email_service and db)
@@ -283,7 +285,8 @@ impl Relay {
                 email_svc.clone(),
                 db_pool.pool().clone(),
             ));
-            queue.clone().start_worker();
+            let tiered_rl = state.tiered_rate_limiter.clone();
+            queue.clone().start_worker(move || tiered_rl.cleanup());
             let _ = state.email_queue.set(queue);
             log::info!("📧 Email queue initialized");
         }

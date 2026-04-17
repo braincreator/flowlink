@@ -64,6 +64,7 @@ pub struct AppState {
     pub notification_store: Option<Arc<crate::preferences_api::NotificationStore>>,
     pub rbac: Arc<crate::rbac_manager::RbacManager>,
     pub auth_rate_limiter: Arc<crate::auth_rate_limiter::AuthRateLimiter>,
+    pub tiered_rate_limiter: Arc<crate::rate_limiter::TieredRateLimiter>,
 }
 
 // ═══════════════════════════════════════════════
@@ -77,6 +78,8 @@ struct HealthResponse {
     uptime_seconds: u64,
     db: String,
     timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rate_limits: Option<crate::rate_limiter::RateLimitStats>,
 }
 
 #[derive(Serialize)]
@@ -223,6 +226,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         uptime_seconds: state.start_time.elapsed().as_secs(),
         db: db_status,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        rate_limits: Some(state.tiered_rate_limiter.stats()),
     })
 }
 

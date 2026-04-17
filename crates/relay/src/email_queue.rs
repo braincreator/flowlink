@@ -283,8 +283,12 @@ impl EmailQueue {
         }
     }
 
-    /// Spawn a background worker that processes pending emails every 60 seconds
-    pub fn start_worker(self: Arc<Self>) {
+    /// Spawn a background worker that processes pending emails every 60 seconds.
+    /// Also calls `cleanup_fn` to purge expired rate-limit windows.
+    pub fn start_worker<F>(self: Arc<Self>, cleanup_fn: F)
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             // Skip first immediate tick
@@ -292,6 +296,7 @@ impl EmailQueue {
             loop {
                 interval.tick().await;
                 self.process_pending().await;
+                cleanup_fn();
             }
         });
         log::info!("📧 Email queue worker started (60s interval)");
