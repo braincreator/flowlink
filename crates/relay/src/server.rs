@@ -1400,6 +1400,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/plans", axum::routing::get(crate::billing_api::public_plans))
         // Billing webhook (external, needs no auth)
         .route("/api/billing/webhook/tochka", axum::routing::post(crate::billing_api::tochka_webhook))
+        // Billing expiry check (cron-callable, internal)
+        .route("/api/billing/check-expiry", axum::routing::post(crate::billing_api::check_expiry))
         // Shield ingest (external agent reporting)
         .route("/api/shield/ingest", post(shield_ingest_alert))
         // Audit ingest (external)
@@ -1499,7 +1501,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/sessions", axum::routing::delete(crate::auth_oauth::revoke_other_sessions))
         .route("/api/auth/sessions/{id}", axum::routing::delete(crate::auth_oauth::revoke_session))
         // Apply JWT auth + rate limiting to protected routes
-        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
+        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth))
+        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::billing_middleware::billing_enforcement_middleware));
 
     // ── Admin routes (require JWT auth + admin RBAC permission) ──
     let admin_routes = Router::new()

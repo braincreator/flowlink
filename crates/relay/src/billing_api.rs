@@ -1005,6 +1005,72 @@ pub async fn tochka_webhook(
     (StatusCode::OK, Json(json!({"ok": true}))).into_response()
 }
 
+/// POST /api/billing/check-expiry — cron-callable endpoint that processes expired trials/grace.
+/// Should be called daily. For orgs with expired trials: enters grace period.
+/// For orgs with expired grace: auto-downgrades to free plan.
+pub async fn check_expiry(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db,
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+
+    let now = chrono::Utc::now();
+    let mut processed = 0i64;
+    let mut errors = 0i64;
+    let mut grace_entered = 0i64;
+    let mut downgraded = 0i64;
+
+    // 1. Find orgs with expired trials but no grace period set yet
+    match sqlx::query(
+        "UPDATE organizations SET grace_ends_at = $2, is_trial = false, updated_at = NOW() WHERE is_trial = true AND trial_ends_at IS NOT NULL AND trial_ends_at < $1 AND grace_ends_at IS NULL"
+    )
+    .bind(now)
+    .bind(now + chrono::Duration::days(3))
+    .execute(db.pool())
+    .await
+    {
+        Ok(result) => {
+            grace_entered = result.rows_affected() as i64;
+            processed += grace_entered;
+        }
+        Err(e) => {
+            log::error!("check_expiry: failed to set grace period: {e}");
+            errors += 1;
+        }
+    }
+
+    // 2. Find orgs with expired grace periods — auto-downgrade to free
+    match sqlx::query(
+        "UPDATE organizations SET plan_id = 'free', grace_ends_at = NULL, updated_at = NOW() WHERE grace_ends_at IS NOT NULL AND grace_ends_at < $1 AND plan_id != 'free'"
+    )
+    .bind(now)
+    .execute(db.pool())
+    .await
+    {
+        Ok(result) => {
+            downgraded = result.rows_affected() as i64;
+            processed += downgraded;
+        }
+        Err(e) => {
+            log::error!("check_expiry: failed to auto-downgrade: {e}");
+            errors += 1;
+        }
+    }
+
+    log::info!(
+        "check_expiry: processed={processed}, grace_entered={grace_entered}, downgraded={downgraded}, errors={errors}"
+    );
+
+    (StatusCode::OK, Json(json!({
+        "processed": processed,
+        "grace_entered": grace_entered,
+        "downgraded": downgraded,
+        "errors": errors,
+    }))).into_response()
+}
+
 /// GET /api/v1/account/tg-link-code — generate a link code for Telegram binding
 /// Returns the account_id as the code (user sends /start <code> in TG bot)
 pub async fn tg_link_code(

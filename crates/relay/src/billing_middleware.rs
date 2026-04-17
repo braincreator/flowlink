@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
+use axum::extract::State;
+use axum::response::IntoResponse;
 
 // ═══════════════════════════════════════════════
 // Per-agent usage counters
@@ -175,6 +177,123 @@ pub fn extract_tokens_from_payload(payload: &serde_json::Value) -> (u64, u64) {
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     (tokens_in, tokens_out)
+}
+
+// ═══════════════════════════════════════════════
+// Billing enforcement for relay proxy requests
+// ═══════════════════════════════════════════════
+
+/// Paths that should skip billing enforcement checks.
+const BILLING_SKIP_PREFIXES: &[&str] = &[
+    "/api/billing",
+    "/api/auth",
+    "/api/admin",
+    "/api/orgs",
+    "/api/account",
+    "/api/plans",
+    "/health",
+    "/healthz",
+    "/metrics",
+    "/ws",
+    "/mcp",
+    "/dashboard",
+    "/api/events",
+    "/api/shield/ingest",
+    "/api/audit/event",
+    "/api/shield/canary",
+    "/api/devices",
+    "/api/notifications",
+    "/api/preferences",
+];
+
+/// Axum middleware function that enforces billing/grace-period restrictions on relay proxy requests.
+/// Must be applied as a layer with State = Arc<AppState>, matching the jwt_auth pattern.
+pub async fn billing_enforcement_middleware(
+    State(state): State<std::sync::Arc<crate::server::AppState>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let path = req.uri().path();
+
+    // Skip non-relay paths
+    for prefix in BILLING_SKIP_PREFIXES {
+        if path.starts_with(prefix) {
+            return next.run(req).await;
+        }
+    }
+
+    // Extract org_id from JWT claims if present
+    let db = match &state.db {
+        Some(db) => db,
+        None => return next.run(req).await,
+    };
+
+    let auth_header = req.headers().get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+
+    let org_id: Option<uuid::Uuid> = match (auth_header, &state.auth_engine) {
+        (Some(token), Some(engine)) => {
+            match engine.validate_access_token(token) {
+                Ok(claims) => claims.org_id.as_ref().and_then(|id| uuid::Uuid::parse_str(id).ok()),
+                Err(_) => return next.run(req).await,
+            }
+        }
+        _ => return next.run(req).await,
+    };
+
+    let org_id = match org_id {
+        Some(id) => id,
+        None => return next.run(req).await,
+    };
+
+    let org = match flowlink_db::orgs::OrgRepo::get(db.pool(), org_id).await {
+        Ok(Some(o)) => o,
+        _ => return next.run(req).await,
+    };
+
+    let now = chrono::Utc::now();
+    let method = req.method().clone();
+
+    if org.is_trial {
+        if let Some(trial_end) = org.trial_ends_at {
+            if trial_end <= now {
+                if let Some(grace_end) = org.grace_ends_at {
+                    if grace_end <= now {
+                        return (
+                            axum::http::StatusCode::FORBIDDEN,
+                            axum::Json(serde_json::json!({
+                                "error": "grace_period_expired",
+                                "message": "Пробный период и льготный период завершены. Пожалуйста, выберите тарифный план для продолжения работы.",
+                            })),
+                        ).into_response();
+                    }
+                    if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
+                        return (
+                            axum::http::StatusCode::FORBIDDEN,
+                            axum::Json(serde_json::json!({
+                                "error": "trial_expired",
+                                "grace_ends_at": grace_end.to_rfc3339(),
+                                "message": "Пробный период завершён. Вы можете продолжать работу 3 дня в режиме чтения.",
+                            })),
+                        ).into_response();
+                    }
+                } else {
+                    if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
+                        return (
+                            axum::http::StatusCode::FORBIDDEN,
+                            axum::Json(serde_json::json!({
+                                "error": "trial_expired",
+                                "message": "Пробный период завершён.",
+                            })),
+                        ).into_response();
+                    }
+                }
+            }
+        }
+    }
+
+    next.run(req).await
 }
 
 /// Returns today's date key in `YYYY-MM-DD` format (UTC).

@@ -15,6 +15,7 @@ pub struct OrgRow {
     pub limits: serde_json::Value,
     pub is_trial: bool,
     pub trial_ends_at: Option<DateTime<Utc>>,
+    pub grace_ends_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

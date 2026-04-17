@@ -100,6 +100,7 @@ fn json_row(row: &OrgRow) -> Value {
         "limits": row.limits,
         "is_trial": row.is_trial,
         "trial_ends_at": row.trial_ends_at,
+        "grace_ends_at": row.grace_ends_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     })
