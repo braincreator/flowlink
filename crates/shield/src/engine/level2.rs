@@ -215,6 +215,35 @@ fn check_raw_patterns(raw: &str) -> Option<Threat> {
         }
     }
 
+    // ── Data exfiltration via pipe to network ── HIGH
+    // cat file | curl -X POST -d @-  OR  cat file | curl --data @-
+    if (lower.contains("cat ") || lower.contains("cat\t")) && lower.contains("curl") && lower.contains("|" ) {
+        return Some(
+            Threat::high(
+                "data_exfil",
+                "Data Exfiltration",
+                "File contents piped to curl — potential data exfiltration to external server".into(),
+            )
+            .with_suggestion("Review the destination URL. Use environment variables or secrets manager instead of files"),
+        );
+    }
+    // cat /etc/shadow, cat .env, cat */secret*
+    if lower.starts_with("cat ") {
+        let sensitive = ["/etc/shadow", "/etc/passwd", ".env", "secret", "credential", "private_key", "id_rsa", "id_ed25519"];
+        for s in &sensitive {
+            if lower.contains(s) {
+                return Some(
+                    Threat::high(
+                        "sensitive_file_read",
+                        "Sensitive File Access",
+                        format!("Reading sensitive file ({}) — credentials may be exposed", s),
+                    )
+                    .with_suggestion("Use environment variables or secrets manager for sensitive data"),
+                );
+            }
+        }
+    }
+
     // ── Download + execute patterns ── CRITICAL
     if (lower.starts_with("curl") || lower.starts_with("wget")) && lower.contains('|') {
         return Some(

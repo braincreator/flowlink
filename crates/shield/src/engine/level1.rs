@@ -137,6 +137,43 @@ fn l1_docker(args: &[String]) -> Option<Threat> {
             "Docker Volume RM",
             "Removing volumes".into(),
         )),
+        "run" => {
+            let privileged = args.iter().any(|a| a == "--privileged");
+            let pid_host = args.iter().any(|a| a == "--pid=host" || a == "--pid host");
+            let net_host = args.iter().any(|a| a == "--network=host" || a == "--net=host");
+            // -v /:/host or -v /:/ — host root mounted. Check args for -v followed by path starting with /
+            let root_fs = args.windows(2).any(|w| w[0] == "-v" && w[1].starts_with('/'))
+                || args.iter().any(|a| a.starts_with("-v/") || a.contains(":/host"));
+            if privileged && (pid_host || root_fs) {
+                return Some(Threat::critical(
+                    "docker_escape",
+                    "Docker Container Escape",
+                    "Privileged container with host access — full system compromise possible".into(),
+                ).with_suggestion("Remove --privileged flag. Use --cap-drop=ALL with specific --cap-add as needed"));
+            }
+            if privileged {
+                return Some(Threat::high(
+                    "docker_privileged",
+                    "Privileged Docker Container",
+                    "Container runs with all host capabilities — security boundary removed".into(),
+                ).with_suggestion("Remove --privileged flag. Use specific --cap-add for needed capabilities"));
+            }
+            if root_fs {
+                return Some(Threat::high(
+                    "docker_host_mount",
+                    "Host Filesystem Mount",
+                    "Mounting host root filesystem into container — data exposure risk".into(),
+                ).with_suggestion("Use specific bind mounts instead of mounting /"));
+            }
+            if net_host {
+                return Some(Threat::warn(
+                    "docker_net_host",
+                    "Host Network Mode",
+                    "Container shares host network stack — can access all host ports".into(),
+                ));
+            }
+            None
+        }
         _ => None,
     }
 }

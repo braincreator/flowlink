@@ -49,20 +49,25 @@ fn scan_command(command: &str) -> axum::response::Response {
     let cmd = Command { binary: extract_binary(command), args: shell_words(command), raw: command.to_string() };
     let report = engine.analyze(&cmd);
     let result = match report.threat {
-        Some(t) => json!({
-            "type": "command",
-            "command": command,
-            "risk_level": level_str(&t.level),
-            "threat_id": t.id,
-            "threat_name": t.name,
-            "explanation": t.description,
-            "suggestion": t.suggestion,
-            "analysis_level": report.level_used,
-        }),
+        Some(t) => {
+            let score = level_score(&t.level);
+            json!({
+                "type": "command",
+                "command": command,
+                "risk_level": level_str(&t.level),
+                "threat_id": t.id,
+                "threat_name": t.name,
+                "explanation": t.description,
+                "suggestion": t.suggestion,
+                "score": score,
+                "analysis_level": report.level_used,
+            })
+        },
         None => json!({
             "type": "command",
             "command": command,
             "risk_level": "safe",
+            "score": 0,
             "analysis_level": 0,
         })
     };
@@ -147,11 +152,14 @@ fn scan_url(url: &str, purpose: &str) -> axum::response::Response {
 
 // Helpers
 fn extract_binary(cmd: &str) -> String { cmd.split_whitespace().next().unwrap_or("").to_string() }
-fn shell_words(cmd: &str) -> Vec<String> { cmd.split_whitespace().skip(1).map(|s| s.to_string()).collect() }
+fn shell_words(cmd: &str) -> Vec<String> { cmd.split_whitespace().map(|s| s.to_string()).collect() }
 fn risk_from_score(s: u32) -> &'static str { if s >= 75 { "danger" } else if s >= 50 { "warning" } else if s >= 25 { "low" } else { "safe" } }
 fn level_str(l: &ThreatLevel) -> &'static str {
     match l { ThreatLevel::Low => "warning", ThreatLevel::Medium => "warning", ThreatLevel::High => "danger", ThreatLevel::Critical => "critical" }
 }
 fn level_val(l: &ThreatLevel) -> u8 {
     match l { ThreatLevel::Low => 2, ThreatLevel::Medium => 3, ThreatLevel::High => 4, ThreatLevel::Critical => 5 }
+}
+fn level_score(l: &ThreatLevel) -> u32 {
+    match l { ThreatLevel::Low => 35, ThreatLevel::Medium => 55, ThreatLevel::High => 75, ThreatLevel::Critical => 100 }
 }
