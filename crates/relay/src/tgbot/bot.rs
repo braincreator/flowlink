@@ -346,6 +346,7 @@ async fn handle_callback(
                                 description: format!("FlowLink {}", new_p.name),
                                 start_date: None,
                                 trial_days: 0,
+                                customer_email: None,
                             };
 
                             match tochka.create_subscription(&req).await {

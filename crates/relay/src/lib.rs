@@ -234,12 +234,12 @@ impl Relay {
                 None
             },
             db,
-            tochka: if let (Some(client_id), Some(secret_key)) = (&self.config.billing.tochka_client_id, &self.config.billing.tochka_webhook_secret) {
+            tochka: if let (Some(jwt_token), Some(customer_code), Some(merchant_id)) = (&self.config.billing.tochka_jwt_token, &self.config.billing.tochka_customer_code, &self.config.billing.tochka_merchant_id) {
                 Some(Arc::new(flowlink_billing::tochka::TochkaClient::new(
                     flowlink_billing::payment::SbpConfig {
-                        terminal_key: client_id.clone(),
-                        secret_key: secret_key.clone(),
-                        payment_type_id: "SBP".to_string(),
+                        terminal_key: customer_code.clone(), // customer_code for API
+                        secret_key: jwt_token.clone(), // JWT token for auth
+                        payment_type_id: merchant_id.clone(), // merchantId for acquiring
                         callback_url: "https://flowlink.flow-masters.ru/api/billing/webhook/tochka".to_string(),
                         success_url: "https://flowlink.flow-masters.ru/billing/success".to_string(),
                         fail_url: "https://flowlink.flow-masters.ru/billing/fail".to_string(),

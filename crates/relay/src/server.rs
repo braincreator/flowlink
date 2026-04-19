@@ -1483,6 +1483,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/billing/invoices/{id}", axum::routing::get(crate::billing_api::get_invoice))
         .route("/api/billing/payments/methods", axum::routing::get(crate::billing_api::list_payment_methods))
         .route("/api/billing/subscribe", axum::routing::post(crate::billing_api::subscribe))
+        .route("/api/billing/create-payment", axum::routing::post(crate::billing_api::subscribe))
         .route("/api/billing/subscription", axum::routing::get(crate::billing_api::get_subscription))
         .route("/api/billing/subscription/pause", axum::routing::post(crate::billing_api::pause_subscription))
         .route("/api/billing/subscription/resume", axum::routing::post(crate::billing_api::resume_subscription))

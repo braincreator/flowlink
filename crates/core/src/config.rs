@@ -566,6 +566,12 @@ pub struct BillingConfig {
     /// Secret key для HMAC-верификации вебхуков
     #[serde(default)]
     pub tochka_webhook_secret: Option<String>,
+    /// Customer Code (бизнес) в Точка Банка (e.g. 305136914)
+    #[serde(default)]
+    pub tochka_customer_code: Option<String>,
+    /// Merchant ID в интернет-эквайринге (e.g. 200000000036224)
+    #[serde(default)]
+    pub tochka_merchant_id: Option<String>,
 }
 
 impl Default for BillingConfig {
@@ -577,6 +583,8 @@ impl Default for BillingConfig {
             tochka_jwt_token: None,
             tochka_client_id: None,
             tochka_webhook_secret: None,
+            tochka_customer_code: None,
+            tochka_merchant_id: None,
         }
     }
 }
@@ -681,7 +689,12 @@ impl RelayConfig {
         vault_set!("auth/github/client_secret", self.oauth.github.client_secret);
         vault_set!("billing/tochka_jwt_token", self.billing.tochka_jwt_token, Some);
         vault_set!("billing/tochka_webhook_secret", self.billing.tochka_webhook_secret, Some);
+        vault_set!("billing/tochka_customer_code", self.billing.tochka_customer_code, Some);
+        vault_set!("billing/tochka_merchant_id", self.billing.tochka_merchant_id, Some);
+        vault_set!("billing/tochka_client_id", self.billing.tochka_client_id, Some);
         vault_set!("smtp/password", self.smtp.password);
+        vault_set!("database/primary", self.database.primary, Some);
+        vault_set!("auth/vk/service_token", self.oauth.vk.service_token);
 
         // LLM backends — match by provider name
         for backend in &mut self.llm.backends {
@@ -948,6 +961,8 @@ mod tests {
             tochka_jwt_token: None,
             tochka_client_id: None,
             tochka_webhook_secret: None,
+            tochka_customer_code: None,
+            tochka_merchant_id: None,
         };
         let json = serde_json::to_string(&billing).unwrap();
         let back: BillingConfig = serde_json::from_str(&json).unwrap();

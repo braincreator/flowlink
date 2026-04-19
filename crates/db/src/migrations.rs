@@ -448,7 +448,7 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
 
             CREATE TABLE IF NOT EXISTS webhooks (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                org_id TEXT NOT NULL REFERENCES organizations(org_id),
+                org_id UUID NOT NULL REFERENCES organizations(org_id),
                 url TEXT NOT NULL,
                 secret TEXT NOT NULL,
                 events TEXT[] NOT NULL DEFAULT '{}',

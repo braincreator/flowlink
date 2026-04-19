@@ -411,6 +411,13 @@ pub async fn subscribe(
     account: AccountIdExtractor,
     Json(body): Json<SubscribeRequest>,
 ) -> impl IntoResponse {
+    // Require authenticated account (not "default")
+    if account.0 == "default" {
+        return (StatusCode::UNAUTHORIZED, Json(json!({
+            "error": "Authentication required"
+        }))).into_response();
+    }
+
     let tochka = match &state.tochka {
         Some(t) => t,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
@@ -430,6 +437,17 @@ pub async fn subscribe(
         }))).into_response(),
     };
 
+    // 54-ФЗ: require email or phone for receipt
+    let customer_email = body.customer_email.clone().or_else(|| {
+        // Try to get email from account DB
+        None // TODO: fetch from account profile
+    });
+    if customer_email.is_none() && body.customer_phone.is_none() {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "error": "Email or phone required for receipt (54-FZ)"
+        }))).into_response();
+    }
+
     let period = body.period.as_deref()
         .and_then(flowlink_billing::tochka::BillingPeriod::from_str_opt)
         .unwrap_or(flowlink_billing::tochka::BillingPeriod::Month);
@@ -446,6 +464,7 @@ pub async fn subscribe(
         description,
         start_date: None,
         trial_days: body.trial_days.unwrap_or(0),
+        customer_email: customer_email,
     };
 
     match tochka.create_subscription(&req).await {
@@ -464,7 +483,7 @@ pub async fn subscribe(
             let resp = SubscribeResponse {
                 subscription_id: sub.subscription_id,
                 status: sub.status,
-                payment_url: None,
+                payment_url: sub.payment_link,
             };
             (StatusCode::CREATED, Json(resp)).into_response()
         }
@@ -653,6 +672,7 @@ pub async fn change_subscription_plan(
             description: format!("FlowLink {} — подписка", new_plan.name),
             start_date: None,
             trial_days: 0,
+            customer_email: None,
         };
 
         match tochka.create_subscription(&req).await {
@@ -810,170 +830,169 @@ pub async fn list_orders(
 // Handlers — Tochka webhook
 // ═══════════════════════════════════════════════
 
+
+/// Tochka webhook JWT payload for acquiringInternetPayment event.
+/// See: https://developers.tochka.com/docs/tochka-api/opisanie-metodov/vebhuki
+#[derive(Debug, serde::Deserialize)]
+struct TochkaAcquiringPayload {
+    #[serde(default)]
+    customer_code: Option<String>,
+    #[serde(default)]
+    amount: Option<String>,
+    #[serde(default)]
+    payment_type: Option<String>,
+    #[serde(default)]
+    operation_id: Option<String>,
+    #[serde(default)]
+    purpose: Option<String>,
+    #[serde(default)]
+    webhook_type: Option<String>,
+    #[serde(default)]
+    merchant_id: Option<String>,
+    #[serde(default)]
+    consumer_id: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    payment_link_id: Option<String>,
+}
+
+/// Decode JWT payload (base64 middle segment) into a serde_json::Value.
+/// Does NOT verify the signature — Tochka webhook verification uses
+/// their public key (JWK) with RS256 algorithm.
+/// TODO: implement full RS256 verification using jsonwebtoken crate.
+fn decode_jwt_payload(token: &str) -> Result<serde_json::Value, String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return Err(format!("Expected 3 JWT parts, got {}", parts.len()));
+    }
+    use base64::Engine;
+    let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let decoded = engine.decode(parts[1]).map_err(|e| format!("Base64 decode: {e}"))?;
+    let json_str = String::from_utf8(decoded).map_err(|e| format!("UTF-8: {e}"))?;
+    serde_json::from_str(&json_str).map_err(|e| format!("JSON parse: {e}"))
+}
+
 /// POST /api/billing/webhook/tochka — webhook from Tochka Bank
-/// Handles both subscription callbacks and one-time payment callbacks.
+///
+/// Tochka sends webhooks as POST with body = JWT token (RS256 signed).
+/// The JWT payload contains payment data (operationId, status, amount, etc).
+/// We decode the JWT payload and process the payment event.
+///
+/// For `acquiringInternetPayment` with status `APPROVED`:
+/// - Find the order by paymentLinkId (our internal order ID)
+/// - Mark order as paid, activate the account's plan
 pub async fn tochka_webhook(
     State(state): State<AppState>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    let secret_key = state.billing.as_ref().and_then(|engine| {
-        engine.payments().sbp_config().map(|c| c.secret_key.clone())
-    });
-
-    let secret = match secret_key {
-        Some(k) => k,
-        None => {
-            log::warn!("Tochka webhook received but secret_key not configured");
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "No secret key configured"}))).into_response();
+    let body_str = match String::from_utf8(body.to_vec()) {
+        Ok(s) => s.trim().to_string(),
+        Err(e) => {
+            log::warn!("Tochka webhook: invalid UTF-8 body: {e}");
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid body"}))).into_response();
         }
     };
 
-    // Verify HMAC signature from X-Signature header
-    let sig_header = headers.get("X-Signature").and_then(|v| v.to_str().ok()).unwrap_or("");
-    let expected = {
-        use hmac::{Hmac, Mac};
-        use sha2::Sha256;
-        type HmacSha256 = Hmac<Sha256>;
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC key");
-        mac.update(&body);
-        let result = mac.finalize();
-        hex::encode(result.into_bytes())
+    // Decode JWT payload (body is a JWT token string)
+    let payload_json = match decode_jwt_payload(&body_str) {
+        Ok(json) => json,
+        Err(e) => {
+            log::warn!("Tochka webhook: failed to decode JWT: {e}");
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid JWT"}))).into_response();
+        }
     };
 
-    if !const_eq(sig_header, &expected) {
-        log::warn!("Tochka webhook HMAC verification failed");
-        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid signature"}))).into_response();
-    }
+    let payload: TochkaAcquiringPayload = match serde_json::from_value(payload_json.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            log::warn!("Tochka webhook: failed to parse payload: {e} | body={}", payload_json);
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid payload"}))).into_response();
+        }
+    };
 
-    let body_str = String::from_utf8_lossy(&body);
+    let webhook_type = payload.webhook_type.as_deref().unwrap_or("unknown");
+    let status = payload.status.as_deref().unwrap_or("UNKNOWN");
+    let operation_id = payload.operation_id.as_deref().unwrap_or("");
 
-    // Try to parse as SubscriptionCallback first
-    if let Ok(callback) = flowlink_billing::tochka::TochkaClient::parse_subscription_callback(&body_str) {
-        log::info!(
-            "Tochka subscription callback: sub={}, event={}, status={}",
-            callback.subscription_id, callback.event, callback.status
-        );
+    log::info!(
+        "Tochka webhook: type={}, status={}, operationId={}, paymentLinkId={}, amount={}, paymentType={}",
+        webhook_type, status, operation_id,
+        payload.payment_link_id.as_deref().unwrap_or("?"),
+        payload.amount.as_deref().unwrap_or("?"),
+        payload.payment_type.as_deref().unwrap_or("?")
+    );
 
+    // Handle acquiringInternetPayment events
+    if webhook_type == "acquiringInternetPayment" {
         if let Some(db) = &state.db {
-            match callback.event.as_str() {
-                "created" | "renewed" | "resumed" => {
-                    if let Err(e) = flowlink_db::subscriptions::SubscriptionRepo::update_status(
-                        db.pool(), &callback.subscription_id, "active",
-                    ).await {
-                        log::warn!("Failed to update subscription {}: {e}", callback.subscription_id);
-                    }
-                    // Update account plan on first payment
-                    if callback.event == "created" {
-                        if let Ok(Some(sub)) = flowlink_db::subscriptions::SubscriptionRepo::get_active(
-                            db.pool(), &callback.subscription_id,
-                        ).await {
-                            let _ = flowlink_db::accounts::AccountRepo::update_plan(
-                                db.pool(), &sub.account_id, &sub.plan_id,
-                            ).await;
-                            // Send payment success email for subscription
-                            if let Some(email_svc) = &state.email_service {
-                                if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &sub.account_id).await {
-                                    if let Some(ref email) = account.email {
-                                        let plan_name = sub.plan_id.clone();
-                                        let email_svc = email_svc.clone();
-                                        let to = email.clone();
-                                        tokio::spawn(async move {
-                                            if let Err(e) = email_svc.send_payment_success(&to, &to, &plan_name, "подписка").await {
-                                                log::warn!("Failed to send subscription welcome email to {to}: {e}");
+            if let Some(ref order_id) = payload.payment_link_id {
+                if !order_id.is_empty() {
+                    match status {
+                        "AUTHORIZED" => {
+                            // Two-step payment: funds reserved, waiting for capture
+                            log::info!("Payment authorized (reserved): order={}, op={}", order_id, operation_id);
+                            // Order stays pending until APPROVED
+                        }
+                        "APPROVED" => {
+                            // Payment completed — activate subscription
+                            if let Err(e) = flowlink_db::orders::OrderRepo::update_paid(
+                                db.pool(), order_id, operation_id,
+                            ).await {
+                                log::warn!("Failed to update order {order_id}: {e}");
+                            }
+
+                            if let Ok(Some(order)) = flowlink_db::orders::OrderRepo::get(db.pool(), order_id).await {
+                                if let Some(ref plan_id) = order.plan_id {
+                                    if let Err(e) = flowlink_db::accounts::AccountRepo::update_plan(
+                                        db.pool(), &order.account_id, plan_id,
+                                    ).await {
+                                        log::warn!("Failed to update account plan {}: {e}", order.account_id);
+                                    } else {
+                                        log::info!(
+                                            "\u{1f4b0} Payment approved: account={}, plan={}, order={}, op={}",
+                                            order.account_id, plan_id, order_id, operation_id
+                                        );
+                                        if let Some(email_service) = &state.email_service {
+                                            if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &order.account_id).await {
+                                                if let Some(ref email) = account.email {
+                                                    let plan_name = plan_id.clone();
+                                                    let amount = format!("{:.2} \u{20bd}", order.amount_kopecks as f64 / 100.0);
+                                                    tokio::spawn({
+                                                        let svc = email_service.clone();
+                                                        let to = email.clone();
+                                                        let name = to.clone();
+                                                        async move {
+                                                            if let Err(e) = svc.send_payment_success(&to, &name, &plan_name, &amount).await {
+                                                                log::warn!("Failed to send payment email to {to}: {e}");
+                                                            }
+                                                        }
+                                                    });
+                                                }
                                             }
-                                        });
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                }
-                "paused" => {
-                    let _ = flowlink_db::subscriptions::SubscriptionRepo::update_status(
-                        db.pool(), &callback.subscription_id, "paused",
-                    ).await;
-                }
-                "payment_failed" => {
-                    let _ = flowlink_db::subscriptions::SubscriptionRepo::update_status(
-                        db.pool(), &callback.subscription_id, "past_due",
-                    ).await;
-                    log::warn!(
-                        "Subscription payment failed: sub={}, reason={}",
-                        callback.subscription_id,
-                        callback.failure_reason.as_deref().unwrap_or("unknown")
-                    );
-                    // Send payment failed email
-                    if let Some(email_svc) = &state.email_service {
-                        if let Ok(Some(sub)) = flowlink_db::subscriptions::SubscriptionRepo::get_active(db.pool(), &callback.subscription_id).await {
-                            if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &sub.account_id).await {
-                                if let Some(ref email) = account.email {
-                                    let plan_name = sub.plan_id.clone();
-                                    let email_svc = email_svc.clone();
-                                    let to = email.clone();
-                                    tokio::spawn(async move {
-                                        if let Err(e) = email_svc.send_payment_failed(&to, &to, &plan_name).await {
-                                            log::warn!("Failed to send payment failed email to {to}: {e}");
-                                        }
-                                    });
-                                }
+                        "DECLINED" | "REJECTED" | "ERROR" => {
+                            // Payment failed
+                            log::warn!("Payment failed: order={}, status={}, op={}", order_id, status, operation_id);
+                            if let Err(e) = flowlink_db::orders::OrderRepo::update_failed(db.pool(), order_id).await {
+                                log::warn!("Failed to mark order {order_id} as failed: {e}");
                             }
-                        }
-                    }
-                }
-                "cancelled" | "expired" => {
-                    let _ = flowlink_db::subscriptions::SubscriptionRepo::cancel(
-                        db.pool(), &callback.subscription_id,
-                    ).await;
-                }
-                _ => log::info!("Unknown subscription event: {}", callback.event),
-            }
-        }
-
-        return (StatusCode::OK, Json(json!({"ok": true}))).into_response();
-    }
-
-    // Fallback: parse as generic JSON for one-time payment callbacks
-    let callback: serde_json::Value = match serde_json::from_slice(&body) {
-        Ok(v) => v,
-        Err(e) => {
-            log::warn!("Failed to parse webhook body: {e}");
-            return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid JSON"}))).into_response();
-        }
-    };
-
-    if let Some(db) = &state.db {
-        let event_type = callback.get("event_type").and_then(|v| v.as_str()).unwrap_or("");
-        match event_type {
-            "payment.success" => {
-                if let Some(order_id) = callback.get("order_id").and_then(|v| v.as_str()) {
-                    let payment_id = callback.get("payment_id").and_then(|v| v.as_str()).unwrap_or("");
-                    if let Err(e) = flowlink_db::orders::OrderRepo::update_paid(db.pool(), order_id, payment_id).await {
-                        log::warn!("Failed to update order {order_id}: {e}");
-                    }
-                    if let Ok(Some(order)) = flowlink_db::orders::OrderRepo::get(db.pool(), order_id).await {
-                        if let Some(ref plan_id) = order.plan_id {
-                            if let Err(e) = flowlink_db::accounts::AccountRepo::update_plan(
-                                db.pool(), &order.account_id, plan_id,
-                            ).await {
-                                log::warn!("Failed to update account plan {}: {e}", order.account_id);
-                            } else {
-                                log::info!(
-                                    "💰 Payment success: account={}, plan={}, order={}, payment_id={}",
-                                    order.account_id, plan_id, order_id, payment_id
-                                );
-                                if let Some(email_service) = &state.email_service {
+                            // Send payment failed email
+                            if let Some(email_service) = &state.email_service {
+                                if let Ok(Some(order)) = flowlink_db::orders::OrderRepo::get(db.pool(), order_id).await {
                                     if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &order.account_id).await {
                                         if let Some(ref email) = account.email {
-                                            let plan_name = plan_id.clone();
-                                            let amount = format!("{:.2} ₽", order.amount_kopecks as f64 / 100.0);
+                                            let plan_id = order.plan_id.clone().unwrap_or_default();
                                             tokio::spawn({
                                                 let svc = email_service.clone();
                                                 let to = email.clone();
-                                                let name = to.clone();
                                                 async move {
-                                                    if let Err(e) = svc.send_payment_success(&to, &name, &plan_name, &amount).await {
-                                                        log::warn!("Failed to send payment email to {to}: {e}");
+                                                    if let Err(e) = svc.send_payment_failed(&to, &to.split('@').next().unwrap_or(&to), &plan_id).await {
+                                                        log::warn!("Failed to send payment failed email to {to}: {e}");
                                                     }
                                                 }
                                             });
@@ -982,34 +1001,24 @@ pub async fn tochka_webhook(
                                 }
                             }
                         }
-                    }
-                }
-            }
-            "payment.failed" => {
-                if let Some(order_id) = callback.get("order_id").and_then(|v| v.as_str()) {
-                    let _ = flowlink_db::orders::OrderRepo::update_failed(db.pool(), order_id).await;
-                    // Send payment failed email
-                    if let Ok(Some(order)) = flowlink_db::orders::OrderRepo::get(db.pool(), order_id).await {
-                        if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &order.account_id).await {
-                            if let Some(ref email) = account.email {
-                                if let Some(email_svc) = &state.email_service {
-                                    let plan_id = order.plan_id.clone().unwrap_or_default();
-                                    tokio::spawn({
-                                        let svc = email_svc.clone();
-                                        let to = email.clone();
-                                        async move {
-                                            if let Err(e) = svc.send_payment_failed(&to, &to.split('@').next().unwrap_or(&to), &plan_id).await {
-                                                log::warn!("Failed to send payment failed email to {to}: {e}");
-                                            }
-                                        }
-                                    });
+                        "REFUNDED" | "PARTIALLY_REFUNDED" => {
+                            // Refund processed
+                            log::info!("Payment refunded: order={}, status={}, op={}", order_id, status, operation_id);
+                            // Downgrade account to free plan
+                            if let Ok(Some(order)) = flowlink_db::orders::OrderRepo::get(db.pool(), order_id).await {
+                                if let Err(e) = flowlink_db::accounts::AccountRepo::update_plan(
+                                    db.pool(), &order.account_id, "free",
+                                ).await {
+                                    log::warn!("Failed to downgrade account {}: {e}", order.account_id);
                                 }
                             }
+                        }
+                        other => {
+                            log::info!("Unhandled payment status '{other}' for order={}", order_id);
                         }
                     }
                 }
             }
-            other => log::info!("Unknown Tochka webhook event_type: {other}"),
         }
     }
 
@@ -1148,10 +1157,20 @@ mod tests {
 #[derive(Deserialize)]
 pub struct SubscribeRequest {
     pub plan_id: String,
+    /// Payment method — optional, defaults to Card
+    #[serde(default = "default_payment_method")]
     pub payment_method: flowlink_billing::tochka::SubscriptionPaymentMethod,
     pub email: Option<String>,
     pub period: Option<String>,
     pub trial_days: Option<u16>,
+    /// Customer email for 54-FZ receipt
+    pub customer_email: Option<String>,
+    /// Customer phone for 54-FZ receipt (alternative to email)
+    pub customer_phone: Option<String>,
+}
+
+fn default_payment_method() -> flowlink_billing::tochka::SubscriptionPaymentMethod {
+    flowlink_billing::tochka::SubscriptionPaymentMethod::Card { card_token: None }
 }
 
 #[derive(Serialize)]

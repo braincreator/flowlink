@@ -245,7 +245,7 @@ download_binary() {
     log_info "Downloading flowlink binary..."
     
     # Determine download URL
-    LATEST_URL="https://github.com/$GITHUB_REPO/releases/latest/download/flowlink-${OS_TYPE}-${ARCH_TYPE}"
+    LATEST_URL="https://flowlink.flow-masters.ru/downloads/flowlink-${OS_TYPE}-${ARCH_TYPE}.tar.gz"
     
     TEMP_FILE="/tmp/flowlink-$$.tmp"
     
@@ -261,7 +261,13 @@ download_binary() {
         exit 1
     fi
     
+    # Extract from tar.gz
+    EXTRACT_DIR="/tmp/flowlink-extract-$$.tmp"
+    mkdir -p "$EXTRACT_DIR"
+    tar xzf "$TEMP_FILE" -C "$EXTRACT_DIR"
+    cp "$EXTRACT_DIR/flowlink" "$TEMP_FILE"
     chmod +x "$TEMP_FILE"
+    rm -rf "$EXTRACT_DIR"
     
     log_success "Binary downloaded"
 }

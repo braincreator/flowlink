@@ -12,6 +12,7 @@
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::payment::{PaymentStatus, SbpConfig};
 
@@ -154,6 +155,9 @@ pub struct CreateSubscriptionRequest {
     /// Trial days (0 = no trial)
     #[serde(default)]
     pub trial_days: u16,
+    /// Customer email for 54-FZ receipt
+    #[serde(default)]
+    pub customer_email: Option<String>,
 }
 
 /// Payment method for subscription
@@ -176,7 +180,7 @@ pub enum SubscriptionPaymentMethod {
 /// Subscription response from Tochka
 #[derive(Debug, Deserialize)]
 pub struct SubscriptionResponse {
-    /// Subscription ID from Tochka
+    /// Subscription ID from Tochka (operationId)
     pub subscription_id: String,
     /// Our customer ID
     pub customer_id: String,
@@ -188,6 +192,9 @@ pub struct SubscriptionResponse {
     pub period: String,
     /// Amount in kopecks
     pub amount: u64,
+    /// Payment link URL for the first payment
+    #[serde(default)]
+    pub payment_link: Option<String>,
     /// Next billing date
     #[serde(default)]
     pub next_billing_date: Option<DateTime<Utc>>,
@@ -346,14 +353,18 @@ pub trait TochkaHttp: Send + Sync {
 pub struct ReqwestBackend {
     client: reqwest::Client,
     base_url: String,
+    jwt_token: String,
+    customer_code: String,
 }
 
 #[cfg(feature = "tochka-live")]
 impl ReqwestBackend {
-    pub fn new(base_url: String) -> Self {
+    pub fn new(base_url: String, jwt_token: String, customer_code: String) -> Self {
         Self {
             client: reqwest::Client::new(),
             base_url,
+            jwt_token,
+            customer_code,
         }
     }
 }
@@ -367,22 +378,49 @@ impl TochkaHttp for ReqwestBackend {
             .client
             .post(&url)
             .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", self.jwt_token))
+            .header("CustomerCode", &self.customer_code)
             .body(body.to_string())
             .send()
             .await?;
-        Ok(resp.text().await?)
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            eprintln!("Tochka POST {} → {}: {}", path, status, &text[..text.len().min(500)]);
+        }
+        Ok(text)
     }
 
     async fn get(&self, path: &str) -> Result<String> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self.client.get(&url).send().await?;
-        Ok(resp.text().await?)
+        let resp = self.client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.jwt_token))
+            .header("CustomerCode", &self.customer_code)
+            .send()
+            .await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            eprintln!("Tochka GET {} → {}: {}", path, status, &text[..text.len().min(500)]);
+        }
+        Ok(text)
     }
 
     async fn delete(&self, path: &str) -> Result<String> {
         let url = format!("{}{}", self.base_url, path);
-        let resp = self.client.delete(&url).send().await?;
-        Ok(resp.text().await?)
+        let resp = self.client
+            .delete(&url)
+            .header("Authorization", format!("Bearer {}", self.jwt_token))
+            .header("CustomerCode", &self.customer_code)
+            .send()
+            .await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            eprintln!("Tochka DELETE {} → {}: {}", path, status, &text[..text.len().min(500)]);
+        }
+        Ok(text)
     }
 }
 
@@ -446,9 +484,13 @@ impl TochkaClient {
     /// Create a new Tochka client with real HTTP backend
     #[cfg(feature = "tochka-live")]
     pub fn new(config: SbpConfig) -> Self {
+        let jwt = config.secret_key.clone();
+        let customer_code = config.terminal_key.clone();
         Self {
             http: Box::new(ReqwestBackend::new(
-                "https://enter.tochka.com/api/v2".to_string(),
+                "https://enter.tochka.com/uapi/acquiring/v1.0".to_string(),
+                jwt,
+                customer_code,
             )),
             config,
         }
@@ -492,21 +534,70 @@ impl TochkaClient {
     // =========================================================================
 
     /// Create a new subscription (recurring billing)
+    /// Uses Tochka API format: POST /subscriptions with Data wrapper
     pub async fn create_subscription(
         &self,
         req: &CreateSubscriptionRequest,
     ) -> Result<SubscriptionResponse> {
-        let json = serde_json::to_string(req)?;
-        let resp = self.http.post("/subscriptions", &json).await?;
-        let sub: SubscriptionResponse = serde_json::from_str(&resp)?;
+        // Build Tochka API request format
+        // Use /subscriptions_with_receipt for 54-FZ compliance
+        let body = json!({
+            "Data": {
+                "customerCode": self.config.terminal_key,
+                "merchantId": self.config.payment_type_id,
+                "amount": req.amount as f64 / 100.0, // kopecks to rubles
+                "purpose": &req.description,
+                "paymentMode": ["sbp", "card"],
+                "redirectUrl": &self.config.success_url,
+                "failRedirectUrl": &self.config.fail_url,
+                "saveCard": true,
+                "recurring": true,
+                "paymentLinkId": &req.plan_id, // our internal plan/order ID
+                "Client": {
+                    "Email": req.customer_email.as_deref().unwrap_or(""),
+                },
+                "Items": [{
+                    "name": &req.description,
+                    "amount": req.amount as f64 / 100.0,
+                    "quantity": 1,
+                    "paymentMethod": "full_payment",
+                    "paymentObject": "service",
+                }]
+            }
+        });
 
-        if let Some(err) = &sub.error_code {
-            bail!(
-                "Tochka subscription error {}: {}",
-                err,
-                sub.error_description.as_deref().unwrap_or("")
-            );
+        let resp = self.http.post("/subscriptions_with_receipt", &serde_json::to_string(&body)?).await?;
+
+        // Parse Tochka response
+        let resp_json: serde_json::Value = serde_json::from_str(&resp)?;
+
+        // Check for errors
+        if let Some(errors) = resp_json.get("Errors") {
+            if let Some(errors_arr) = errors.as_array() {
+                if !errors_arr.is_empty() {
+                    bail!("Tochka API error: {:?}", errors_arr);
+                }
+            }
         }
+
+        // Extract data from response
+        let data = resp_json.get("Data").cloned().unwrap_or(resp_json.clone());
+
+        let sub = SubscriptionResponse {
+            subscription_id: data.get("operationId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            customer_id: req.customer_id.clone(),
+            plan_id: req.plan_id.clone(),
+            status: data.get("status").and_then(|v| v.as_str()).unwrap_or("CREATED").to_string(),
+            period: req.period.as_str().to_string(),
+            amount: req.amount,
+            payment_link: data.get("paymentLink").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            next_billing_date: None,
+            current_period_start: None,
+            current_period_end: None,
+            error_code: None,
+            error_description: None,
+        };
+
         Ok(sub)
     }
 
