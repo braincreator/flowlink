@@ -7,9 +7,26 @@ use std::io::{self, BufRead, Write};
 
 use flowlink_shield::{AnalysisEngine, Command};
 
+/// Audit log entry for MCP operations
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AuditEntry {
+    pub timestamp: String,
+    pub tool: String,
+    pub input: String,
+    pub risk_level: String,
+    pub threat: Option<String>,
+}
+
 pub struct McpServer {
     engine: AnalysisEngine,
     pending_approvals: std::sync::Mutex<Vec<PendingApproval>>,
+    audit_log: std::sync::Mutex<Vec<AuditEntry>>,
+    /// Security mode: "strict", "moderate", "permissive"
+    mode: std::sync::Mutex<String>,
+    /// Risk threshold (0-100). Commands scoring above this are flagged.
+    threshold: std::sync::Mutex<u32>,
+    blocked_commands: std::sync::Mutex<Vec<String>>,
+    protected_paths: std::sync::Mutex<Vec<String>>,
 }
 
 /// Pending approval created by an agent via MCP
@@ -30,6 +47,17 @@ impl McpServer {
                 enable_interpreter: true,
             },
             pending_approvals: std::sync::Mutex::new(Vec::new()),
+            audit_log: std::sync::Mutex::new(Vec::new()),
+            mode: std::sync::Mutex::new("moderate".to_string()),
+            threshold: std::sync::Mutex::new(50),
+            blocked_commands: std::sync::Mutex::new(vec![
+                "rm".into(), "mkfs".into(), "dd".into(), "shred".into(),
+                "shutdown".into(), "reboot".into(), "poweroff".into(), "halt".into(),
+            ]),
+            protected_paths: std::sync::Mutex::new(vec![
+                "/etc".into(), "/var".into(), "/usr".into(), "/bin".into(),
+                "/sbin".into(), "/boot".into(), "/dev".into(),
+            ]),
         }
     }
 
@@ -248,6 +276,69 @@ impl McpServer {
                         "name": "policy_reload",
                         "description": "Hot-reload entire policy from config file. Updates all rules without restarting the service.",
                         "inputSchema": { "type": "object", "properties": {} }
+                    },
+                    {
+                        "name": "scan_file",
+                        "description": "Scan a file path for security risks before writing/uploading. Checks for path traversal, sensitive locations, dangerous extensions.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": { "type": "string", "description": "File path to scan" },
+                                "operation": { "type": "string", "description": "Operation: write, upload, delete, execute", "enum": ["write", "upload", "delete", "execute"] },
+                                "size_bytes": { "type": "integer", "description": "Optional file size in bytes" }
+                            },
+                            "required": ["path"]
+                        }
+                    },
+                    {
+                        "name": "scan_url",
+                        "description": "Scan a URL for security risks. Checks for private IPs, known malicious patterns, suspicious TLDs, credential leaks.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "url": { "type": "string", "description": "URL to scan" },
+                                "purpose": { "type": "string", "description": "Purpose: download, upload, api_call, webhook" }
+                            },
+                            "required": ["url"]
+                        }
+                    },
+                    {
+                        "name": "audit_log",
+                        "description": "Get recent scan/decision history. Shows what commands were scanned, results, and actions taken.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "limit": { "type": "integer", "description": "Max entries to return (default 50, max 200)" },
+                                "risk_level": { "type": "string", "description": "Filter by risk level: safe, warning, danger, critical" }
+                            }
+                        }
+                    },
+                    {
+                        "name": "set_mode",
+                        "description": "Set the security analysis mode. strict=block everything suspicious, moderate=warn on medium/high, permissive=only block critical.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "mode": { "type": "string", "description": "Security mode: strict, moderate, permissive", "enum": ["strict", "moderate", "permissive"] }
+                            },
+                            "required": ["mode"]
+                        }
+                    },
+                    {
+                        "name": "set_threshold",
+                        "description": "Set the risk score threshold (0-100). Commands scoring above this are flagged. Lower=stricter.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "threshold": { "type": "integer", "description": "Risk score threshold (0-100). Default: 50" }
+                            },
+                            "required": ["threshold"]
+                        }
+                    },
+                    {
+                        "name": "system_info",
+                        "description": "Get system information for security context: OS, arch, FlowLink version, policy stats.",
+                        "inputSchema": { "type": "object", "properties": {} }
                     }
                 ]
             }
@@ -259,10 +350,13 @@ impl McpServer {
         let arguments = &params["arguments"];
 
         let result = match tool_name {
-            "scan_command" => self.scan_command(arguments),
+            "scan_command" => { let r = self.scan_command(arguments); self.audit("scan_command", &arguments["command"].as_str().unwrap_or(""), &r); r }
             "scan_script" => self.scan_script(arguments),
+            "scan_file" => self.scan_file(arguments),
+            "scan_url" => self.scan_url(arguments),
             "get_policy" => self.get_policy(),
             "explain_risk" => self.explain_risk(arguments),
+            "audit_log" => self.audit_log_get(arguments),
             "policy_block_command" => self.policy_block_command(arguments),
             "policy_unblock_command" => self.policy_unblock_command(arguments),
             "policy_protect_path" => self.policy_protect_path(arguments),
@@ -271,6 +365,9 @@ impl McpServer {
             "policy_whitelist_pid" => self.policy_whitelist_pid(arguments),
             "policy_status" => self.policy_status(),
             "policy_reload" => self.policy_reload(),
+            "set_mode" => self.set_mode(arguments),
+            "set_threshold" => self.set_threshold(arguments),
+            "system_info" => self.system_info(),
             _ => {
                 return error_response(id, -32602, &format!("Unknown tool: {}", tool_name));
             }
@@ -597,6 +694,280 @@ impl McpServer {
         })).unwrap()
     }
 
+    // ── New Tools ──────────────────────────────────
+
+    /// Log a scan result to audit log
+    fn audit(&self, tool: &str, input: &str, result_json: &str) {
+        let parsed: serde_json::Value = serde_json::from_str(result_json).unwrap_or_default();
+        let entry = AuditEntry {
+            timestamp: chrono_free_now(),
+            tool: tool.to_string(),
+            input: input.chars().take(200).collect(), // truncate long inputs
+            risk_level: parsed["risk_level"].as_str().unwrap_or("unknown").to_string(),
+            threat: parsed["threat_name"].as_str().map(|s| s.to_string()),
+        };
+        let mut log = self.audit_log.lock().unwrap();
+        log.push(entry);
+        // Keep last 1000 entries
+        if log.len() > 1000 {
+            let excess = log.len() - 1000;
+            log.drain(0..excess);
+        }
+    }
+
+    fn scan_file(&self, args: &Value) -> String {
+        let path = args["path"].as_str().unwrap_or("");
+        let operation = args["operation"].as_str().unwrap_or("write");
+        let size_bytes = args["size_bytes"].as_u64();
+
+        if path.is_empty() {
+            return serde_json::to_string_pretty(&json!({"error": "path is required"})).unwrap();
+        }
+
+        let mut risks: Vec<serde_json::Value> = Vec::new();
+        let mut score: u32 = 0;
+
+        // Path traversal
+        if path.contains("..") {
+            risks.push(json!({"category": "path_traversal", "detail": "Path contains '..' — potential directory traversal"}));
+            score += 60;
+        }
+
+        // Absolute path to sensitive location
+        let protected = self.protected_paths.lock().unwrap();
+        for pp in protected.iter() {
+            if path.starts_with(pp) {
+                risks.push(json!({"category": "protected_path", "detail": format!("Path is under protected directory: {}", pp)}));
+                score += 40;
+                break;
+            }
+        }
+        drop(protected);
+
+        // Dangerous extensions for execute operation
+        let dangerous_exts = [".sh", ".bash", ".py", ".pl", ".rb", ".exe", ".bat", ".cmd", ".ps1", ".vbs"];
+        if operation == "execute" {
+            for ext in &dangerous_exts {
+                if path.to_lowercase().ends_with(ext) {
+                    risks.push(json!({"category": "executable", "detail": format!("File has executable extension: {}", ext)}));
+                    score += 30;
+                    break;
+                }
+            }
+        }
+
+        // Overwriting critical files
+        let critical_files = ["/etc/passwd", "/etc/shadow", "/etc/sudoers", "/etc/ssh/sshd_config",
+            "/boot/grub/grub.cfg", "/etc/crontab", "/etc/fstab"];
+        for cf in &critical_files {
+            if path == *cf {
+                risks.push(json!({"category": "critical_file", "detail": format!("Attempting to modify critical system file: {}", cf)}));
+                score = 100;
+                break;
+            }
+        }
+
+        // Hidden files
+        if path.split('/').last().map(|s| s.starts_with('.')).unwrap_or(false) {
+            risks.push(json!({"category": "hidden_file", "detail": "File is hidden (starts with dot)"}));
+            score += 10;
+        }
+
+        // Large file warning
+        if let Some(sz) = size_bytes {
+            if sz > 100 * 1024 * 1024 {
+                risks.push(json!({"category": "large_file", "detail": format!("File is large: {} MB", sz / 1024 / 1024)}));
+                score += 15;
+            }
+        }
+
+        let risk_level = if score >= 75 { "danger" } else if score >= 50 { "warning" } else if score >= 25 { "low" } else { "safe" };
+
+        serde_json::to_string_pretty(&json!({
+            "path": path,
+            "operation": operation,
+            "risk_level": risk_level,
+            "score": score,
+            "risks": risks,
+            "recommendation": if score >= 75 { "Block — high risk operation on sensitive location" } else if score >= 50 { "Review — moderate risk, confirm with user" } else { "Proceed — low risk" }
+        })).unwrap()
+    }
+
+    fn scan_url(&self, args: &Value) -> String {
+        let url = args["url"].as_str().unwrap_or("");
+        let purpose = args["purpose"].as_str().unwrap_or("download");
+
+        if url.is_empty() {
+            return serde_json::to_string_pretty(&json!({"error": "url is required"})).unwrap();
+        }
+
+        let mut risks: Vec<serde_json::Value> = Vec::new();
+        let mut score: u32 = 0;
+
+        // Private/internal IPs
+        let private_patterns = ["127.0.0.1", "localhost", "0.0.0.0", "169.254.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+            "172.2", "172.3", "192.168.", "::1", "[::1]", "metadata.google", "169.254.169.254"];
+        for pp in &private_patterns {
+            if url.contains(pp) {
+                risks.push(json!({"category": "private_ip", "detail": format!("URL targets internal/private address: {}", pp)}));
+                score += 70;
+                break;
+            }
+        }
+
+        // Credentials in URL
+        if url.contains("@") && (url.contains("://") && url.split("://").nth(1).map(|s| s.contains("@")).unwrap_or(false)) {
+            risks.push(json!({"category": "credentials_in_url", "detail": "URL contains credentials (user:pass@host)"}));
+            score += 60;
+        }
+
+        // Suspicious TLDs
+        let suspicious_tlds = [".tk", ".ml", ".ga", ".cf", ".gq", ".xyz", ".top", ".work"];
+        for tld in &suspicious_tlds {
+            let lower = url.to_lowercase();
+            if lower.contains(tld) {
+                risks.push(json!({"category": "suspicious_tld", "detail": format!("URL uses suspicious TLD: {}", tld)}));
+                score += 20;
+                break;
+            }
+        }
+
+        // HTTP (not HTTPS)
+        if url.starts_with("http://") {
+            risks.push(json!({"category": "unencrypted", "detail": "URL uses unencrypted HTTP"}));
+            score += 15;
+        }
+
+        // Webhook with secret
+        if purpose == "webhook" && (url.contains("secret") || url.contains("token") || url.contains("key")) {
+            risks.push(json!({"category": "secret_in_webhook_url", "detail": "Webhook URL contains secret/token in path"}));
+            score += 30;
+        }
+
+        // Known malicious patterns
+        let malicious_patterns = ["payload", "exploit", "shell", "reverse", "backdoor", "c2", "beacon"];
+        for mp in &malicious_patterns {
+            if url.to_lowercase().contains(mp) {
+                risks.push(json!({"category": "malicious_pattern", "detail": format!("URL contains suspicious keyword: {}", mp)}));
+                score += 25;
+                break;
+            }
+        }
+
+        let risk_level = if score >= 75 { "danger" } else if score >= 50 { "warning" } else if score >= 25 { "low" } else { "safe" };
+
+        serde_json::to_string_pretty(&json!({
+            "url": url,
+            "purpose": purpose,
+            "risk_level": risk_level,
+            "score": score,
+            "risks": risks,
+            "recommendation": if score >= 75 { "Block — URL poses security risk" } else if score >= 50 { "Review — verify URL is legitimate" } else { "Proceed — low risk" }
+        })).unwrap()
+    }
+
+    fn audit_log_get(&self, args: &Value) -> String {
+        let limit = args["limit"].as_u64().unwrap_or(50).min(200) as usize;
+        let risk_filter = args["risk_level"].as_str();
+
+        let log = self.audit_log.lock().unwrap();
+        let entries: Vec<&AuditEntry> = log.iter().rev()
+            .filter(|e| {
+                if let Some(rf) = risk_filter {
+                    e.risk_level == rf
+                } else {
+                    true
+                }
+            })
+            .take(limit)
+            .collect();
+
+        serde_json::to_string_pretty(&json!({
+            "total_entries": log.len(),
+            "showing": entries.len(),
+            "mode": self.mode.lock().unwrap().clone(),
+            "threshold": *self.threshold.lock().unwrap(),
+            "entries": entries.iter().map(|e| json!({
+                "timestamp": e.timestamp,
+                "tool": e.tool,
+                "input": e.input,
+                "risk_level": e.risk_level,
+                "threat": e.threat
+            })).collect::<Vec<_>>()
+        })).unwrap()
+    }
+
+    fn set_mode(&self, args: &Value) -> String {
+        let mode = args["mode"].as_str().unwrap_or("");
+        match mode {
+            "strict" | "moderate" | "permissive" => {
+                *self.mode.lock().unwrap() = mode.to_string();
+                // Adjust threshold based on mode
+                let new_threshold = match mode {
+                    "strict" => 25,
+                    "moderate" => 50,
+                    "permissive" => 75,
+                    _ => 50,
+                };
+                *self.threshold.lock().unwrap() = new_threshold;
+                serde_json::to_string_pretty(&json!({
+                    "status": "ok",
+                    "mode": mode,
+                    "threshold": new_threshold,
+                    "description": match mode {
+                        "strict" => "Blocks everything above score 25. Only clearly safe commands allowed.",
+                        "moderate" => "Blocks high/critical (score >= 50). Balanced security.",
+                        "permissive" => "Only blocks critical threats (score >= 75). Maximum flexibility.",
+                        _ => ""
+                    }
+                })).unwrap()
+            }
+            _ => serde_json::to_string_pretty(&json!({"error": "Invalid mode. Use: strict, moderate, or permissive"})).unwrap()
+        }
+    }
+
+    fn set_threshold(&self, args: &Value) -> String {
+        let threshold = args["threshold"].as_u64().unwrap_or(50) as u32;
+        if threshold > 100 {
+            return serde_json::to_string_pretty(&json!({"error": "Threshold must be 0-100"})).unwrap();
+        }
+        *self.threshold.lock().unwrap() = threshold;
+        serde_json::to_string_pretty(&json!({
+            "status": "ok",
+            "threshold": threshold,
+            "description": format!("Commands scoring >= {} will be flagged", threshold)
+        })).unwrap()
+    }
+
+    fn system_info(&self) -> String {
+        let log = self.audit_log.lock().unwrap();
+        let total_scans = log.len();
+        let danger_scans = log.iter().filter(|e| e.risk_level == "danger" || e.risk_level == "critical").count();
+        drop(log);
+
+        serde_json::to_string_pretty(&json!({
+            "flowlink_version": "0.1.0",
+            "mcp_server": "flowlink-security",
+            "protocol_version": "2024-11-05",
+            "analysis_engine": {
+                "levels": ["L1_pattern", "L1.5_raw_string", "L2_ast", "L3_interpreter"],
+                "ast_enabled": self.engine.enable_ast,
+                "interpreter_enabled": self.engine.enable_interpreter
+            },
+            "policy": {
+                "mode": self.mode.lock().unwrap().clone(),
+                "threshold": *self.threshold.lock().unwrap(),
+                "blocked_commands": *self.blocked_commands.lock().unwrap(),
+                "protected_paths": *self.protected_paths.lock().unwrap(),
+                "pending_approvals": self.pending_approvals.lock().unwrap().len()
+            },
+            "stats": {
+                "total_scans": total_scans,
+                "dangerous_scans": danger_scans
+            }
+        })).unwrap()
+    }
+
     fn parse_command(cmd_str: &str) -> Command {
         let parts: Vec<&str> = cmd_str.split_whitespace().collect();
         let (binary, rest) = match parts.split_first() {
@@ -653,6 +1024,13 @@ fn error_response(id: Option<Value>, code: i64, message: &str) -> Value {
         "id": id,
         "error": { "code": code, "message": message }
     })
+}
+
+fn chrono_free_now() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}", d.as_secs())
 }
 
 #[cfg(test)]
@@ -750,6 +1128,122 @@ mod tests {
     #[test] fn danger_score_high() { assert!(scan("rm -rf /")["score"].as_u64().unwrap() >= 75); }
     #[test] fn safe_score_zero() { assert_eq!(scan("ls")["score"].as_u64().unwrap(), 0); }
 
+    // ── scan_file ──
+    #[test]
+    fn scan_file_protected_path() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_file(&json!({"path": "/etc/passwd", "operation": "write"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 40);
+    }
+    #[test]
+    fn scan_file_traversal() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_file(&json!({"path": "../../../etc/shadow"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 60);
+    }
+    #[test]
+    fn scan_file_critical() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_file(&json!({"path": "/etc/shadow"}))).unwrap();
+        assert_eq!(r["score"].as_u64().unwrap(), 100);
+    }
+    #[test]
+    fn scan_file_safe() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_file(&json!({"path": "/home/user/app/main.rs"}))).unwrap();
+        assert_eq!(r["risk_level"], "safe");
+    }
+    #[test]
+    fn scan_file_empty() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_file(&json!({"path": ""}))).unwrap();
+        assert!(r.get("error").is_some());
+    }
+
+    // ── scan_url ──
+    #[test]
+    fn scan_url_localhost() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "http://localhost:8080/api"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 50);
+    }
+    #[test]
+    fn scan_url_private_ip() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "http://192.168.1.1/admin"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 50);
+    }
+    #[test]
+    fn scan_url_metadata() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "http://169.254.169.254/latest/meta-data/"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 70);
+    }
+    #[test]
+    fn scan_url_http() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "http://example.com/file"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 10);
+    }
+    #[test]
+    fn scan_url_https_safe() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "https://api.github.com/repos"}))).unwrap();
+        assert_eq!(r["risk_level"], "safe");
+    }
+    #[test]
+    fn scan_url_empty() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": ""}))).unwrap();
+        assert!(r.get("error").is_some());
+    }
+
+    // ── set_mode / set_threshold ──
+    #[test]
+    fn set_mode_strict() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.set_mode(&json!({"mode": "strict"}))).unwrap();
+        assert_eq!(r["mode"], "strict");
+        assert_eq!(r["threshold"], 25);
+    }
+    #[test]
+    fn set_mode_invalid() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.set_mode(&json!({"mode": "hacker"}))).unwrap();
+        assert!(r.get("error").is_some());
+    }
+    #[test]
+    fn set_threshold() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.set_threshold(&json!({"threshold": 75}))).unwrap();
+        assert_eq!(r["threshold"], 75);
+    }
+    #[test]
+    fn set_threshold_invalid() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.set_threshold(&json!({"threshold": 200}))).unwrap();
+        assert!(r.get("error").is_some());
+    }
+
+    // ── audit_log ──
+    #[test]
+    fn audit_log_empty() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.audit_log_get(&json!({}))).unwrap();
+        assert_eq!(r["total_entries"], 0);
+    }
+
+    // ── system_info ──
+    #[test]
+    fn system_info_structure() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.system_info()).unwrap();
+        assert!(r.get("flowlink_version").is_some());
+        assert!(r.get("analysis_engine").is_some());
+        assert!(r.get("policy").is_some());
+        assert!(r.get("stats").is_some());
+    }
+
     // ── get_policy ──
     #[test] fn policy_structure() {
         let p = policy();
@@ -798,7 +1292,7 @@ mod tests {
     async fn tools_list() {
         let s = server();
         let resp = s.handle_request(json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}})).await;
-        assert_eq!(resp["result"]["tools"].as_array().unwrap().len(), 12);
+        assert_eq!(resp["result"]["tools"].as_array().unwrap().len(), 18);
     }
 
     #[tokio::test]
