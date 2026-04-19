@@ -1494,6 +1494,7 @@ dependencies = [
  "flowlink-core",
  "flowlink-crypto",
  "flowlink-db",
+ "flowlink-shield",
  "futures-util",
  "hex",
  "hmac",

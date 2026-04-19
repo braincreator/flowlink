@@ -10,6 +10,7 @@ flowlink-core = { path = "../core" }
 flowlink-crypto = { path = "../crypto" }
 flowlink-billing = { path = "../billing" }
 flowlink-db = { path = "../db" }
+flowlink-shield = { path = "../shield" }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
 openssl-sys = { version = "0.9", features = ["vendored"] }
 async-trait = "0.1"
