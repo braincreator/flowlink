@@ -349,6 +349,40 @@ impl AuthEngine {
         self.sessions.get(account_id).map(|s| s.clone()).unwrap_or_default()
     }
 
+    /// Find or create an account by email (for SAML/OAuth)
+    pub async fn find_or_create_by_email(&self, email: &str, name: &str, groups: &[String]) -> Result<(String, bool)> {
+        // Check if account exists
+        let row = sqlx::query_as::<_, (String, bool)>(
+            "SELECT account_id, is_admin FROM accounts WHERE email = $1 AND active = true"
+        )
+        .bind(email)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(|e| anyhow::anyhow!("DB error: {e}"))?;
+
+        if let Some((account_id, is_admin)) = row {
+            return Ok((account_id, is_admin));
+        }
+
+        // Create new account
+        let account_id = uuid::Uuid::new_v4().to_string();
+        let is_admin = groups.iter().any(|g| g == "admin" || g == "Administrators");
+
+        sqlx::query(
+            "INSERT INTO accounts (account_id, email, name, is_admin, active, plan_id, created_at) VALUES ($1, $2, $3, $4, true, 'free', NOW())"
+        )
+        .bind(&account_id)
+        .bind(email)
+        .bind(name)
+        .bind(is_admin)
+        .execute(&self.db)
+        .await
+        .map_err(|e| anyhow::anyhow!("Account create error: {e}"))?;
+
+        log::info!("SAML: created account {} for {}", account_id, email);
+        Ok((account_id, is_admin))
+    }
+
     /// Revoke a specific session
     pub fn revoke_session(&self, account_id: &str, session_id: &str) -> bool {
         let mut sessions = match self.sessions.get_mut(account_id) {

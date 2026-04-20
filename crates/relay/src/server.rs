@@ -69,6 +69,7 @@ pub struct AppState {
     pub auth_rate_limiter: Arc<crate::auth_rate_limiter::AuthRateLimiter>,
     pub tiered_rate_limiter: Arc<crate::rate_limiter::TieredRateLimiter>,
     pub key_rate_limiter: Arc<crate::api_keys::KeyRateLimiter>,
+    pub saml_config: Option<Arc<tokio::sync::Mutex<crate::saml::SamlConfig>>>,
 }
 
 // ═══════════════════════════════════════════════
@@ -1855,6 +1856,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/yandex/callback", axum::routing::get(crate::auth_oauth::yandex_callback))
         .route("/api/auth/github/callback", axum::routing::get(crate::auth_oauth::github_callback))
         .route("/api/auth/refresh", axum::routing::post(crate::auth_oauth::refresh_token))
+        // SAML
+        .route("/auth/saml/login", axum::routing::get(crate::saml::saml_login))
+        .route("/auth/saml/acs", axum::routing::post(crate::saml::saml_acs))
+        .route("/auth/saml/metadata", axum::routing::get(crate::saml::saml_metadata))
         // 2FA (public: setup done authed, but complete is public for temp_token flow)
         .route("/api/auth/2fa/complete", axum::routing::post(crate::auth_2fa::complete_2fa))
         // Auth providers listing
@@ -2141,6 +2146,7 @@ mod tests {
             auth_rate_limiter: Arc::new(crate::auth_rate_limiter::AuthRateLimiter::new()),
             tiered_rate_limiter: Arc::new(crate::rate_limiter::TieredRateLimiter::new()),
             key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)),
+            saml_config: None,
         }
     }
 
