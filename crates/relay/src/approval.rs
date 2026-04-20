@@ -45,6 +45,11 @@ impl ApprovalQueue {
         self.pending.insert(req.id.clone(), req);
     }
 
+    /// Enqueue without responder (relay-side tracking only).
+    pub fn track(&self, req: ApprovalRequest) {
+        self.pending.insert(req.id.clone(), req);
+    }
+
     pub fn resolve(&self, id: &str, decision: ApprovalDecision) -> bool {
         if let Some((_, _req)) = self.pending.remove(id) {
             if let Some((_, tx)) = self.responders.remove(id) {

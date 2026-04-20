@@ -13,6 +13,8 @@ use log::info;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::sync::Arc;
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
 // StreamExt comes from futures_util (re-exported via axum)
 
 use crate::approval::{ApprovalDecision, ApprovalQueue};
@@ -29,6 +31,7 @@ use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
 use flowlink_core::ShieldAlertPayload;
 use crate::audit::{AuditStore, AuditFilter, SiemFormat};
+use serde_json::json;
 
 // ═══════════════════════════════════════════════
 // Shared State
@@ -393,6 +396,119 @@ async fn reject_approval(
     })
 }
 
+// ═══════════════════════════════════════════════
+// API Key Management
+// ═══════════════════════════════════════════════
+
+#[derive(Deserialize)]
+struct CreateApiKeyRequest {
+    name: String,
+    role: String,
+    expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Deserialize)]
+struct RevokeApiKeyRequest {
+    key_id: Uuid,
+}
+
+async fn create_api_key(
+    State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    Json(body): Json<CreateApiKeyRequest>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db.pool(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+
+    let org_id = match &claims.org_id {
+        Some(id) => match Uuid::parse_str(id) {
+            Ok(id) => id,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid org_id"}))).into_response(),
+        },
+        None => return (StatusCode::FORBIDDEN, Json(json!({"error": "No organization context"}))).into_response(),
+    };
+
+    let role = match crate::api_keys::ApiKeyRole::from_str(&body.role) {
+        Some(r) => r,
+        None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid role. Use: admin, operator, viewer"}))).into_response(),
+    };
+
+    match crate::api_keys::ApiKeyRepo::create(db, org_id, &claims.account_id, &body.name, &role, body.expires_at).await {
+        Ok(key) => (StatusCode::OK, Json(serde_json::to_value(key).unwrap())).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+async fn list_api_keys(
+    State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db.pool(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+
+    let org_id = match &claims.org_id {
+        Some(id) => match Uuid::parse_str(id) {
+            Ok(id) => id,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid org_id"}))).into_response(),
+        },
+        None => return (StatusCode::FORBIDDEN, Json(json!({"error": "No organization context"}))).into_response(),
+    };
+
+    // Determine caller role from their JWT (is_admin = admin, otherwise viewer)
+    let caller_role = if claims.is_admin {
+        crate::api_keys::ApiKeyRole::Admin
+    } else {
+        crate::api_keys::ApiKeyRole::Viewer
+    };
+
+    match crate::api_keys::ApiKeyRepo::list_by_org(db, org_id, &claims.account_id, &caller_role).await {
+        Ok(keys) => (StatusCode::OK, Json(json!({"keys": keys}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+async fn revoke_api_key(
+    State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    Path(key_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db.pool(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+
+    match crate::api_keys::ApiKeyRepo::revoke(db, key_id, &claims.account_id, claims.is_admin).await {
+        Ok(true) => (StatusCode::OK, Json(json!({"ok": true, "message": "API key revoked"}))).into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"ok": false, "error": "Key not found or not owned by you"}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+async fn delete_api_key(
+    State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    Path(key_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db.pool(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+
+    if !claims.is_admin {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "Admin required"}))).into_response();
+    }
+
+    match crate::api_keys::ApiKeyRepo::delete(db, key_id).await {
+        Ok(true) => (StatusCode::OK, Json(json!({"ok": true, "message": "API key deleted"}))).into_response(),
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "Key not found"}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
 async fn list_clients(State(state): State<AppState>) -> Json<Vec<crate::registry::RegisteredClient>> {
     Json(state.registry.list_clients())
 }
@@ -647,6 +763,37 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
                                 eventbus.publish("exec_output", &text_str);
                             }
                             flowlink_core::MessageType::NeedsApproval => {
+                                log::info!("Agent {aid}: approval requested");
+                                // Store in approval queue
+                                if let Some(ref payload) = msg.payload {
+                                    let req_id = payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    let command = payload.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    let risk = payload.get("risk").and_then(|v| v.as_str()).unwrap_or("high").to_string();
+                                    if !req_id.is_empty() {
+                                        state.approvals.track(
+                                            crate::approval::ApprovalRequest {
+                                                id: req_id.clone(),
+                                                agent_id: aid.clone(),
+                                                command: command.clone(),
+                                                risk_level: risk.clone(),
+                                                created_at: chrono::Utc::now().timestamp(),
+                                            },
+                                        );
+                                        // Persist to DB
+                                        if let Some(ref db) = state.db {
+                                            let _ = sqlx::query(
+                                                "INSERT INTO approval_log (id, agent_id, command, risk_level, status) VALUES ($1, $2, $3, $4, 'pending') ON CONFLICT (id) DO NOTHING"
+                                            )
+                                            .bind(&req_id)
+                                            .bind(&aid)
+                                            .bind(&command)
+                                            .bind(&risk)
+                                            .execute(db.write_pool())
+                                            .await;
+                                        }
+                                        log::info!("Approval request stored: {} agent={} cmd={:?} risk={}", req_id, aid, command, risk);
+                                    }
+                                }
                                 eventbus.publish("approval_request", &text_str);
                             }
                             flowlink_core::MessageType::ShieldAlert => {
@@ -1500,6 +1647,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/{id}/approve", post(approve_approval))
         .route("/api/approvals/{id}/reject", post(reject_approval))
+        // API Keys
+        .route("/api/v1/api-keys", post(create_api_key))
+        .route("/api/v1/api-keys", get(list_api_keys))
+        .route("/api/v1/api-keys/{key_id}", axum::routing::delete(delete_api_key))
+        .route("/api/v1/api-keys/{key_id}/revoke", post(revoke_api_key))
         .route("/api/exec/{agent_id}", post(exec_agent))
         // Devices
         .route("/api/devices/pair", axum::routing::post(crate::devices::pair_device))

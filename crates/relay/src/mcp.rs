@@ -3,12 +3,14 @@
 
 use axum::{
     extract::State,
+    http::HeaderMap,
     response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::api_keys::{ApiKeyRepo, ApiKeyRole, KeyIdentity};
 use crate::approval::ApprovalDecision;
 use crate::server::AppState;
 
@@ -187,7 +189,8 @@ fn mcp_tools() -> Vec<Value> {
                     "agent": { "type": "string", "description": "Agent ID or label" },
                     "action": { "type": "string", "enum": ["list", "approve", "reject", "approve_always"], "description": "Action to perform" },
                     "request_id": { "type": "string", "description": "Approval request ID (required for approve/reject/approve_always)" },
-                    "reason": { "type": "string", "description": "Reason for the decision (optional, for audit)" }
+                    "reason": { "type": "string", "description": "Reason for the decision (optional, for audit)" },
+                    "approver": { "type": "string", "description": "Who is making this decision (user ID or name, for audit trail)" }
                 }
             }
         }),
@@ -213,8 +216,42 @@ fn mcp_tools() -> Vec<Value> {
 
 pub async fn handle_mcp(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<McpRequest>,
 ) -> axum::response::Response {
+    // ── API Key Auth ──
+    let identity = match extract_api_key(&headers) {
+        Some(key) => {
+            match &state.db {
+                Some(db) => {
+                    match ApiKeyRepo::validate(db.pool(), &key).await {
+                        Ok(Some(id)) => Some(id),
+                        Ok(None) => {
+                            log::warn!("MCP auth failed: invalid API key prefix={}", &key[..12.min(key.len())]);
+                            return mcp_err(req.id, -32001, "Unauthorized: invalid API key").into_response();
+                        }
+                        Err(e) => {
+                            log::error!("MCP auth error: {e}");
+                            // DB error — allow through for now (graceful degradation)
+                            None
+                        }
+                    }
+                }
+                None => {
+                    log::warn!("MCP auth skipped: no DB configured");
+                    None
+                }
+            }
+        }
+        None => {
+            // No API key provided — check if auth is enforced
+            // For now: allow through with no identity (backward compat)
+            // TODO: make this configurable (enforce_auth: bool)
+            log::debug!("MCP request without API key");
+            None
+        }
+    };
+
     match req.method.as_str() {
         "initialize" => {
             let result = json!({
@@ -233,13 +270,13 @@ pub async fn handle_mcp(
             mcp_ok(req.id, json!({ "tools": mcp_tools() })).into_response()
         }
 
-        "tools/call" => handle_tools_call(state, req).await,
+        "tools/call" => handle_tools_call(state, req, identity).await,
 
         _ => mcp_err(req.id, -32601, format!("method not found: {}", req.method)).into_response(),
     }
 }
 
-async fn handle_tools_call(state: AppState, req: McpRequest) -> axum::response::Response {
+async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<KeyIdentity>) -> axum::response::Response {
     let params = match req.params {
         Some(Value::Object(map)) => map,
         _ => return mcp_err(req.id, -32602, "invalid params").into_response(),
@@ -254,19 +291,74 @@ async fn handle_tools_call(state: AppState, req: McpRequest) -> axum::response::
 
     match name {
         "flowlink_agents" => mcp_agents(&state, req.id, &args),
-        "flowlink_exec" => mcp_exec(&state, req.id, &args).await,
-        "flowlink_read" => mcp_read(&state, req.id, &args).await,
-        "flowlink_write" => mcp_write(&state, req.id, &args).await,
-        "flowlink_list" => mcp_list(&state, req.id, &args).await,
-        "flowlink_sysinfo" => mcp_sysinfo(&state, req.id, &args).await,
-        "flowlink_kill" => mcp_kill(&state, req.id, &args).await,
-        "flowlink_deregister" => mcp_deregister(&state, req.id, &args).await,
+        "flowlink_exec" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_exec") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_exec").into_response(); } }
+            mcp_exec(&state, req.id, &args, identity.as_ref()).await
+        }
+        "flowlink_read" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_read") { return mcp_err(req.id, -32002, "Forbidden: insufficient role").into_response(); } }
+            mcp_read(&state, req.id, &args).await
+        }
+        "flowlink_write" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_write") { return mcp_err(req.id, -32002, "Forbidden: insufficient role").into_response(); } }
+            mcp_write(&state, req.id, &args).await
+        }
+        "flowlink_list" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_list") { return mcp_err(req.id, -32002, "Forbidden: insufficient role").into_response(); } }
+            mcp_list(&state, req.id, &args).await
+        }
+        "flowlink_sysinfo" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_sysinfo") { return mcp_err(req.id, -32002, "Forbidden: insufficient role").into_response(); } }
+            mcp_sysinfo(&state, req.id, &args).await
+        }
+        "flowlink_kill" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_kill") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_kill").into_response(); } }
+            mcp_kill(&state, req.id, &args).await
+        }
+        "flowlink_deregister" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_deregister") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_deregister").into_response(); } }
+            mcp_deregister(&state, req.id, &args).await
+        }
         "flowlink_health" => mcp_health(&state, req.id, &args),
-        "flowlink_config_update" => mcp_config_update(&state, req.id, &args).await,
-        "flowlink_approve" => mcp_approve(&state, req.id, &args).await,
-        "flowlink_policy" => mcp_policy(&state, req.id, &args).await,
+        "flowlink_config_update" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_config_update") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_config_update").into_response(); } }
+            mcp_config_update(&state, req.id, &args).await
+        }
+        "flowlink_approve" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_approve") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_approve").into_response(); } }
+            mcp_approve(&state, req.id, &args, identity.as_ref()).await
+        }
+        "flowlink_policy" => {
+            if let Some(ref id) = identity { if !id.role.can_call("flowlink_policy") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_policy").into_response(); } }
+            mcp_policy(&state, req.id, &args).await
+        }
         _ => mcp_err(req.id, -32602, format!("unknown tool: {name}")).into_response(),
     }
+}
+
+// ═══════════════════════════════════════════════
+// API Key extraction
+// ═══════════════════════════════════════════════
+
+fn extract_api_key(headers: &HeaderMap) -> Option<String> {
+    // 1. x-api-key header
+    if let Some(v) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
+        let key = v.trim();
+        if key.starts_with("flk_") {
+            return Some(key.to_string());
+        }
+    }
+    // 2. Authorization: Bearer flk_...
+    if let Some(v) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        let parts: Vec<&str> = v.splitn(2, ' ').collect();
+        if parts.len() == 2 && parts[0].eq_ignore_ascii_case("bearer") {
+            let key = parts[1].trim();
+            if key.starts_with("flk_") {
+                return Some(key.to_string());
+            }
+        }
+    }
+    None
 }
 
 // ═══════════════════════════════════════════════
@@ -295,7 +387,7 @@ fn mcp_agents(state: &AppState, id: Option<Value>, _args: &Value) -> axum::respo
     mcp_ok(id, json!({ "content": [{ "type": "text", "text": text }] })).into_response()
 }
 
-async fn mcp_exec(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
+async fn mcp_exec(state: &AppState, id: Option<Value>, args: &Value, identity: Option<&KeyIdentity>) -> axum::response::Response {
     let agent_id = match get_arg(args, "agent") {
         Some(v) => v,
         None => return mcp_err(id, -32602, "agent: required").into_response(),
@@ -309,6 +401,11 @@ async fn mcp_exec(state: &AppState, id: Option<Value>, args: &Value) -> axum::re
         Some(id) => id,
         None => return mcp_err(id, -32602, format!("agent not found: {agent_id}")).into_response(),
     };
+
+    // Audit log with identity
+    if let Some(id) = identity {
+        log::info!("MCP exec: agent={resolved} cmd={command:.80} caller={} org={}", id.account_id, id.org_id);
+    }
 
     let timeout: i32 = args.get("timeout").and_then(|v| v.as_i64()).unwrap_or(120) as i32;
     let workdir = args.get("workdir").and_then(|v| v.as_str()).map(String::from);
@@ -630,7 +727,7 @@ async fn mcp_deregister(state: &AppState, id: Option<Value>, args: &Value) -> ax
     })).into_response()
 }
 
-async fn mcp_approve(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
+async fn mcp_approve(state: &AppState, id: Option<Value>, args: &Value, identity: Option<&KeyIdentity>) -> axum::response::Response {
     let agent_id = match get_arg(args, "agent") {
         Some(v) => v,
         None => return mcp_err(id, -32602, "agent: required").into_response(),
@@ -682,12 +779,41 @@ async fn mcp_approve(state: &AppState, id: Option<Value>, args: &Value) -> axum:
             };
 
             let reason = get_arg(args, "reason").unwrap_or_default();
-            if state.approvals.resolve(&request_id, decision) {
+            let approver = if let Some(id) = identity {
+                format!("mcp:{} ({})", id.account_id, id.key_id)
+            } else {
+                get_arg(args, "approver").unwrap_or_else(|| "mcp:unknown".into())
+            };
+
+            if state.approvals.resolve(&request_id, decision.clone()) {
+                // Log the decision
+                log::info!(
+                    "Approval {}: request={} agent={} approver={:?} reason={:?}",
+                    action, request_id, resolved, approver, reason
+                );
+
+                // Update DB audit log with identity
+                if let Some(ref db) = state.db {
+                    let _ = sqlx::query(
+                        "UPDATE approval_log SET status = $1, approver = $2, reason = $3, resolved_at = NOW(),
+                         org_id = $5, approver_account_id = $6, api_key_id = $7 WHERE id = $4"
+                    )
+                    .bind(&action)
+                    .bind(&approver)
+                    .bind(&reason)
+                    .bind(&request_id)
+                    .bind(identity.map(|i| i.org_id))
+                    .bind(identity.map(|i| i.account_id.as_str()))
+                    .bind(identity.map(|i| i.key_id))
+                    .execute(db.write_pool())
+                    .await;
+                }
+
                 let emoji = if action == "approve" { "✅" } else { "❌" };
                 let text = if reason.is_empty() {
-                    format!("{} Approval {} for request {}", emoji, action, request_id)
+                    format!("{} Approval {} for request {} by {}", emoji, action, request_id, approver)
                 } else {
-                    format!("{} Approval {} for request {}. Reason: {}", emoji, action, request_id, reason)
+                    format!("{} Approval {} for request {} by {}. Reason: {}", emoji, action, request_id, approver, reason)
                 };
 
                 // Also send decision to agent via WS
@@ -703,6 +829,7 @@ async fn mcp_approve(state: &AppState, id: Option<Value>, args: &Value) -> axum:
                             "request_id": request_id,
                             "decision": action,
                             "reason": reason,
+                            "approved": action == "approve",
                         }))
                 ).await;
 

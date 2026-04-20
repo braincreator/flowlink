@@ -533,6 +533,51 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             ON CONFLICT (id) DO NOTHING;
             "#,
         ),
+        (
+            "031_approval_log",
+            r#"
+            CREATE TABLE IF NOT EXISTS approval_log (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                command TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                approver TEXT,
+                reason TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                resolved_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_approval_log_agent ON approval_log(agent_id);
+            CREATE INDEX IF NOT EXISTS idx_approval_log_status ON approval_log(status);
+            CREATE INDEX IF NOT EXISTS idx_approval_log_created ON approval_log(created_at);
+            "#,
+        ),
+        (
+            "032_api_keys",
+            r#"
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+                account_id TEXT NOT NULL,
+                key_hash TEXT NOT NULL,
+                key_prefix TEXT NOT NULL,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'viewer',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                last_used TIMESTAMPTZ,
+                expires_at TIMESTAMPTZ,
+                active BOOLEAN NOT NULL DEFAULT true
+            );
+            CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+            CREATE INDEX IF NOT EXISTS idx_api_keys_org ON api_keys(org_id);
+            CREATE INDEX IF NOT EXISTS idx_api_keys_account ON api_keys(account_id);
+
+            ALTER TABLE approval_log ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organizations(org_id) ON DELETE SET NULL;
+            ALTER TABLE approval_log ADD COLUMN IF NOT EXISTS approver_account_id TEXT;
+            ALTER TABLE approval_log ADD COLUMN IF NOT EXISTS approver_name TEXT;
+            ALTER TABLE approval_log ADD COLUMN IF NOT EXISTS api_key_id UUID REFERENCES api_keys(id) ON DELETE SET NULL;
+            "#,
+        ),
     ]
 }
 
@@ -543,7 +588,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 28);
+        assert_eq!(migrations.len(), 32);
     }
 
     #[test]
@@ -579,6 +624,9 @@ mod tests {
             "027_audit_org_columns_and_webhooks",
             "028_account_deletion",
             "029_agent_api_tokens",
+            "030_policy_framework",
+            "031_approval_log",
+            "032_api_keys",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(
