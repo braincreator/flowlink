@@ -22,62 +22,57 @@ pub struct Client {
     pub active: bool,
 }
 
-/// Persisted auth manager for API token validation.
-/// Tokens backed by JSON file so they survive restarts.
+/// Auth manager for API token validation.
+/// Tokens cached in-memory (DashMap) with optional PostgreSQL backing.
 pub struct AuthManager {
     clients: Arc<DashMap<String, Client>>,
     token_to_client: Arc<DashMap<String, String>>,
-    persist_path: Option<String>,
+    db: Option<Arc<sqlx::PgPool>>,
 }
 
 impl Default for AuthManager {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self { Self::new(None) }
 }
 
 impl AuthManager {
-    pub fn new() -> Self {
-        Self::with_persistence(None)
-    }
-
-    pub fn with_persistence(path: Option<String>) -> Self {
+    pub fn new(db: Option<Arc<sqlx::PgPool>>) -> Self {
         let mgr = Self {
             clients: Arc::new(DashMap::new()),
             token_to_client: Arc::new(DashMap::new()),
-            persist_path: path.clone(),
+            db: db.clone(),
         };
-        if let Some(ref p) = path {
-            mgr.load_from_file(p);
+        if let Some(ref pool) = db {
+            let rt = tokio::runtime::Handle::current();
+            let pool = pool.clone();
+            let clients = mgr.clients.clone();
+            let token_map = mgr.token_to_client.clone();
+            rt.spawn_blocking(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async move {
+                    if let Ok(rows) = sqlx::query_as::<_, (String, String, String, bool)>(
+                        "SELECT agent_id, COALESCE(api_token, ''), name, (status = 'connected') FROM agents WHERE api_token IS NOT NULL"
+                    ).fetch_all(pool.as_ref()).await {
+                        for (agent_id, api_token, name, active) in &rows {
+                            if !api_token.is_empty() {
+                                let client = Client {
+                                    client_id: agent_id.clone(),
+                                    api_token: api_token.clone(),
+                                    name: name.clone(),
+                                    active: *active,
+                                };
+                                token_map.insert(api_token.clone(), agent_id.clone());
+                                clients.insert(agent_id.clone(), client);
+                            }
+                        }
+                        let count = rows.iter().filter(|(_, t, _, _)| !t.is_empty()).count();
+                        if count > 0 {
+                            log::info!("AuthManager: loaded {} agent tokens from DB", count);
+                        }
+                    }
+                });
+            });
         }
         mgr
-    }
-
-    fn save_to_file(&self) {
-        let path = match &self.persist_path {
-            Some(p) => p,
-            None => return,
-        };
-        let clients: Vec<Client> = self.clients.iter().map(|r| r.value().clone()).collect();
-        if let Ok(data) = serde_json::to_string_pretty(&clients) {
-            let tmp = format!("{}.tmp", path);
-            if std::fs::write(&tmp, &data).is_ok() {
-                let _ = std::fs::rename(&tmp, path);
-            }
-        }
-    }
-
-    fn load_from_file(&self, path: &str) {
-        if let Ok(data) = std::fs::read_to_string(path) {
-            if let Ok(parsed) = serde_json::from_str::<Vec<Client>>(&data) {
-                let count = parsed.len();
-                for c in parsed {
-                    self.token_to_client.insert(c.api_token.clone(), c.client_id.clone());
-                    self.clients.insert(c.client_id.clone(), c);
-                }
-                if count > 0 {
-                    log::info!("AuthManager: loaded {} persisted tokens from {}", count, path);
-                }
-            }
-        }
     }
 
     pub fn register_client(&self, client: Client) {
@@ -86,14 +81,28 @@ impl AuthManager {
         if let Some(old) = self.clients.get(&id) {
             self.token_to_client.remove(&old.api_token);
         }
-        self.token_to_client.insert(token, id.clone());
-        self.clients.insert(id, client);
-        self.save_to_file();
+        self.token_to_client.insert(token.clone(), id.clone());
+        self.clients.insert(id.clone(), client.clone());
+
+        // Persist to DB
+        if let Some(ref pool) = self.db {
+            let pool = pool.clone();
+            let cid = id.clone();
+            let name = client.name.clone();
+            let api_token = token.clone();
+            tokio::spawn(async move {
+                let _ = sqlx::query(
+                    "INSERT INTO agents (agent_id, api_token, name, status) VALUES ($1, $2, $3, 'connected') \
+                     ON CONFLICT (agent_id) DO UPDATE SET api_token = EXCLUDED.api_token, name = EXCLUDED.name, status = 'connected'"
+                ).bind(&cid).bind(&api_token).bind(&name).execute(pool.as_ref()).await;
+            });
+        }
     }
 
     pub fn is_empty(&self) -> bool { self.clients.is_empty() }
 
     pub fn validate_token(&self, token: &str) -> Option<Client> {
+        // Fast path: in-memory cache
         let client_id = self.token_to_client.get(token)?;
         let id: String = client_id.value().clone();
         self.clients.get(&id).map(|c| c.value().clone())

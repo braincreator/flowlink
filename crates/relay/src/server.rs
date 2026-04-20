@@ -1662,7 +1662,7 @@ mod tests {
             eventbus: Arc::new(EventBus::new()),
             handler: Arc::new(RelayHandler::new(
                 Arc::new(AgentPool::new()),
-                Arc::new(AuthManager::new()),
+                Arc::new(AuthManager::new(None)),
                 Arc::new(EventBus::new()),
                 Arc::new(ApprovalQueue::new()),
             )),
@@ -1684,7 +1684,7 @@ mod tests {
             notification_router: std::sync::OnceLock::new(),
             auth_engine: None,
             email_service: None,
-            auth: Arc::new(AuthManager::new()),
+            auth: Arc::new(AuthManager::new(None)),
             tochka: None,
             notification_store: None,
             rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
@@ -1964,7 +1964,7 @@ mod tests {
         let shared_config = Arc::new(tokio::sync::RwLock::new(config));
         let handler = Arc::new(RelayHandler::new(
             Arc::new(AgentPool::new()),
-            Arc::new(AuthManager::new()),
+            Arc::new(AuthManager::new(None)),
             Arc::new(EventBus::new()),
             Arc::new(ApprovalQueue::new()),
         ));

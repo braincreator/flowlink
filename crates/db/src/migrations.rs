@@ -467,6 +467,15 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_accounts_deleted_at ON accounts(deleted_at) WHERE deleted_at IS NOT NULL;
             "#,
         ),
+        (
+            "029_agent_api_tokens",
+            r#"
+            ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_token TEXT;
+            ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_token_hash TEXT;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_api_token ON agents(api_token) WHERE api_token IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_api_token_hash ON agents(api_token_hash) WHERE api_token_hash IS NOT NULL;
+            "#,
+        ),
     ]
 }
 
@@ -512,6 +521,7 @@ mod tests {
             "026_organizations_grace_period",
             "027_audit_org_columns_and_webhooks",
             "028_account_deletion",
+            "029_agent_api_tokens",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(

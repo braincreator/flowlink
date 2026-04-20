@@ -73,7 +73,7 @@ mod tests {
     fn test_handler() -> RelayHandler {
         RelayHandler::new(
             Arc::new(AgentPool::new()),
-            Arc::new(AuthManager::new()),
+            Arc::new(AuthManager::new(None)),
             Arc::new(EventBus::new()),
             Arc::new(ApprovalQueue::new()),
         )

@@ -79,8 +79,6 @@ impl Relay {
 
     pub async fn run(&self) -> anyhow::Result<()> {
         let pool = Arc::new(AgentPool::new());
-        let tokens_path = std::path::Path::new(&shellexpand::tilde("~/.flowlink/agents.json").to_string()).to_string_lossy().to_string();
-        let auth = Arc::new(AuthManager::with_persistence(Some(tokens_path)));
         let eventbus = Arc::new(EventBus::new());
         let approvals = Arc::new(ApprovalQueue::new());
 
@@ -90,10 +88,6 @@ impl Relay {
 
         let data_dir = shellexpand::tilde(&self.config.registry.data_path).to_string();
         let registry = Arc::new(Registry::new(&data_dir)?);
-
-        let handler = Arc::new(RelayHandler::new(
-            pool.clone(), auth.clone(), eventbus.clone(), approvals.clone(),
-        ));
 
         let llm_proxy = if self.config.llm.enabled {
             Some(Arc::new(LlmProxy::new(
@@ -130,6 +124,13 @@ impl Relay {
         } else {
             None
         };
+
+        // AuthManager — loads agent tokens from DB on startup
+        let auth = Arc::new(AuthManager::new(db.as_ref().map(|d| Arc::new(d.write_pool.clone()))));
+
+        let handler = Arc::new(RelayHandler::new(
+            pool.clone(), auth.clone(), eventbus.clone(), approvals.clone(),
+        ));
 
         // Initialize AuthEngine now that db is available
         let auth_engine = if !self.config.auth.jwt_secret.is_empty() {

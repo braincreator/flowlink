@@ -386,7 +386,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_layer_no_config_passthrough() {
-        let auth = Arc::new(AuthManager::new());
+        let auth = Arc::new(AuthManager::new(None));
         let layer = auth_layer(auth, None, vec![]);
         let app = test_app().layer(axum::middleware::from_fn(layer));
         let resp = app.oneshot(HttpRequest::builder().uri("/health").body(Body::empty()).unwrap()).await.unwrap();
@@ -395,7 +395,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_layer_rejects_missing_token() {
-        let auth = Arc::new(AuthManager::new());
+        let auth = Arc::new(AuthManager::new(None));
         auth.register_client(crate::auth::Client {
             client_id: "c1".into(), api_token: "tok1".into(), name: "c1".into(), active: true,
         });
@@ -407,7 +407,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_layer_accepts_valid_token() {
-        let auth = Arc::new(AuthManager::new());
+        let auth = Arc::new(AuthManager::new(None));
         auth.register_client(crate::auth::Client {
             client_id: "c1".into(), api_token: "tok1".into(), name: "c1".into(), active: true,
         });
@@ -422,7 +422,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_layer_invalid_token() {
-        let auth = Arc::new(AuthManager::new());
+        let auth = Arc::new(AuthManager::new(None));
         auth.register_client(crate::auth::Client {
             client_id: "c1".into(), api_token: "secret".into(), name: "c1".into(), active: true,
         });
@@ -437,7 +437,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_layer_skip_paths() {
-        let auth = Arc::new(AuthManager::new());
+        let auth = Arc::new(AuthManager::new(None));
         auth.register_client(crate::auth::Client {
             client_id: "c1".into(), api_token: "tok1".into(), name: "c1".into(), active: true,
         });
@@ -449,7 +449,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_layer_static_token() {
-        let auth = Arc::new(AuthManager::new());
+        let auth = Arc::new(AuthManager::new(None));
         let layer = auth_layer(auth, Some("static-secret".into()), vec![]);
         let app = test_app().layer(axum::middleware::from_fn(layer));
         let req = HttpRequest::builder().uri("/health")

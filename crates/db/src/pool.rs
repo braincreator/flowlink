@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// Database pool wrapper with primary/replica support.
 pub struct DbPool {
     /// Primary pool — used for writes, migrations, and read fallback.
-    write_pool: PgPool,
+    pub write_pool: PgPool,
     /// Optional read replica pools for read queries.
     read_pools: Vec<PgPool>,
     /// Round-robin counter for replica selection.

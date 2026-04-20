@@ -313,7 +313,7 @@ mod tests {
         let config = Arc::new(RwLock::new(config));
         let handler = Arc::new(RelayHandler::new(
             Arc::new(AgentPool::new()),
-            Arc::new(AuthManager::new()),
+            Arc::new(AuthManager::new(None)),
             Arc::new(EventBus::new()),
             Arc::new(ApprovalQueue::new()),
         ));
