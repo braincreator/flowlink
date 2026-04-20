@@ -84,6 +84,9 @@ struct HealthResponse {
     agents_online: usize,
     agents_total: usize,
     approvals_pending: usize,
+    shield_alerts_24h: i64,
+    pattern_suggestions: i64,
+    api_keys_active: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     rate_limits: Option<crate::rate_limiter::RateLimitStats>,
 }
@@ -230,6 +233,24 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let agents_total = agents.len();
     let agents_online = agents.iter().filter(|a| a.online).count();
     let approvals_pending = state.approvals.list_pending().len();
+
+    // Additional metrics from DB
+    let (shield_alerts_24h, pattern_suggestions, api_keys_active) = match &state.db {
+        Some(pool) => {
+            let sa = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM shield_alerts WHERE timestamp > NOW() - INTERVAL '24 hours'"
+            ).fetch_one(pool.pool()).await.unwrap_or(0);
+            let ps = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM command_patterns WHERE suggested_action IS NOT NULL"
+            ).fetch_one(pool.pool()).await.unwrap_or(0);
+            let ak = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM api_keys WHERE revoked_at IS NULL"
+            ).fetch_one(pool.pool()).await.unwrap_or(0);
+            (sa, ps, ak)
+        }
+        None => (0, 0, 0),
+    };
+
     Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -239,6 +260,9 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         agents_online,
         agents_total,
         approvals_pending,
+        shield_alerts_24h,
+        pattern_suggestions,
+        api_keys_active,
         rate_limits: Some(state.tiered_rate_limiter.stats()),
     })
 }
@@ -259,22 +283,88 @@ async fn list_pattern_suggestions(State(state): State<AppState>) -> impl IntoRes
         Some(db) => db.pool(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
     };
-    match sqlx::query_as::<_, (String, String, String, Option<String>, chrono::DateTime<chrono::Utc>)>(
-        "SELECT agent_id, command_prefix, last_risk, suggested_action, last_seen FROM command_patterns WHERE suggested_action IS NOT NULL ORDER BY last_seen DESC LIMIT 100"
+    match sqlx::query_as::<_, (String, String, i32, i32, i32, String, Option<String>, chrono::DateTime<chrono::Utc>)>(
+        "SELECT agent_id, command_prefix, exec_count, blocked_count, approved_count, last_risk, suggested_action, last_seen FROM command_patterns ORDER BY last_seen DESC LIMIT 100"
     )
     .fetch_all(db)
     .await {
         Ok(rows) => {
-            let suggestions: Vec<serde_json::Value> = rows.into_iter().map(|(agent_id, prefix, risk, action, last_seen)| {
+            let suggestions: Vec<serde_json::Value> = rows.into_iter().map(|(agent_id, prefix, exec_count, blocked_count, approved_count, risk, action, last_seen)| {
                 json!({
                     "agent_id": agent_id,
                     "command_prefix": prefix,
+                    "exec_count": exec_count,
+                    "blocked_count": blocked_count,
+                    "approved_count": approved_count,
                     "risk": risk,
                     "suggested_action": action,
                     "last_seen": last_seen.to_rfc3339(),
                 })
             }).collect();
             (StatusCode::OK, Json(json!({"suggestions": suggestions}))).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct ApplyPatternRequest {
+    agent_id: String,
+    command_prefix: String,
+    action: String,
+}
+
+/// Apply a pattern suggestion as a policy rule
+async fn apply_pattern_suggestion(
+    State(state): State<AppState>,
+    Json(body): Json<ApplyPatternRequest>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db.pool(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+
+    // Determine policy action based on suggestion
+    let (rule_type, pattern) = match body.action.as_str() {
+        "AutoApprove" => ("allow", body.command_prefix.clone()),
+        "PermanentDeny" => ("deny", body.command_prefix.clone()),
+        "LowerRisk" => ("allow", body.command_prefix.clone()),
+        _ => return (StatusCode::BAD_REQUEST, Json(json!({"error": "Unknown action"}))).into_response(),
+    };
+
+    // Insert as runtime policy rule bound to default policy
+    let result = sqlx::query(
+        "INSERT INTO policy_rules (policy_id, rule_type, pattern, priority) 
+         SELECT id, $2, $3, 100 FROM policies WHERE name = 'Default' LIMIT 1"
+    )
+    .bind(&rule_type)
+    .bind(&pattern)
+    .execute(db)
+    .await;
+
+    match result {
+        Ok(r) => {
+            if r.rows_affected() > 0 {
+                // Clear the suggestion
+                let _ = sqlx::query(
+                    "UPDATE command_patterns SET suggested_action = NULL WHERE agent_id = $1 AND command_prefix = $2"
+                )
+                .bind(&body.agent_id)
+                .bind(&body.command_prefix)
+                .execute(db)
+                .await;
+
+                // Notify agent via WS to reload policy
+                let _ = state.handler.send_to_agent(&body.agent_id,
+                    flowlink_core::Message::new(flowlink_core::MessageType::PolicyUpdate)
+                        .with_agent_id(&body.agent_id)
+                        .with_payload(serde_json::json!({"action": "reload"}))
+                ).await;
+
+                (StatusCode::OK, Json(json!({"ok": true, "message": format!("Applied {} rule for '{}'", rule_type, pattern)}))).into_response()
+            } else {
+                (StatusCode::NOT_FOUND, Json(json!({"error": "Default policy not found"}))).into_response()
+            }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
@@ -924,11 +1014,10 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
                                             let prefix = s.get("prefix").and_then(|v| v.as_str()).unwrap_or("");
                                             let reason = s.get("reason").and_then(|v| v.as_str()).unwrap_or("");
                                             log::info!("[Pattern] {aid}: {action} for '{prefix}' — {reason}");
-                                            // Persist to DB
                                             if let Some(ref db) = state.db {
                                                 let _ = sqlx::query(
-                                                    "INSERT INTO command_patterns (agent_id, command_hash, command_prefix, suggested_action, last_seen) 
-                                                     VALUES ($1, digest($2, 'sha256'), $2, $3, NOW()) 
+                                                    "INSERT INTO command_patterns (agent_id, command_hash, command_prefix, suggested_action, last_risk, last_result, last_seen)
+                                                     VALUES ($1, digest($2, 'sha256'), $2, $3, 'low', 'allowed', NOW())
                                                      ON CONFLICT (agent_id, command_hash) DO UPDATE SET suggested_action = $3, last_seen = NOW()"
                                                 )
                                                 .bind(&aid)
@@ -1822,6 +1911,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/policies/unbind", axum::routing::post(crate::policy_db::unbind_policy_from_agent))
         // Pattern suggestions
         .route("/api/v1/patterns", get(list_pattern_suggestions))
+        .route("/api/v1/patterns/apply", post(apply_pattern_suggestion))
         // Account
         .route("/api/account/info", axum::routing::get(account_info))
         .route("/api/account", axum::routing::delete(crate::account_deletion_api::request_deletion))
