@@ -584,6 +584,27 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS scopes TEXT NOT NULL DEFAULT '';
             "#,
         ),
+        (
+            "034_command_patterns",
+            r#"
+            CREATE TABLE IF NOT EXISTS command_patterns (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                agent_id TEXT NOT NULL,
+                command_hash TEXT NOT NULL,
+                command_prefix TEXT NOT NULL,
+                exec_count INT NOT NULL DEFAULT 0,
+                blocked_count INT NOT NULL DEFAULT 0,
+                approved_count INT NOT NULL DEFAULT 0,
+                last_risk TEXT NOT NULL DEFAULT 'none',
+                last_result TEXT NOT NULL DEFAULT 'allowed',
+                suggested_action TEXT,
+                first_seen TIMESTAMPTZ DEFAULT NOW(),
+                last_seen TIMESTAMPTZ DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_patterns_agent ON command_patterns(agent_id);
+            CREATE INDEX IF NOT EXISTS idx_patterns_hash ON command_patterns(agent_id, command_hash);
+            "#,
+        ),
     ]
 }
 
@@ -594,7 +615,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 33);
+        assert_eq!(migrations.len(), 34);
     }
 
     #[test]
@@ -634,6 +655,7 @@ mod tests {
             "031_approval_log",
             "032_api_keys",
             "033_api_keys_scopes",
+            "034_command_patterns",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(

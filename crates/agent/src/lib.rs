@@ -10,6 +10,7 @@ pub mod dispatch;
 pub mod executor;
 pub mod fileops;
 pub mod killswitch;
+pub mod pattern_learn;
 pub mod policy;
 pub mod remote_llm;
 pub mod sandbox;

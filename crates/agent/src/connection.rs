@@ -12,6 +12,7 @@ use crate::backup::BackupManager;
 use crate::executor::Executor;
 use crate::fileops::FileOps;
 use crate::killswitch::KillSwitch;
+use crate::pattern_learn::PatternLearner;
 use crate::policy::PolicyEngine;
 use crate::sandbox::Sandbox;
 use crate::skills::SkillManager;
@@ -29,6 +30,7 @@ pub struct Connection {
     skill_mgr: SkillManager,
     sandbox: Arc<RwLock<Sandbox>>,
     executor: Executor,
+    pattern_learner: Arc<tokio::sync::Mutex<PatternLearner>>,
     shutdown: Arc<tokio::sync::Notify>,
 }
 
@@ -59,6 +61,7 @@ impl Connection {
             skill_mgr,
             sandbox: Arc::new(RwLock::new(sandbox)),
             executor,
+            pattern_learner: Arc::new(tokio::sync::Mutex::new(PatternLearner::new())),
             shutdown,
         }
     }
@@ -125,6 +128,8 @@ impl Connection {
         // Message loop with heartbeat
         let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
         heartbeat_interval.tick().await; // skip first immediate tick
+        let mut analysis_interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 5 min
+        analysis_interval.tick().await;
 
         loop {
             tokio::select! {
@@ -175,6 +180,24 @@ impl Connection {
                         warn!("WS Ping failed: {e}");
                     }
                 }
+                _ = analysis_interval.tick() => {
+                    // Pattern learning: analyze and log suggestions
+                    let suggestions = {
+                        let learner = self.pattern_learner.lock().await;
+                        learner.analyze()
+                    };
+                    if !suggestions.is_empty() {
+                        for s in &suggestions {
+                            info!("[Pattern] suggestion: {:?}", s);
+                        }
+                        // Save patterns to disk
+                        let cache_path = std::env::var("FLOWLINK_AGENT_DIR")
+                            .unwrap_or_else(|_| "/opt/flowlink/agent".into());
+                        let path = std::path::Path::new(&cache_path).join("pattern_cache.json");
+                        let learner = self.pattern_learner.lock().await;
+                        learner.save_to_file(&path);
+                    }
+                }
             }
         }
 
@@ -216,6 +239,14 @@ impl Connection {
         }
 
         info!("Received: {:?}", msg.msg_type);
+
+        // Track command patterns for learning (before dispatch, extract command info)
+        let track_info = if msg.msg_type == MessageType::ExecRequest {
+            msg.payload.as_ref().and_then(|p| p.get("command")).and_then(|c| c.as_str()).map(|c| c.to_string())
+        } else {
+            None
+        };
+
         let response = crate::dispatch::dispatch(
             &msg,
             &*self.policy.read().await,
@@ -228,6 +259,30 @@ impl Connection {
             &self.executor,
         )
         .await;
+
+        // Track pattern after dispatch (we know the result now)
+        if let Some(cmd) = track_info {
+            let result = match &response {
+                Some(r) => {
+                    if r.msg_type == MessageType::Error {
+                        // Check if it was a policy block
+                        r.error.as_deref().unwrap_or("").contains("BLOCKED")
+                            .then_some("blocked")
+                            .unwrap_or("allowed")
+                    } else {
+                        "allowed"
+                    }
+                }
+                None => "allowed",
+            };
+            let risk = match result {
+                "blocked" => "high",
+                _ => "low",
+            };
+            let mut learner = self.pattern_learner.lock().await;
+            learner.track(&cmd, risk, result);
+        }
+
         response
     }
 
