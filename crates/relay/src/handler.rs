@@ -11,7 +11,7 @@ use crate::auth::AuthManager;
 use crate::eventbus::EventBus;
 use crate::pool::AgentPool;
 
-type WsSender = mpsc::Sender<AxumMsg>;
+type WsSender = (mpsc::Sender<AxumMsg>, u64);
 
 pub struct RelayHandler {
     #[allow(dead_code)]
@@ -48,6 +48,19 @@ impl RelayHandler {
         self.ws_senders.remove(agent_id);
     }
 
+    /// Remove sender only if it hasn't been replaced by a new connection.
+    /// Uses a connection counter to detect stale senders.
+    pub fn remove_sender_if_stale(&self, agent_id: &str, conn_id: u64) {
+        if let Some(entry) = self.ws_senders.get(agent_id) {
+            // Check if connection ID matches
+            if entry.value().1 != conn_id {
+                log::info!("Skipping sender removal for {agent_id}: newer connection active");
+                return;
+            }
+        }
+        self.ws_senders.remove(agent_id);
+    }
+
     /// List all currently connected agent IDs.
     pub fn connected_agents(&self) -> Vec<String> {
         self.ws_senders.iter().map(|r| r.key().clone()).collect()
@@ -58,7 +71,7 @@ impl RelayHandler {
         let json = serde_json::to_string(&msg)?;
         let ws_msg = AxumMsg::Text(json.into());
         if let Some(sender) = self.ws_senders.get(agent_id) {
-            sender.send(ws_msg).await?;
+            sender.value().0.send(ws_msg).await?;
             Ok(())
         } else {
             anyhow::bail!("Agent {agent_id} is offline — not connected via WebSocket");

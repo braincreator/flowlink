@@ -539,7 +539,11 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
     let (tx, mut rx) = tokio::sync::mpsc::channel::<AxumMsg>(256);
 
     // Register sender
-    state.handler.register_sender(agent_id.clone(), tx.clone());
+    // Each WS connection gets a unique ID to prevent stale sender removal
+    static CONNECTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let conn_id = CONNECTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+    state.handler.register_sender(agent_id.clone(), (tx.clone(), conn_id));
 
     // Register in pool
     state.pool.register(crate::pool::AgentInfo {
@@ -714,8 +718,10 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
         _ = write_task => {},
     }
 
+    // Only remove sender if it hasn't been replaced by a new connection
+    // (agent may have reconnected before this WS handler finished cleanup)
+    state.handler.remove_sender_if_stale(&aid, conn_id);
     pool.set_offline(&aid);
-    state.handler.remove_sender(&aid);
     state.e2ee.remove_agent_key(&aid).await;
     // Notify via Telegram
     if let Some(tg_bot) = state.tg_bot.get() {

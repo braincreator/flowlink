@@ -33,11 +33,13 @@ pub struct PolicyEngine {
     runtime_allow: Vec<String>,
     /// Dynamic deny rules added at runtime (regex patterns). Always blocked.
     runtime_deny: Vec<String>,
+    /// Path to cache file for persistence across restarts.
+    cache_path: Option<String>,
 }
 
 impl PolicyEngine {
     pub fn new(read_only: bool, allow_sudo: bool) -> Self {
-        Self {
+        let mut engine = Self {
             shield: AnalysisEngine {
                 enable_ast: true,
                 enable_interpreter: true,
@@ -48,7 +50,14 @@ impl PolicyEngine {
             allowed_dirs: vec![],
             runtime_allow: vec![],
             runtime_deny: vec![],
+            cache_path: None,
+        };
+        // Auto-detect cache path from agent config dir
+        if let Ok(config_dir) = std::env::var("FLOWLINK_AGENT_DIR") {
+            engine.cache_path = Some(format!("{}/policy_cache.json", config_dir.trim_end_matches('/')));
+            engine.load_cache_from_file();
         }
+        engine
     }
 
     pub fn with_allowed_dirs(mut self, dirs: Vec<String>) -> Self {
@@ -74,21 +83,25 @@ impl PolicyEngine {
     /// Add a runtime allow rule (regex or glob). Commands matching this are always allowed.
     pub fn add_allow_rule(&mut self, pattern: String) {
         self.runtime_allow.push(pattern);
+        self.save_cache_to_file();
     }
 
     /// Add a runtime deny rule (regex or glob). Commands matching this are always blocked.
     pub fn add_deny_rule(&mut self, pattern: String) {
         self.runtime_deny.push(pattern);
+        self.save_cache_to_file();
     }
 
     /// Remove a runtime rule (allow or deny) by exact pattern match.
     pub fn remove_rule(&mut self, pattern: &str) -> bool {
         if let Some(pos) = self.runtime_allow.iter().position(|r| r == pattern) {
             self.runtime_allow.remove(pos);
+            self.save_cache_to_file();
             return true;
         }
         if let Some(pos) = self.runtime_deny.iter().position(|r| r == pattern) {
             self.runtime_deny.remove(pos);
+            self.save_cache_to_file();
             return true;
         }
         false
@@ -103,6 +116,53 @@ impl PolicyEngine {
     pub fn replace_runtime_rules(&mut self, allows: Vec<String>, denies: Vec<String>) {
         self.runtime_allow = allows;
         self.runtime_deny = denies;
+        self.save_cache_to_file();
+    }
+
+    /// Set cache file path explicitly.
+    pub fn set_cache_path(&mut self, path: String) {
+        self.cache_path = Some(path);
+    }
+
+    /// Save current runtime rules to cache file.
+    fn save_cache_to_file(&self) {
+        if let Some(ref path) = self.cache_path {
+            let data = serde_json::json!({
+                "allows": self.runtime_allow,
+                "denies": self.runtime_deny,
+                "cached_at": chrono::Utc::now().to_rfc3339(),
+            });
+            if let Ok(json) = serde_json::to_string_pretty(&data) {
+                if std::fs::write(path, json).is_err() {
+                    log::warn!("Failed to save policy cache to {}", path);
+                } else {
+                    log::info!("Policy cache saved: {} allows, {} denies", self.runtime_allow.len(), self.runtime_deny.len());
+                }
+            }
+        }
+    }
+
+    /// Load runtime rules from cache file (fallback when relay is unreachable).
+    fn load_cache_from_file(&mut self) {
+        if let Some(ref path) = self.cache_path {
+            if let Ok(data) = std::fs::read_to_string(path) {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let allows: Vec<String> = parsed.get("allows")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+                    let denies: Vec<String> = parsed.get("denies")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
+                    if !allows.is_empty() || !denies.is_empty() {
+                        self.runtime_allow = allows;
+                        self.runtime_deny = denies;
+                        log::info!("Policy cache loaded: {} allows, {} denies", self.runtime_allow.len(), self.runtime_deny.len());
+                    }
+                }
+            }
+        }
     }
 
     /// Match a command against a simple glob pattern (* = wildcard).
