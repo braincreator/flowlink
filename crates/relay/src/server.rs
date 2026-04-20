@@ -90,6 +90,8 @@ struct HealthResponse {
     api_keys_active: i64,
     avg_response_ms: f64,
     total_requests_24h: i64,
+    ws_connections: i64,
+    agent_avg_latency_ms: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     rate_limits: Option<crate::rate_limiter::RateLimitStats>,
 }
@@ -266,8 +268,36 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         shield_alerts_24h,
         pattern_suggestions,
         api_keys_active,
-        avg_response_ms: 0.0, // TODO: track with middleware
-        total_requests_24h: 0, // TODO: track with middleware
+        avg_response_ms: {
+            let hist = &state.metrics.http_request_duration_ms;
+            match hist.get_metric_with_label_values(&["POST"]) {
+                Ok(h) => {
+                    let sum = h.get_sample_sum();
+                    let count = h.get_sample_count();
+                    if count > 0 { sum / count as f64 } else { 0.0 }
+                }
+                Err(_) => 0.0,
+            }
+        },
+        total_requests_24h: {
+            let total: f64 = ["GET", "POST", "PUT", "DELETE", "PATCH"].iter()
+                .filter_map(|m| state.metrics.http_requests_total.get_metric_with_label_values(&[m]).ok())
+                .map(|c| c.get() as f64)
+                .sum();
+            total as i64
+        },
+        ws_connections: state.metrics.ws_connections.get() as i64,
+        agent_avg_latency_ms: {
+            let hist = &state.metrics.agent_heartbeat_lag_ms;
+            match hist.get_metric_with_label_values(&["default"]) {
+                Ok(h) => {
+                    let sum = h.get_sample_sum();
+                    let count = h.get_sample_count();
+                    if count > 0 { sum / count as f64 } else { 0.0 }
+                }
+                Err(_) => 0.0,
+            }
+        },
         rate_limits: Some(state.tiered_rate_limiter.stats()),
     })
 }
