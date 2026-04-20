@@ -88,6 +88,8 @@ struct HealthResponse {
     shield_alerts_24h: i64,
     pattern_suggestions: i64,
     api_keys_active: i64,
+    avg_response_ms: f64,
+    total_requests_24h: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     rate_limits: Option<crate::rate_limiter::RateLimitStats>,
 }
@@ -264,6 +266,8 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         shield_alerts_24h,
         pattern_suggestions,
         api_keys_active,
+        avg_response_ms: 0.0, // TODO: track with middleware
+        total_requests_24h: 0, // TODO: track with middleware
         rate_limits: Some(state.tiered_rate_limiter.stats()),
     })
 }
