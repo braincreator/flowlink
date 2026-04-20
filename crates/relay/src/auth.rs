@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use dashmap::DashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Client {
     pub client_id: String,
     pub api_token: String,
@@ -22,10 +22,12 @@ pub struct Client {
     pub active: bool,
 }
 
-/// Legacy auth manager for API token validation
+/// Persisted auth manager for API token validation.
+/// Tokens backed by JSON file so they survive restarts.
 pub struct AuthManager {
     clients: Arc<DashMap<String, Client>>,
     token_to_client: Arc<DashMap<String, String>>,
+    persist_path: Option<String>,
 }
 
 impl Default for AuthManager {
@@ -34,9 +36,47 @@ impl Default for AuthManager {
 
 impl AuthManager {
     pub fn new() -> Self {
-        Self {
+        Self::with_persistence(None)
+    }
+
+    pub fn with_persistence(path: Option<String>) -> Self {
+        let mgr = Self {
             clients: Arc::new(DashMap::new()),
             token_to_client: Arc::new(DashMap::new()),
+            persist_path: path.clone(),
+        };
+        if let Some(ref p) = path {
+            mgr.load_from_file(p);
+        }
+        mgr
+    }
+
+    fn save_to_file(&self) {
+        let path = match &self.persist_path {
+            Some(p) => p,
+            None => return,
+        };
+        let clients: Vec<Client> = self.clients.iter().map(|r| r.value().clone()).collect();
+        if let Ok(data) = serde_json::to_string_pretty(&clients) {
+            let tmp = format!("{}.tmp", path);
+            if std::fs::write(&tmp, &data).is_ok() {
+                let _ = std::fs::rename(&tmp, path);
+            }
+        }
+    }
+
+    fn load_from_file(&self, path: &str) {
+        if let Ok(data) = std::fs::read_to_string(path) {
+            if let Ok(parsed) = serde_json::from_str::<Vec<Client>>(&data) {
+                let count = parsed.len();
+                for c in parsed {
+                    self.token_to_client.insert(c.api_token.clone(), c.client_id.clone());
+                    self.clients.insert(c.client_id.clone(), c);
+                }
+                if count > 0 {
+                    log::info!("AuthManager: loaded {} persisted tokens from {}", count, path);
+                }
+            }
         }
     }
 
@@ -48,6 +88,7 @@ impl AuthManager {
         }
         self.token_to_client.insert(token, id.clone());
         self.clients.insert(id, client);
+        self.save_to_file();
     }
 
     pub fn is_empty(&self) -> bool { self.clients.is_empty() }

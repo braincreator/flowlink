@@ -79,7 +79,8 @@ impl Relay {
 
     pub async fn run(&self) -> anyhow::Result<()> {
         let pool = Arc::new(AgentPool::new());
-        let auth = Arc::new(AuthManager::new());
+        let tokens_path = std::path::Path::new(&shellexpand::tilde("~/.flowlink/agents.json").to_string()).to_string_lossy().to_string();
+        let auth = Arc::new(AuthManager::with_persistence(Some(tokens_path)));
         let eventbus = Arc::new(EventBus::new());
         let approvals = Arc::new(ApprovalQueue::new());
 
