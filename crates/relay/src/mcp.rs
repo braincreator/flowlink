@@ -172,7 +172,8 @@ fn mcp_tools() -> Vec<Value> {
                     "read_only": { "type": "boolean", "description": "Set agent to read-only mode" },
                     "label": { "type": "string", "description": "Update agent label" },
                     "work_dir": { "type": "string", "description": "Set agent working directory" },
-                    "approval_mode": { "type": "string", "enum": ["auto", "soft_ask", "hard_ask"], "description": "Set approval mode: auto=execute all, soft_ask=approve medium/high risk, hard_ask=approve all commands" }
+                    "approval_mode": { "type": "string", "enum": ["auto", "soft_ask", "hard_ask"], "description": "Set approval mode: auto=execute all, soft_ask=approve medium/high risk, hard_ask=approve all commands" },
+                    "approval_timeout_sec": { "type": "integer", "description": "Seconds before auto-rejecting pending approvals. 0=no timeout, default=300" }
                 }
             }
         }),
@@ -558,6 +559,9 @@ async fn mcp_config_update(state: &AppState, id: Option<Value>, args: &Value) ->
     if let Some(mode) = args.get("approval_mode").and_then(|v| v.as_str()) {
         payload["approval_mode"] = json!(mode);
     }
+    if let Some(timeout) = args.get("approval_timeout_sec").and_then(|v| v.as_u64()) {
+        payload["approval_timeout_sec"] = json!(timeout);
+    }
 
     let msg = flowlink_core::Message::new(flowlink_core::MessageType::ConfigUpdate)
         .with_agent_id(&resolved)
@@ -571,6 +575,7 @@ async fn mcp_config_update(state: &AppState, id: Option<Value>, args: &Value) ->
                 args.get("label").map(|v| format!("label={}", v.as_str().unwrap_or(""))),
                 args.get("work_dir").map(|v| format!("work_dir={}", v.as_str().unwrap_or(""))),
                 args.get("approval_mode").map(|v| format!("approval_mode={}", v.as_str().unwrap_or(""))),
+                args.get("approval_timeout_sec").map(|v| format!("approval_timeout_sec={}", v)),
             ].into_iter().flatten().collect();
 
             if changes.is_empty() {

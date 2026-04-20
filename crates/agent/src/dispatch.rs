@@ -74,8 +74,7 @@ pub async fn dispatch(
         MessageType::BackupList => handle_backup_list(msg, backup).await,
 
         MessageType::ExecApprove | MessageType::ExecReject | MessageType::ApprovalResponse => {
-            handle_approval_response(msg, approval).await;
-            None
+            handle_approval_response(msg, approval, executor, policy).await
         }
 
         MessageType::ShieldAlert => handle_shield_alert(msg),
@@ -171,14 +170,19 @@ fn handle_shield_alert(msg: &Message) -> Option<Message> {
     None
 }
 
-async fn handle_approval_response(msg: &Message, approval: &ApprovalManager) {
+async fn handle_approval_response(
+    msg: &Message,
+    approval: &ApprovalManager,
+    executor: &Executor,
+    policy: &PolicyEngine,
+) -> Option<Message> {
     let payload = match &msg.payload {
         Some(p) => p,
-        None => return,
+        None => return None,
     };
     let rid = match payload.get("request_id").and_then(|v| v.as_str()) {
         Some(r) => r,
-        None => return,
+        None => return None,
     };
     let approved = payload
         .get("approved")
@@ -189,7 +193,23 @@ async fn handle_approval_response(msg: &Message, approval: &ApprovalManager) {
     } else {
         crate::approval::ApprovalDecision::Rejected
     };
-    approval.respond(rid, decision).await;
+
+    let exec_payload = approval.respond(rid, decision).await;
+
+    // If approved and we have the saved payload, execute it now
+    if let Some(exec_payload) = exec_payload {
+        info!("Executing approved command: {}", exec_payload.command);
+        match executor.exec(&exec_payload, flowlink_core::Priority::User).await {
+            Ok(result) => {
+                info!("Approved exec done: exit={} duration={}ms cmd={}", result.exit_code, result.duration_ms, exec_payload.command);
+                return Some(exec_done_response(msg, &result));
+            }
+            Err(e) => {
+                return Some(error_response(msg, "EXEC_FAILED", &format!("Execution error: {e}")));
+            }
+        }
+    }
+    None
 }
 
 async fn handle_exec(
@@ -270,7 +290,20 @@ async fn handle_exec(
         crate::policy::RiskLevel::High => "high",
     };
     if approval.needs_approval(risk_str) {
-        info!("Command requires approval: {}", payload.command);
+        info!("Command requires approval: {} (timeout: {}s)", payload.command, approval.timeout_sec());
+
+        // Register pending approval with exec payload for later execution
+        let request_id = payload.request_id.clone();
+        let command = payload.command.clone();
+        let risk = risk_str.to_string();
+        let exec_payload = Some(payload.clone());
+
+        // Spawn approval wait in background — it will timeout if no response
+        let approval_clone = approval.clone_safe();
+        tokio::spawn(async move {
+            let _ = approval_clone.request_approval(request_id.clone(), command, risk, exec_payload).await;
+        });
+
         let approval_payload = ApprovalRequestPayload {
             request_id: payload.request_id.clone(),
             command: payload.command.clone(),

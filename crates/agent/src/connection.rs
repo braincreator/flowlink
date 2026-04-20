@@ -461,6 +461,15 @@ impl Connection {
             applied.push(format!("approval_mode={mode}"));
         }
 
+        // Update approval timeout
+        if let Some(timeout) = payload.get("approval_timeout_sec").and_then(|v| v.as_u64()) {
+            {
+                let mut approval = self.approval.write().await;
+                approval.set_timeout(timeout);
+            }
+            applied.push(format!("approval_timeout_sec={timeout}"));
+        }
+
         // Log fields that require reconnect (cannot be applied at runtime)
         for field in &["relay_url", "agent_id", "token"] {
             if payload.get(*field).is_some() {

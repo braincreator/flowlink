@@ -19,7 +19,10 @@ pub struct PendingApproval {
     pub risk_level: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub responder: oneshot::Sender<ApprovalDecision>,
+    /// The full exec payload to replay on approval.
+    pub exec_payload: Option<flowlink_core::ExecRequestPayload>,
 }
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApprovalDecision {
@@ -31,6 +34,8 @@ pub enum ApprovalDecision {
 pub struct ApprovalManager {
     mode: ApprovalMode,
     pending: Arc<Mutex<HashMap<String, PendingApproval>>>,
+    /// Timeout in seconds for approval requests. 0 = no timeout.
+    timeout_sec: u64,
 }
 
 impl ApprovalManager {
@@ -38,7 +43,25 @@ impl ApprovalManager {
         Self {
             mode,
             pending: Arc::new(Mutex::new(HashMap::new())),
+            timeout_sec: 300, // default 5 min
         }
+    }
+
+    /// Clone a reference for async tasks (shared state).
+    pub fn clone_safe(&self) -> Self {
+        Self {
+            mode: self.mode.clone(),
+            pending: self.pending.clone(),
+            timeout_sec: self.timeout_sec,
+        }
+    }
+
+    pub fn set_timeout(&mut self, secs: u64) {
+        self.timeout_sec = secs;
+    }
+
+    pub fn timeout_sec(&self) -> u64 {
+        self.timeout_sec
     }
 
     /// Update approval mode at runtime (from ConfigUpdate).
@@ -61,6 +84,7 @@ impl ApprovalManager {
         request_id: String,
         command: String,
         risk_level: String,
+        exec_payload: Option<flowlink_core::ExecRequestPayload>,
     ) -> ApprovalDecision {
         // Auto mode: immediately approved without waiting.
         if !self.needs_approval(&risk_level) {
@@ -75,6 +99,7 @@ impl ApprovalManager {
             risk_level,
             created_at: chrono::Utc::now(),
             responder: tx,
+            exec_payload,
         };
 
         self.pending
@@ -82,26 +107,75 @@ impl ApprovalManager {
             .await
             .insert(request_id.clone(), pending);
 
-        // Wait for response (with timeout handled externally)
-        match rx.await {
+        // Wait for response with timeout
+        let result = if self.timeout_sec > 0 {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(self.timeout_sec),
+                rx,
+            ).await
+            .map_err(|_| ApprovalDecision::TimedOut)
+            .and_then(|r| r.map_err(|_| ApprovalDecision::TimedOut))
+        } else {
+            match rx.await {
+                Ok(decision) => Ok(decision),
+                Err(_) => Err(ApprovalDecision::TimedOut),
+            }
+        };
+
+        // Clean up pending entry if timed out
+        match result {
             Ok(decision) => decision,
-            Err(_) => ApprovalDecision::TimedOut,
+            Err(timedout) => {
+                self.pending.lock().await.remove(&request_id);
+                log::warn!("Approval timed out for request {} ({}s timeout)", request_id, self.timeout_sec);
+                timedout
+            }
         }
     }
 
-    /// Respond to a pending approval.
-    pub async fn respond(&self, request_id: &str, decision: ApprovalDecision) -> bool {
+    /// Respond to a pending approval. Returns the exec payload if approved.
+    pub async fn respond(&self, request_id: &str, decision: ApprovalDecision) -> Option<flowlink_core::ExecRequestPayload> {
         let mut pending = self.pending.lock().await;
         if let Some(p) = pending.remove(request_id) {
+            let is_approved = matches!(decision, ApprovalDecision::Approved);
             let _ = p.responder.send(decision);
-            true
+            if is_approved {
+                p.exec_payload
+            } else {
+                None
+            }
         } else {
-            false
+            None
         }
     }
 
     pub fn mode(&self) -> &ApprovalMode {
         &self.mode
+    }
+
+    /// List pending approvals (for MCP/API).
+    pub async fn list_pending(&self) -> Vec<(String, String, String, i64)> {
+        let pending = self.pending.lock().await;
+        pending.iter().map(|(_, p)| {
+            (p.request_id.clone(), p.command.clone(), p.risk_level.clone(), p.created_at.timestamp())
+        }).collect()
+    }
+
+    /// Take timed-out approvals and return their request IDs.
+    pub async fn take_timed_out(&self) -> Vec<String> {
+        let mut pending = self.pending.lock().await;
+        let now = chrono::Utc::now().timestamp();
+        let timeout = self.timeout_sec as i64;
+        let timed_out: Vec<String> = pending.iter()
+            .filter(|(_, p)| timeout > 0 && (now - p.created_at.timestamp()) > timeout)
+            .map(|(_, p)| p.request_id.clone())
+            .collect();
+        for id in &timed_out {
+            if let Some(p) = pending.remove(id) {
+                let _ = p.responder.send(ApprovalDecision::TimedOut);
+            }
+        }
+        timed_out
     }
 }
 
