@@ -545,6 +545,8 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
 
     state.handler.register_sender(agent_id.clone(), (tx.clone(), conn_id));
 
+    let read_tx = tx.clone();
+
     // Register in pool
     state.pool.register(crate::pool::AgentInfo {
         agent_id: agent_id.clone(),
@@ -694,6 +696,9 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
                         }
                     }
                 }
+                Ok(AxumMsg::Ping(data)) => {
+                    let _ = read_tx.send(AxumMsg::Pong(data)).await;
+                }
                 Ok(AxumMsg::Close(_)) => break,
                 Err(e) => {
                     log::error!("Agent {aid} WS error: {e}");
@@ -713,9 +718,23 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
         }
     };
 
+    // Ping loop — send WS Ping every 20s to detect dead connections
+    let ping_tx = tx.clone();
+    let ping_task = async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(20));
+        interval.tick().await; // skip first
+        loop {
+            interval.tick().await;
+            if ping_tx.send(AxumMsg::Ping(vec![].into())).await.is_err() {
+                break;
+            }
+        }
+    };
+
     tokio::select! {
         _ = read_task => {},
         _ = write_task => {},
+        _ = ping_task => {},
     }
 
     // Only remove sender if it hasn't been replaced by a new connection

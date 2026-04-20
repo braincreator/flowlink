@@ -162,12 +162,17 @@ impl Connection {
                     }
                 }
                 _ = heartbeat_interval.tick() => {
+                    // Send application-level heartbeat
                     let hb = Message::new(MessageType::Heartbeat)
                         .with_agent_id(&self.agent_id);
                     let json = serde_json::to_string(&hb)?;
                     if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
                         warn!("Heartbeat send failed: {e}");
                         return Err(e.into());
+                    }
+                    // Also send WS-level Ping to keep connection alive through proxies
+                    if let Err(e) = ws_stream.send(WsMessage::Ping(vec![].into())).await {
+                        warn!("WS Ping failed: {e}");
                     }
                 }
             }
