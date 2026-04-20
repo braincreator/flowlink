@@ -440,9 +440,35 @@ async fn create_api_key(
         None => return (StatusCode::FORBIDDEN, Json(json!({"error": "No organization context"}))).into_response(),
     };
 
-    let role = match crate::api_keys::ApiKeyRole::from_str(&body.role) {
-        Some(r) => r,
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid role. Use: admin, operator, viewer"}))).into_response(),
+    // Get caller's role in org
+    let caller_org_role: String = match sqlx::query_scalar::<_, String>(
+        "SELECT role FROM org_members WHERE org_id = $1 AND account_id = $2"
+    )
+    .bind(org_id)
+    .bind(&claims.account_id)
+    .fetch_optional(db)
+    .await {
+        Ok(Some(r)) => r,
+        Ok(None) => return (StatusCode::FORBIDDEN, Json(json!({"error": "Not a member of this organization"}))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    };
+
+    // Determine key role:
+    // - owner/admin: can choose any role
+    // - member/viewer: key inherits their org role (mapped: owner/admin→admin, member→operator, viewer→viewer)
+    let role = if caller_org_role == "owner" || caller_org_role == "admin" {
+        // Admin chooses role
+        match crate::api_keys::ApiKeyRole::from_str(&body.role) {
+            Some(r) => r,
+            None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid role. Use: admin, operator, viewer"}))).into_response(),
+        }
+    } else {
+        // Non-admin: inherit from org membership
+        match caller_org_role.as_str() {
+            "member" => crate::api_keys::ApiKeyRole::Operator,
+            "viewer" => crate::api_keys::ApiKeyRole::Viewer,
+            _ => crate::api_keys::ApiKeyRole::Viewer,
+        }
     };
 
     match crate::api_keys::ApiKeyRepo::create(db, org_id, &claims.account_id, &body.name, &role, body.expires_at).await {
