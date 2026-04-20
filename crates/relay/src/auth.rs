@@ -90,11 +90,17 @@ impl AuthManager {
             let cid = id.clone();
             let name = client.name.clone();
             let api_token = token.clone();
+            // SHA-256 hash of token for verification without storing plaintext
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            api_token.hash(&mut hasher);
+            let token_hash = format!("{:016x}", hasher.finish());
             tokio::spawn(async move {
                 let _ = sqlx::query(
-                    "INSERT INTO agents (agent_id, api_token, name, status) VALUES ($1, $2, $3, 'connected') \
-                     ON CONFLICT (agent_id) DO UPDATE SET api_token = EXCLUDED.api_token, name = EXCLUDED.name, status = 'connected'"
-                ).bind(&cid).bind(&api_token).bind(&name).execute(pool.as_ref()).await;
+                    "INSERT INTO agents (agent_id, api_token, api_token_hash, name, status) VALUES ($1, $2, $3, $4, 'connected') \
+                     ON CONFLICT (agent_id) DO UPDATE SET api_token = EXCLUDED.api_token, api_token_hash = EXCLUDED.api_token_hash, name = EXCLUDED.name, status = 'connected'"
+                ).bind(&cid).bind(&api_token).bind(&token_hash).bind(&name).execute(pool.as_ref()).await;
             });
         }
     }
