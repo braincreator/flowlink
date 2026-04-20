@@ -202,12 +202,20 @@ pub async fn signup(
     let token = format!("fl_{}_{}", &req.agent_id[..8.min(req.agent_id.len())],
         uuid_simple());
 
+    // Register token in AuthManager so WS auth (validate_token) works
+    state.handler.auth.register_client(crate::auth::Client {
+        client_id: agent.agent_id.clone(),
+        api_token: token.clone(),
+        name: req.agent_id.clone(),
+        active: true,
+    });
+
     // Assign free plan by default
     let plan_id = "trial".to_string();
     let now = Utc::now();
     let trial_ends = now + chrono::Duration::days(14);
 
-    let relay_url = "wss://control.flowlink.app/ws".to_string();
+    let relay_url = "wss://relay.flow-masters.ru:9093".to_string();
 
     (
         StatusCode::OK,
