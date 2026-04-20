@@ -64,6 +64,27 @@ impl ApprovalQueue {
     pub fn list_pending(&self) -> Vec<ApprovalRequest> {
         self.pending.iter().map(|r| r.value().clone()).collect()
     }
+
+    /// Remove and return requests older than `timeout_sec` seconds.
+    pub fn take_timed_out(&self, timeout_sec: i64) -> Vec<ApprovalRequest> {
+        let now = chrono::Utc::now().timestamp();
+        let mut timed_out = Vec::new();
+        let mut to_remove = Vec::new();
+        for entry in self.pending.iter() {
+            if now - entry.value().created_at > timeout_sec {
+                timed_out.push(entry.value().clone());
+                to_remove.push(entry.key().clone());
+            }
+        }
+        for id in &to_remove {
+            self.pending.remove(id);
+            // Also clean up responder if present (send TimedOut)
+            if let Some((_, tx)) = self.responders.remove(id) {
+                let _ = tx.send(ApprovalDecision::TimedOut);
+            }
+        }
+        timed_out
+    }
 }
 
 #[cfg(test)]

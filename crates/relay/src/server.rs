@@ -81,6 +81,9 @@ struct HealthResponse {
     uptime_seconds: u64,
     db: String,
     timestamp: String,
+    agents_online: usize,
+    agents_total: usize,
+    approvals_pending: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     rate_limits: Option<crate::rate_limiter::RateLimitStats>,
 }
@@ -223,12 +226,19 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         },
         None => "disabled".to_string(),
     };
+    let agents = state.pool.list();
+    let agents_total = agents.len();
+    let agents_online = agents.iter().filter(|a| a.online).count();
+    let approvals_pending = state.approvals.list_pending().len();
     Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_seconds: state.start_time.elapsed().as_secs(),
         db: db_status,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        agents_online,
+        agents_total,
+        approvals_pending,
         rate_limits: Some(state.tiered_rate_limiter.stats()),
     })
 }

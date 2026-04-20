@@ -294,6 +294,45 @@ impl Relay {
             log::info!("📧 Email queue initialized");
         }
 
+        // ── Approval timeout background task ──
+        // Scans pending approvals every 10s and marks timed-out ones.
+        {
+            let approvals_bg = state.approvals.clone();
+            let handler_bg = state.handler.clone();
+            let db_bg = state.db.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+                interval.tick().await; // skip first
+                loop {
+                    interval.tick().await;
+                    let timed_out = approvals_bg.take_timed_out(300); // 5 min default
+                    for req in timed_out {
+                        log::warn!("Approval timed out: {} agent={} cmd={:?}", req.id, req.agent_id, req.command);
+                        // Notify agent via WS
+                        let _ = handler_bg.send_to_agent(&req.agent_id,
+                            flowlink_core::Message::new(flowlink_core::MessageType::ExecReject)
+                                .with_agent_id(&req.agent_id)
+                                .with_payload(serde_json::json!({
+                                    "request_id": req.id,
+                                    "decision": "timed_out",
+                                    "approved": false,
+                                    "reason": "approval request timed out (300s)",
+                                }))
+                        ).await;
+                        // Update DB
+                        if let Some(ref db) = db_bg {
+                            let _ = sqlx::query(
+                                "UPDATE approval_log SET status = 'timed_out', resolved_at = NOW() WHERE id = $1 AND status = 'pending'"
+                            )
+                            .bind(&req.id)
+                            .execute(db.write_pool())
+                            .await;
+                        }
+                    }
+                }
+            });
+        }
+
         let app = server::build_router(state.clone());
 
         let addr = self.config.http_addr;
