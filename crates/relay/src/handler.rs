@@ -61,7 +61,7 @@ impl RelayHandler {
             sender.send(ws_msg).await?;
             Ok(())
         } else {
-            anyhow::bail!("Agent {agent_id} not connected");
+            anyhow::bail!("Agent {agent_id} is offline — not connected via WebSocket");
         }
     }
 }

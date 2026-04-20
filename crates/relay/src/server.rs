@@ -551,6 +551,7 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
         last_heartbeat: chrono::Utc::now().timestamp(),
         labels: vec![],
         capabilities: vec![],
+        online: true,
     });
 
     // Notify via Telegram
@@ -695,7 +696,7 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
         _ = write_task => {},
     }
 
-    pool.unregister(&aid);
+    pool.set_offline(&aid);
     state.handler.remove_sender(&aid);
     state.e2ee.remove_agent_key(&aid).await;
     // Notify via Telegram
@@ -1497,6 +1498,7 @@ pub fn build_router(state: AppState) -> Router {
         // Control Plane (agents listing)
         .route("/api/v1/agents", axum::routing::get(crate::control_plane::list_agents))
         .route("/api/v1/agents/{id}", axum::routing::get(crate::control_plane::get_agent))
+        .route("/api/v1/agents/{id}", axum::routing::delete(crate::control_plane::deregister_agent))
         // Account
         .route("/api/account/info", axum::routing::get(account_info))
         .route("/api/account", axum::routing::delete(crate::account_deletion_api::request_deletion))
@@ -1719,7 +1721,7 @@ mod tests {
         state.pool.register(AgentInfo {
             agent_id: "a1".into(), hostname: "h1".into(), os: "linux".into(),
             arch: "x86_64".into(), connected_at: 1000, last_heartbeat: 1000,
-            labels: vec![], capabilities: vec![],
+            labels: vec![], capabilities: vec![], online: true,
         });
         let app = build_router(state);
         let resp = app.oneshot(HttpRequest::builder().uri("/api/agents").body(Body::empty()).unwrap()).await.unwrap();

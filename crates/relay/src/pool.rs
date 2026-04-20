@@ -15,6 +15,8 @@ pub struct AgentInfo {
     pub last_heartbeat: i64,
     pub labels: Vec<String>,
     pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub online: bool,
 }
 
 impl AgentInfo {
@@ -27,8 +29,7 @@ impl AgentInfo {
     }
     
     pub fn is_connected(&self) -> bool {
-        let now = chrono::Utc::now().timestamp();
-        (now - self.last_heartbeat) < 90 // heartbeat_timeout_sec = 90
+        self.online
     }
     
     pub fn last_activity(&self) -> Option<i64> {
@@ -58,10 +59,24 @@ impl AgentPool {
         self.agents.insert(info.agent_id.clone(), info);
     }
 
-    pub fn unregister(&self, agent_id: &str) {
-        if self.agents.remove(agent_id).is_some() {
-            info!("Agent disconnected: {agent_id}");
+    /// Mark agent as offline (WS disconnected) but keep in pool.
+    /// The agent record persists — only the live session is gone.
+    pub fn set_offline(&self, agent_id: &str) {
+        if let Some(mut agent) = self.agents.get_mut(agent_id) {
+            agent.online = false;
+            info!("Agent went offline: {agent_id}");
         }
+    }
+
+    /// Permanently remove agent from pool (explicit deregister).
+    pub fn deregister(&self, agent_id: &str) {
+        if self.agents.remove(agent_id).is_some() {
+            info!("Agent deregistered: {agent_id}");
+        }
+    }
+
+    pub fn unregister(&self, agent_id: &str) {
+        self.set_offline(agent_id);
     }
 
     pub fn get(&self, agent_id: &str) -> Option<AgentInfo> {
@@ -97,6 +112,7 @@ mod tests {
             last_heartbeat: 1000,
             labels: vec![],
             capabilities: vec![],
+            online: true,
         }
     }
 
@@ -109,11 +125,20 @@ mod tests {
     }
 
     #[test]
-    fn test_unregister() {
+    fn test_unregister_sets_offline() {
         let pool = AgentPool::new();
         pool.register(test_agent("a1"));
-        assert!(pool.get("a1").is_some());
+        assert!(pool.get("a1").unwrap().online);
         pool.unregister("a1");
+        let agent = pool.get("a1").unwrap();
+        assert!(!agent.online);
+    }
+
+    #[test]
+    fn test_deregister_removes() {
+        let pool = AgentPool::new();
+        pool.register(test_agent("a1"));
+        pool.deregister("a1");
         assert!(pool.get("a1").is_none());
     }
 
@@ -171,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn test_concurrent_register_unregister() {
+    fn test_concurrent_register_deregister() {
         use std::sync::Arc;
         use std::thread;
         let pool = Arc::new(AgentPool::new());
@@ -182,7 +207,7 @@ mod tests {
                     let id = format!("agent-{i}");
                     p.register(test_agent(&id));
                     assert!(p.get(&id).is_some());
-                    p.unregister(&id);
+                    p.deregister(&id);
                     assert!(p.get(&id).is_none());
                 })
             })

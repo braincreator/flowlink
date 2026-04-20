@@ -128,13 +128,25 @@ fn mcp_tools() -> Vec<Value> {
         }),
         json!({
             "name": "flowlink_kill",
-            "description": "Emergency kill switch — immediately disconnect an agent from the relay. Use when an agent is compromised or running unauthorized commands.",
+            "description": "Emergency kill switch — immediately disconnect an agent from the relay. Use when an agent is compromised or running unauthorized commands. Agent record is preserved.",
             "inputSchema": {
                 "type": "object",
                 "required": ["agent"],
                 "properties": {
                     "agent": { "type": "string", "description": "Agent ID or label to kill" },
                     "reason": { "type": "string", "description": "Reason for killing the agent (audited)" }
+                }
+            }
+        }),
+        json!({
+            "name": "flowlink_deregister",
+            "description": "Permanently remove an agent — disconnects WS, removes from pool and database. The agent will no longer be able to reconnect. Requires explicit confirmation.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["agent"],
+                "properties": {
+                    "agent": { "type": "string", "description": "Agent ID to deregister" },
+                    "reason": { "type": "string", "description": "Reason for deregistration (audited)" }
                 }
             }
         }),
@@ -247,6 +259,7 @@ async fn handle_tools_call(state: AppState, req: McpRequest) -> axum::response::
         "flowlink_list" => mcp_list(&state, req.id, &args).await,
         "flowlink_sysinfo" => mcp_sysinfo(&state, req.id, &args).await,
         "flowlink_kill" => mcp_kill(&state, req.id, &args).await,
+        "flowlink_deregister" => mcp_deregister(&state, req.id, &args).await,
         "flowlink_health" => mcp_health(&state, req.id, &args),
         "flowlink_config_update" => mcp_config_update(&state, req.id, &args).await,
         "flowlink_approve" => mcp_approve(&state, req.id, &args).await,
@@ -444,10 +457,10 @@ async fn mcp_kill(state: &AppState, id: Option<Value>, args: &Value) -> axum::re
 
     match state.handler.send_to_agent(&resolved, msg).await {
         Ok(()) => {
-            state.pool.unregister(&resolved);
+            state.pool.set_offline(&resolved);
             state.handler.remove_sender(&resolved);
             mcp_ok(id, json!({
-                "content": [{ "type": "text", "text": format!("🛑 Agent {} killed. Reason: {}", resolved, reason) }]
+                "content": [{ "type": "text", "text": format!("🛑 Agent {} disconnected. Reason: {}. Agent record preserved (use deregister to remove).", resolved, reason) }]
             })).into_response()
         }
         Err(e) => {
@@ -575,6 +588,42 @@ async fn mcp_config_update(state: &AppState, id: Option<Value>, args: &Value) ->
 // ═══════════════════════════════════════════════
 // Approve + Policy Management
 // ═══════════════════════════════════════════════
+
+async fn mcp_deregister(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
+    let agent_id = match get_arg(args, "agent") {
+        Some(v) => v,
+        None => return mcp_err(id, -32602, "agent: required").into_response(),
+    };
+    let reason = get_arg(args, "reason").unwrap_or_else(|| "No reason provided".into());
+
+    let resolved = match resolve_agent(&state.pool, &agent_id) {
+        Some(id) => id,
+        None => return mcp_err(id, -32602, format!("agent not found: {agent_id}")).into_response(),
+    };
+
+    // Disconnect WS if online
+    let _ = state.handler.send_to_agent(&resolved,
+        flowlink_core::Message::new(flowlink_core::MessageType::Disconnect)
+            .with_agent_id(&resolved)
+            .with_priority(flowlink_core::Priority::System)
+            .with_payload(serde_json::json!({"reason": reason, "timestamp": chrono::Utc::now().timestamp()}))
+    ).await;
+
+    state.handler.remove_sender(&resolved);
+    state.pool.deregister(&resolved);
+
+    // Remove from DB
+    if let Some(db) = state.db.as_ref() {
+        let _ = sqlx::query("DELETE FROM agents WHERE agent_id = $1")
+            .bind(&resolved)
+            .execute(db.write_pool()).await;
+    }
+
+    log::info!("Agent deregistered via MCP: {resolved} (reason: {reason})");
+    mcp_ok(id, json!({
+        "content": [{ "type": "text", "text": format!("🗑️ Agent {} permanently deregistered. Reason: {}. DB record deleted.", resolved, reason) }]
+    })).into_response()
+}
 
 async fn mcp_approve(state: &AppState, id: Option<Value>, args: &Value) -> axum::response::Response {
     let agent_id = match get_arg(args, "agent") {

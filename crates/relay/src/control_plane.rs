@@ -285,6 +285,34 @@ pub async fn get_agent(
     }
 }
 
+/// Explicitly deregister (permanently remove) an agent.
+/// Disconnects WS if online, removes from pool, cleans up DB record.
+pub async fn deregister_agent(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> impl IntoResponse {
+    // Disconnect WS if agent is online
+    let _ = state.handler.send_to_agent(&agent_id,
+        flowlink_core::Message::new(flowlink_core::MessageType::Disconnect)
+            .with_agent_id(&agent_id)
+            .with_priority(flowlink_core::Priority::System)
+            .with_payload(serde_json::json!({"reason": "deregistered", "timestamp": chrono::Utc::now().timestamp()}))
+    ).await;
+
+    state.handler.remove_sender(&agent_id);
+    state.pool.deregister(&agent_id);
+
+    // Remove from DB if available
+    if let Some(db) = state.db.as_ref() {
+        let _ = sqlx::query("DELETE FROM agents WHERE agent_id = $1")
+            .bind(&agent_id)
+            .execute(db.write_pool()).await;
+    }
+
+    log::info!("Agent deregistered via API: {agent_id}");
+    (StatusCode::OK, Json(serde_json::json!({"ok": true, "message": format!("Agent {agent_id} deregistered")}))).into_response()
+}
+
 // Simple UUID-like generator (no external dependency)
 fn uuid_simple() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
