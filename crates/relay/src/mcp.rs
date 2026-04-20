@@ -225,7 +225,14 @@ pub async fn handle_mcp(
             match &state.db {
                 Some(db) => {
                     match ApiKeyRepo::validate(db.pool(), &key).await {
-                        Ok(Some(id)) => Some(id),
+                        Ok(Some(id)) => {
+                            // Per-key rate limiting
+                            if !state.key_rate_limiter.check(&id.key_id.to_string()).await {
+                                log::warn!("MCP rate limited: key_id={}", id.key_id);
+                                return mcp_err(req.id, -32029, "Rate limit exceeded: max 100 requests per minute per key").into_response();
+                            }
+                            Some(id)
+                        }
                         Ok(None) => {
                             log::warn!("MCP auth failed: invalid API key prefix={}", &key[..12.min(key.len())]);
                             return mcp_err(req.id, -32001, "Unauthorized: invalid API key").into_response();

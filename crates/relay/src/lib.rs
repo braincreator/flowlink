@@ -280,6 +280,7 @@ impl Relay {
             rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
             auth_rate_limiter: Arc::new(crate::auth_rate_limiter::AuthRateLimiter::new()),
             tiered_rate_limiter: Arc::new(crate::rate_limiter::TieredRateLimiter::new()),
+            key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)), // 100 req/min per key
         };
 
         // Email queue worker (requires both email_service and db)

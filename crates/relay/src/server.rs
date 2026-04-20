@@ -68,6 +68,7 @@ pub struct AppState {
     pub rbac: Arc<crate::rbac_manager::RbacManager>,
     pub auth_rate_limiter: Arc<crate::auth_rate_limiter::AuthRateLimiter>,
     pub tiered_rate_limiter: Arc<crate::rate_limiter::TieredRateLimiter>,
+    pub key_rate_limiter: Arc<crate::api_keys::KeyRateLimiter>,
 }
 
 // ═══════════════════════════════════════════════
@@ -2104,6 +2105,8 @@ mod tests {
             notification_store: None,
             rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
             auth_rate_limiter: Arc::new(crate::auth_rate_limiter::AuthRateLimiter::new()),
+            tiered_rate_limiter: Arc::new(crate::rate_limiter::TieredRateLimiter::new()),
+            key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)),
         }
     }
 

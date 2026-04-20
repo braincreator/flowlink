@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use std::collections::HashMap;
 
 // ═══════════════════════════════════════════════
 // Scopes (fine-grained permissions)
@@ -502,5 +505,68 @@ impl ApiKeyRepo {
             .await?;
 
         Ok(Some(new_key))
+    }
+}
+
+// ═══════════════════════════════════════════════
+// Per-key Rate Limiter (sliding window)
+// ═══════════════════════════════════════════════
+
+#[derive(Default)]
+struct KeyBucket {
+    count: u64,
+    window_start: Option<std::time::Instant>,
+}
+
+pub struct KeyRateLimiter {
+    buckets: RwLock<HashMap<String, KeyBucket>>,
+    max_requests: u64,
+    window_secs: u64,
+}
+
+impl KeyRateLimiter {
+    pub fn new(max_requests: u64, window_secs: u64) -> Self {
+        Self {
+            buckets: RwLock::new(HashMap::new()),
+            max_requests,
+            window_secs,
+        }
+    }
+
+    /// Returns true if the request is allowed, false if rate limited
+    pub async fn check(&self, key_id: &str) -> bool {
+        let now = std::time::Instant::now();
+        let window_dur = std::time::Duration::from_secs(self.window_secs);
+        let mut buckets = self.buckets.write().await;
+
+        let bucket = buckets.entry(key_id.to_string()).or_insert_with(KeyBucket::default);
+
+        // Reset window if expired
+        let window_start = bucket.window_start.get_or_insert(std::time::Instant::now());
+        if now.duration_since(*window_start) > window_dur {
+            bucket.count = 0;
+            bucket.window_start = Some(now);
+        }
+
+        bucket.count += 1;
+        bucket.count <= self.max_requests
+    }
+
+    /// Get current usage for a key
+    pub async fn usage(&self, key_id: &str) -> (u64, u64) {
+        let buckets = self.buckets.read().await;
+        if let Some(bucket) = buckets.get(key_id) {
+            (bucket.count, self.max_requests)
+        } else {
+            (0, self.max_requests)
+        }
+    }
+
+    /// Clean up stale buckets (call periodically)
+    pub async fn cleanup(&self) {
+        let now = std::time::Instant::now();
+        let window_dur = std::time::Duration::from_secs(self.window_secs);
+        let mut buckets = self.buckets.write().await;
+        buckets.retain(|_, b| b.window_start.map_or(false, |ws| now.duration_since(ws) < window_dur));
     }
 }
