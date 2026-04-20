@@ -20,7 +20,7 @@ GITHUB_REPO="braincreator/flowlink"
 BINARY_NAME="flowlink"
 INSTALL_DIR="/usr/local/bin"
 FLOWLINK_HOME="${FLOWLINK_HOME:-$HOME/.flowlink}"
-RELAY_URL="${RELAY_URL:-wss://relay.flowmasters.ru/ws}"
+RELAY_URL="${RELAY_URL:-wss://relay.flow-masters.ru/ws}"
 TOKEN=""
 LABEL=""
 
@@ -169,7 +169,7 @@ generate_token() {
     fi
 }
 
-# Create config.json
+# Create flowlink.json
 create_config() {
     log_info "Creating configuration..."
     
@@ -184,41 +184,14 @@ create_config() {
         LABEL=$(hostname)
     fi
     
-    CONFIG_FILE="$FLOWLINK_HOME/config.json"
+    CONFIG_FILE="$FLOWLINK_HOME/flowlink.json"
     
     cat > "$CONFIG_FILE" <<EOF
 {
   "agent_id": "$AGENT_ID",
   "token": "$TOKEN",
   "relay_url": "$RELAY_URL",
-  "heartbeat_sec": 30,
-  "label": "$LABEL",
-  "work_dir": "",
-  "sandbox": {
-    "allowed_dirs": [],
-    "blocked_patterns": [
-      "rm -rf /*",
-      "mkfs*",
-      "dd if=*",
-      ":(){ :|:& };:"
-    ],
-    "max_file_size": 104857600,
-    "max_exec_timeout": 300,
-    "allow_sudo": false
-  },
-  "approval": {
-    "mode": "auto",
-    "soft_ask_notify": true,
-    "hard_ask_timeout_sec": 3600,
-    "max_retries": 3
-  },
-  "backup": {
-    "max_snapshots": 50,
-    "max_total_size": 5368709120,
-    "retention_days": 7,
-    "backup_dir": "$FLOWLINK_HOME/backups",
-    "enabled": true
-  }
+  "label": "$LABEL"
 }
 EOF
     
@@ -320,7 +293,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$SERVICE_USER
-ExecStart=$INSTALL_DIR/flowlink agent start
+WorkingDirectory=$SERVICE_HOME
+ExecStart=$INSTALL_DIR/flowlink agent -c $SERVICE_HOME/flowlink.json
 Restart=always
 RestartSec=5
 Environment=FLOWLINK_HOME=$SERVICE_HOME
@@ -363,7 +337,8 @@ install_launchagent() {
     <array>
         <string>$INSTALL_DIR/flowlink</string>
         <string>agent</string>
-        <string>start</string>
+        <string>-c</string>
+        <string>$FLOWLINK_HOME/flowlink.json</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -417,7 +392,7 @@ show_status() {
     echo -e "${GREEN}  FlowLink Installation Complete!${NC}"
     echo -e "${GREEN}════════════════════════════════════════${NC}"
     echo ""
-    echo "Configuration: $FLOWLINK_HOME/config.json"
+    echo "Configuration: $FLOWLINK_HOME/flowlink.json"
     echo "Binary:        $INSTALL_DIR/flowlink"
     echo ""
     
@@ -460,8 +435,8 @@ main() {
     create_flowlink_dir
     
     # Check if already installed
-    if [[ -f "$FLOWLINK_HOME/config.json" ]]; then
-        log_warn "Configuration already exists at $FLOWLINK_HOME/config.json"
+    if [[ -f "$FLOWLINK_HOME/flowlink.json" ]]; then
+        log_warn "Configuration already exists at $FLOWLINK_HOME/flowlink.json"
         read -p "Overwrite? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
