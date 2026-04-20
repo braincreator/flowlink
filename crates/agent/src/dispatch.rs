@@ -286,7 +286,10 @@ async fn handle_exec(
     }
 
     match executor.exec(&payload, Priority::User).await {
-        Ok(result) => Some(exec_done_response(msg, &result)),
+        Ok(result) => {
+            info!("Exec done: exit={} duration={}ms cmd={}", result.exit_code, result.duration_ms, payload.command);
+            Some(exec_done_response(msg, &result))
+        }
         Err(e) => Some(error_response(
             msg,
             "EXEC_FAILED",

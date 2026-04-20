@@ -242,28 +242,34 @@ impl Connection {
             );
         }
 
-        let pattern = pattern.unwrap();
         let mut policy = self.policy.write().await;
 
         let result = match action {
+            "list" => {
+                let (allows, denies) = policy.runtime_rules();
+                format!("Allow: {:?}\nDeny: {:?}", allows, denies)
+            }
             "add_allow" => {
-                policy.add_allow_rule(pattern.to_string());
-                format!("allow rule '{}' added", pattern)
+                let p = pattern.unwrap();
+                policy.add_allow_rule(p.to_string());
+                format!("allow rule '{}' added", p)
             }
             "add_deny" => {
-                policy.add_deny_rule(pattern.to_string());
-                format!("deny rule '{}' added", pattern)
+                let p = pattern.unwrap();
+                policy.add_deny_rule(p.to_string());
+                format!("deny rule '{}' added", p)
             }
             "remove" => {
-                if policy.remove_rule(pattern) {
-                    format!("rule '{}' removed", pattern)
+                let p = pattern.unwrap();
+                if policy.remove_rule(p) {
+                    format!("rule '{}' removed", p)
                 } else {
                     return Some(
                         Message::new(MessageType::PolicyAck)
                             .with_agent_id(&self.agent_id)
                             .with_payload(serde_json::json!({
                                 "status": "error",
-                                "reason": format!("rule '{}' not found", pattern)
+                                "reason": format!("rule '{}' not found", p)
                             })),
                     );
                 }
