@@ -254,6 +254,32 @@ async fn list_agents(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
     Json(state.pool.list())
 }
 
+async fn list_pattern_suggestions(State(state): State<AppState>) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db.pool(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+    match sqlx::query_as::<_, (String, String, String, Option<String>, chrono::DateTime<chrono::Utc>)>(
+        "SELECT agent_id, command_prefix, last_risk, suggested_action, last_seen FROM command_patterns WHERE suggested_action IS NOT NULL ORDER BY last_seen DESC LIMIT 100"
+    )
+    .fetch_all(db)
+    .await {
+        Ok(rows) => {
+            let suggestions: Vec<serde_json::Value> = rows.into_iter().map(|(agent_id, prefix, risk, action, last_seen)| {
+                json!({
+                    "agent_id": agent_id,
+                    "command_prefix": prefix,
+                    "risk": risk,
+                    "suggested_action": action,
+                    "last_seen": last_seen.to_rfc3339(),
+                })
+            }).collect();
+            (StatusCode::OK, Json(json!({"suggestions": suggestions}))).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
 /// GET /api/account/info — Returns current account info from DB
 async fn account_info(
     State(state): State<AppState>,
@@ -888,6 +914,33 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
                             }
                             flowlink_core::MessageType::SysInfo => {
                                 eventbus.publish("sysinfo", &text_str);
+                            }
+                            flowlink_core::MessageType::PatternSuggestion => {
+                                log::info!("Agent {aid}: pattern suggestions received");
+                                if let Some(ref payload) = msg.payload {
+                                    if let Some(suggestions) = payload.as_array() {
+                                        for s in suggestions {
+                                            let action = s.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                            let prefix = s.get("prefix").and_then(|v| v.as_str()).unwrap_or("");
+                                            let reason = s.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+                                            log::info!("[Pattern] {aid}: {action} for '{prefix}' — {reason}");
+                                            // Persist to DB
+                                            if let Some(ref db) = state.db {
+                                                let _ = sqlx::query(
+                                                    "INSERT INTO command_patterns (agent_id, command_hash, command_prefix, suggested_action, last_seen) 
+                                                     VALUES ($1, digest($2, 'sha256'), $2, $3, NOW()) 
+                                                     ON CONFLICT (agent_id, command_hash) DO UPDATE SET suggested_action = $3, last_seen = NOW()"
+                                                )
+                                                .bind(&aid)
+                                                .bind(prefix)
+                                                .bind(action)
+                                                .execute(db.write_pool())
+                                                .await;
+                                            }
+                                        }
+                                        eventbus.publish("pattern_suggestion", &text_str);
+                                    }
+                                }
                             }
                             flowlink_core::MessageType::ConfigAck => {
                                 eventbus.publish("config_ack", &text_str);
@@ -1767,6 +1820,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/policies/{id}", axum::routing::get(crate::policy_db::get_policy).delete(crate::policy_db::delete_policy))
         .route("/api/v1/policies/bind", axum::routing::post(crate::policy_db::bind_policy_to_agent))
         .route("/api/v1/policies/unbind", axum::routing::post(crate::policy_db::unbind_policy_from_agent))
+        // Pattern suggestions
+        .route("/api/v1/patterns", get(list_pattern_suggestions))
         // Account
         .route("/api/account/info", axum::routing::get(account_info))
         .route("/api/account", axum::routing::delete(crate::account_deletion_api::request_deletion))

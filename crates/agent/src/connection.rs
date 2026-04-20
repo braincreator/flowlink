@@ -181,7 +181,7 @@ impl Connection {
                     }
                 }
                 _ = analysis_interval.tick() => {
-                    // Pattern learning: analyze and log suggestions
+                    // Pattern learning: analyze, log, and send suggestions to relay
                     let suggestions = {
                         let learner = self.pattern_learner.lock().await;
                         learner.analyze()
@@ -189,6 +189,15 @@ impl Connection {
                     if !suggestions.is_empty() {
                         for s in &suggestions {
                             info!("[Pattern] suggestion: {:?}", s);
+                        }
+                        // Send suggestions to relay via WS
+                        let suggestions_json = serde_json::to_value(&suggestions).unwrap_or_default();
+                        let msg = Message::new(MessageType::PatternSuggestion)
+                            .with_agent_id(&self.agent_id)
+                            .with_payload(suggestions_json);
+                        let json = serde_json::to_string(&msg).unwrap_or_default();
+                        if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
+                            warn!("Failed to send pattern suggestions: {e}");
                         }
                         // Save patterns to disk
                         let cache_path = std::env::var("FLOWLINK_AGENT_DIR")

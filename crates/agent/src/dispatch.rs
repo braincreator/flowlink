@@ -114,6 +114,7 @@ pub async fn dispatch(
         | MessageType::PairingRequest
         | MessageType::PairingConfirm
         | MessageType::PairingResponse
+        | MessageType::PatternSuggestion
         | MessageType::Error => {
             info!("Ignoring message type: {:?}", msg.msg_type);
             None

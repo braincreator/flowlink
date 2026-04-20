@@ -115,6 +115,9 @@ pub enum MessageType {
     ShieldAlert,
     ShieldAlertResponse,
 
+    // Pattern Learning
+    PatternSuggestion,
+
     // Error
     Error,
 }
