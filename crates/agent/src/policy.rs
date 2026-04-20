@@ -99,6 +99,12 @@ impl PolicyEngine {
         (self.runtime_allow.clone(), self.runtime_deny.clone())
     }
 
+    /// Replace all runtime rules atomically (used for DB policy sync).
+    pub fn replace_runtime_rules(&mut self, allows: Vec<String>, denies: Vec<String>) {
+        self.runtime_allow = allows;
+        self.runtime_deny = denies;
+    }
+
     /// Match a command against a simple glob pattern (* = wildcard).
     fn match_glob(pattern: &str, text: &str) -> bool {
         if pattern == text {

@@ -579,6 +579,24 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
         let _ = ws_sink.send(AxumMsg::Text(json.into())).await;
     }
 
+    // Push DB policies to agent on connect
+    if let Some(ref db) = state.db {
+        if let Ok(rules) = crate::policy_db::load_agent_rules(db.write_pool(), &agent_id).await {
+            if !rules.is_empty() {
+                let denies: Vec<String> = rules.iter().filter(|r| r.action == "deny").map(|r| r.pattern.clone()).collect();
+                let allows: Vec<String> = rules.iter().filter(|r| r.action == "allow").map(|r| r.pattern.clone()).collect();
+                let push_msg = flowlink_core::Message::new(flowlink_core::MessageType::PolicyUpdate)
+                    .with_agent_id(&agent_id)
+                    .with_priority(flowlink_core::Priority::System)
+                    .with_payload(serde_json::json!({"action": "replace_all", "denies": denies, "allows": allows, "source": "db"}));
+                if let Ok(json) = serde_json::to_string(&push_msg) {
+                    let _ = ws_sink.send(AxumMsg::Text(json.into())).await;
+                    log::info!("Pushed {} rules to agent {} from DB", rules.len(), agent_id);
+                }
+            }
+        }
+    }
+
     let aid = agent_id.clone();
     let pool = state.pool.clone();
     let eventbus = state.eventbus.clone();
@@ -1499,6 +1517,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agents", axum::routing::get(crate::control_plane::list_agents))
         .route("/api/v1/agents/{id}", axum::routing::get(crate::control_plane::get_agent))
         .route("/api/v1/agents/{id}", axum::routing::delete(crate::control_plane::deregister_agent))
+        // Policy management
+        .route("/api/v1/policies", axum::routing::get(crate::policy_db::list_policies).post(crate::policy_db::create_policy))
+        .route("/api/v1/policies/{id}", axum::routing::get(crate::policy_db::get_policy).delete(crate::policy_db::delete_policy))
+        .route("/api/v1/policies/bind", axum::routing::post(crate::policy_db::bind_policy_to_agent))
+        .route("/api/v1/policies/unbind", axum::routing::post(crate::policy_db::unbind_policy_from_agent))
         // Account
         .route("/api/account/info", axum::routing::get(account_info))
         .route("/api/account", axum::routing::delete(crate::account_deletion_api::request_deletion))

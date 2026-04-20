@@ -210,6 +210,12 @@ pub async fn signup(
         active: true,
     });
 
+    // Bind default policy to new agent
+    if let Some(ref db) = state.db {
+        if let Err(e) = crate::policy_db::bind_default_policy(db.write_pool(), &agent.agent_id).await {
+            log::warn!("Failed to bind default policy: {e}");
+        }
+    }
     // Assign free plan by default
     let plan_id = "trial".to_string();
     let now = Utc::now();

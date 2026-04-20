@@ -249,7 +249,7 @@ impl Connection {
             .unwrap_or("add_allow");
         let pattern = payload.get("pattern").and_then(|v| v.as_str());
 
-        if pattern.is_none() && action != "list" {
+        if pattern.is_none() && action != "list" && action != "replace_all" {
             return Some(
                 Message::new(MessageType::PolicyAck)
                     .with_agent_id(&self.agent_id)
@@ -263,6 +263,22 @@ impl Connection {
         let mut policy = self.policy.write().await;
 
         let result = match action {
+            "replace_all" => {
+                let denies: Vec<String> = payload
+                    .get("denies")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                let allows: Vec<String> = payload
+                    .get("allows")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_default();
+                policy.replace_runtime_rules(allows.clone(), denies.clone());
+                let source = payload.get("source").and_then(|v| v.as_str()).unwrap_or("manual");
+                info!("Policy replaced from {}: {} allows, {} denies", source, allows.len(), denies.len());
+                format!("policy replaced from {}: {} allows, {} denies", source, allows.len(), denies.len())
+            }
             "list" => {
                 let (allows, denies) = policy.runtime_rules();
                 format!("Allow: {:?}\nDeny: {:?}", allows, denies)

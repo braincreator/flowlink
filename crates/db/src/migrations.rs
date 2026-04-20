@@ -482,6 +482,57 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_api_token_hash ON agents(api_token_hash) WHERE api_token_hash IS NOT NULL;
             "#,
         ),
+        (
+            "030_policy_framework",
+            r#"
+            CREATE TABLE IF NOT EXISTS policies (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                org_id TEXT,
+                is_default BOOLEAN DEFAULT false,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS policy_rules (
+                id TEXT PRIMARY KEY,
+                policy_id TEXT NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+                action TEXT NOT NULL CHECK (action IN ('allow', 'deny')),
+                pattern TEXT NOT NULL,
+                risk_level TEXT DEFAULT 'high',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            CREATE TABLE IF NOT EXISTS agent_policy_bindings (
+                agent_id TEXT NOT NULL,
+                policy_id TEXT NOT NULL REFERENCES policies(id) ON DELETE CASCADE,
+                PRIMARY KEY (agent_id, policy_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_policy_rules_policy ON policy_rules(policy_id);
+            CREATE INDEX IF NOT EXISTS idx_agent_policy_bindings_agent ON agent_policy_bindings(agent_id);
+            CREATE INDEX IF NOT EXISTS idx_agent_policy_bindings_policy ON agent_policy_bindings(policy_id);
+            CREATE INDEX IF NOT EXISTS idx_policies_org ON policies(org_id);
+
+            -- Insert default policy: block dangerous commands
+            INSERT INTO policies (id, name, description, is_default)
+            VALUES ('default', 'Default Security Policy', 'Blocks dangerous commands like rm -rf, curl pipes, and privilege escalation', true)
+            ON CONFLICT (id) DO NOTHING;
+
+            INSERT INTO policy_rules (id, policy_id, action, pattern, risk_level) VALUES
+                ('rule-deny-rm-rf', 'default', 'deny', 'rm -rf *', 'critical'),
+                ('rule-deny-curl-pipe', 'default', 'deny', 'curl * | *', 'critical'),
+                ('rule-deny-wget-pipe', 'default', 'deny', 'wget * | *', 'critical'),
+                ('rule-deny-chmod-777', 'default', 'deny', 'chmod 777 *', 'high'),
+                ('rule-deny-shadow', 'default', 'deny', 'cat /etc/shadow', 'high'),
+                ('rule-deny-env', 'default', 'deny', 'cat .env', 'medium'),
+                ('rule-allow-read', 'default', 'allow', 'ls *', 'none'),
+                ('rule-allow-echo', 'default', 'allow', 'echo *', 'none'),
+                ('rule-allow-cat-safe', 'default', 'allow', 'cat /var/log/*', 'low')
+            ON CONFLICT (id) DO NOTHING;
+            "#,
+        ),
     ]
 }
 
