@@ -295,44 +295,44 @@ async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<Ke
     match name {
         "flowlink_agents" => mcp_agents(&state, req.id, &args),
         "flowlink_exec" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_exec") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_exec").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_exec") { return mcp_err(req.id, -32002, "Forbidden: missing agents:write scope").into_response(); } }
             mcp_exec(&state, req.id, &args, identity.as_ref()).await
         }
         "flowlink_read" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_read") { return mcp_err(req.id, -32002, "Forbidden: insufficient role").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_read") { return mcp_err(req.id, -32002, "Forbidden: missing agents:read scope").into_response(); } }
             mcp_read(&state, req.id, &args).await
         }
         "flowlink_write" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_write") { return mcp_err(req.id, -32002, "Forbidden: insufficient role").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_write") { return mcp_err(req.id, -32002, "Forbidden: missing agents:write scope").into_response(); } }
             mcp_write(&state, req.id, &args).await
         }
         "flowlink_list" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_list") { return mcp_err(req.id, -32002, "Forbidden: insufficient role").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_list") { return mcp_err(req.id, -32002, "Forbidden: missing agents:read scope").into_response(); } }
             mcp_list(&state, req.id, &args).await
         }
         "flowlink_sysinfo" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_sysinfo") { return mcp_err(req.id, -32002, "Forbidden: insufficient role").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_sysinfo") { return mcp_err(req.id, -32002, "Forbidden: missing system:read scope").into_response(); } }
             mcp_sysinfo(&state, req.id, &args).await
         }
         "flowlink_kill" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_kill") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_kill").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_kill") { return mcp_err(req.id, -32002, "Forbidden: missing agents:admin scope").into_response(); } }
             mcp_kill(&state, req.id, &args).await
         }
         "flowlink_deregister" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_deregister") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_deregister").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_deregister") { return mcp_err(req.id, -32002, "Forbidden: missing agents:admin scope").into_response(); } }
             mcp_deregister(&state, req.id, &args).await
         }
         "flowlink_health" => mcp_health(&state, req.id, &args),
         "flowlink_config_update" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_config_update") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_config_update").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_config_update") { return mcp_err(req.id, -32002, "Forbidden: missing system:write scope").into_response(); } }
             mcp_config_update(&state, req.id, &args).await
         }
         "flowlink_approve" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_approve") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_approve").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_approve") { return mcp_err(req.id, -32002, "Forbidden: missing approvals:write scope").into_response(); } }
             mcp_approve(&state, req.id, &args, identity.as_ref()).await
         }
         "flowlink_policy" => {
-            if let Some(ref id) = identity { if !id.role.can_call("flowlink_policy") { return mcp_err(req.id, -32002, "Forbidden: insufficient role for flowlink_policy").into_response(); } }
+            if let Some(ref id) = identity { if !id.can_call("flowlink_policy") { return mcp_err(req.id, -32002, "Forbidden: missing policy:read scope").into_response(); } }
             mcp_policy(&state, req.id, &args).await
         }
         _ => mcp_err(req.id, -32602, format!("unknown tool: {name}")).into_response(),

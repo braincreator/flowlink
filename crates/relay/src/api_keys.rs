@@ -1,16 +1,161 @@
 // API Key management — CRUD + validation for MCP and API auth
-// Keys are prefixed with `flk_` for identification, stored as SHA-256 hashes.
+// Industry-standard pattern: fine-grained scopes, role inheritance,
+// last_used tracking, rotation support.
+//
+// Inspired by: GitHub PAT (fine-grained), Stripe restricted keys, AWS IAM access keys.
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 // ═══════════════════════════════════════════════
-// Types
+// Scopes (fine-grained permissions)
+// ═══════════════════════════════════════════════
+
+/// Individual permission scopes for API keys.
+/// Following the pattern: `resource:action` (like GitHub's `repo:read`, `repo:write`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum Scope {
+    // Agent management
+    #[serde(rename = "agents:read")]
+    AgentsRead,
+    #[serde(rename = "agents:write")]
+    AgentsWrite,    // exec, write files
+    #[serde(rename = "agents:admin")]
+    AgentsAdmin,    // kill, deregister, config
+
+    // Approvals
+    #[serde(rename = "approvals:read")]
+    ApprovalsRead,
+    #[serde(rename = "approvals:write")]
+    ApprovalsWrite, // approve/reject
+
+    // Policy
+    #[serde(rename = "policy:read")]
+    PolicyRead,
+    #[serde(rename = "policy:write")]
+    PolicyWrite,
+
+    // System
+    #[serde(rename = "system:read")]
+    SystemRead,     // health, sysinfo
+    #[serde(rename = "system:write")]
+    SystemWrite,    // config_update
+}
+
+impl Scope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AgentsRead => "agents:read",
+            Self::AgentsWrite => "agents:write",
+            Self::AgentsAdmin => "agents:admin",
+            Self::ApprovalsRead => "approvals:read",
+            Self::ApprovalsWrite => "approvals:write",
+            Self::PolicyRead => "policy:read",
+            Self::PolicyWrite => "policy:write",
+            Self::SystemRead => "system:read",
+            Self::SystemWrite => "system:write",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "agents:read" => Some(Self::AgentsRead),
+            "agents:write" => Some(Self::AgentsWrite),
+            "agents:admin" => Some(Self::AgentsAdmin),
+            "approvals:read" => Some(Self::ApprovalsRead),
+            "approvals:write" => Some(Self::ApprovalsWrite),
+            "policy:read" => Some(Self::PolicyRead),
+            "policy:write" => Some(Self::PolicyWrite),
+            "system:read" => Some(Self::SystemRead),
+            "system:write" => Some(Self::SystemWrite),
+            _ => None,
+        }
+    }
+
+    /// All available scopes (for admin role).
+    pub fn all() -> Vec<Scope> {
+        vec![
+            Self::AgentsRead, Self::AgentsWrite, Self::AgentsAdmin,
+            Self::ApprovalsRead, Self::ApprovalsWrite,
+            Self::PolicyRead, Self::PolicyWrite,
+            Self::SystemRead, Self::SystemWrite,
+        ]
+    }
+
+    /// Scopes for operator role (no agents:admin, no system:write, no policy:write).
+    pub fn operator_scopes() -> Vec<Scope> {
+        vec![
+            Self::AgentsRead, Self::AgentsWrite,
+            Self::ApprovalsRead, Self::ApprovalsWrite,
+            Self::PolicyRead,
+            Self::SystemRead,
+        ]
+    }
+
+    /// Scopes for viewer role (read-only).
+    pub fn viewer_scopes() -> Vec<Scope> {
+        vec![
+            Self::AgentsRead,
+            Self::ApprovalsRead,
+            Self::PolicyRead,
+            Self::SystemRead,
+        ]
+    }
+
+    /// Scopes granted to an org role.
+    pub fn for_org_role(role: &str) -> Vec<Scope> {
+        match role {
+            "owner" | "admin" => Self::all(),
+            "member" => Self::operator_scopes(),
+            "viewer" => Self::viewer_scopes(),
+            _ => Self::viewer_scopes(),
+        }
+    }
+
+    /// Parse a comma-separated list of scopes.
+    pub fn parse_list(s: &str) -> Vec<Scope> {
+        s.split(',')
+            .filter_map(|p| Self::from_str(p.trim()))
+            .collect()
+    }
+
+    /// Serialize a list of scopes to comma-separated string.
+    pub fn join(scopes: &[Scope]) -> String {
+        scopes.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(",")
+    }
+}
+
+/// Map MCP tool names to required scopes.
+pub fn required_scopes(tool: &str) -> Vec<Scope> {
+    match tool {
+        "flowlink_agents" | "flowlink_health" | "flowlink_read" | "flowlink_list" | "flowlink_sysinfo" => {
+            vec![Scope::AgentsRead]
+        }
+        "flowlink_exec" | "flowlink_write" => {
+            vec![Scope::AgentsWrite]
+        }
+        "flowlink_kill" | "flowlink_deregister" => {
+            vec![Scope::AgentsAdmin]
+        }
+        "flowlink_approve" => {
+            vec![Scope::ApprovalsWrite]
+        }
+        "flowlink_policy" => {
+            vec![Scope::PolicyRead]
+        }
+        "flowlink_config_update" => {
+            vec![Scope::SystemWrite]
+        }
+        _ => vec![Scope::AgentsRead], // default: at least read
+    }
+}
+
+// ═══════════════════════════════════════════════
+// Legacy role enum (kept for backward compat)
 // ═══════════════════════════════════════════════
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,21 +183,26 @@ impl ApiKeyRole {
         }
     }
 
-    /// Check if this role is allowed to call a given MCP tool.
-    pub fn can_call(&self, tool: &str) -> bool {
+    /// Scopes granted by this role.
+    pub fn scopes(&self) -> Vec<Scope> {
         match self {
-            Self::Admin => true, // Full access
-            Self::Operator => !matches!(
-                tool,
-                "flowlink_kill" | "flowlink_deregister" | "flowlink_config_update"
-            ),
-            Self::Viewer => matches!(
-                tool,
-                "flowlink_agents" | "flowlink_health" | "flowlink_read" | "flowlink_list" | "flowlink_sysinfo"
-            ),
+            Self::Admin => Scope::all(),
+            Self::Operator => Scope::operator_scopes(),
+            Self::Viewer => Scope::viewer_scopes(),
         }
     }
+
+    /// Check if this role can call a given MCP tool.
+    pub fn can_call(&self, tool: &str) -> bool {
+        let required = required_scopes(tool);
+        let granted = self.scopes();
+        required.iter().all(|r| granted.contains(r))
+    }
 }
+
+// ═══════════════════════════════════════════════
+// Types
+// ═══════════════════════════════════════════════
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ApiKeyInfo {
@@ -62,6 +212,7 @@ pub struct ApiKeyInfo {
     pub key_prefix: String,
     pub name: String,
     pub role: String,
+    pub scopes: String,
     pub created_at: DateTime<Utc>,
     pub last_used: Option<DateTime<Utc>>,
     pub expires_at: Option<DateTime<Utc>>,
@@ -70,19 +221,31 @@ pub struct ApiKeyInfo {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ApiKeyWithSecret {
-    pub info: ApiKeyInfo,
-    /// The full secret key — only returned once at creation time.
-    pub secret: String,
+    pub id: Uuid,
+    pub key: String,
+    pub key_prefix: String,
+    pub name: String,
+    pub role: String,
+    pub scopes: String,
 }
 
-/// Identity resolved from a validated API key — attached to request context.
+/// Identity resolved from a validated API key.
 #[derive(Debug, Clone)]
 pub struct KeyIdentity {
     pub key_id: Uuid,
     pub org_id: Uuid,
     pub account_id: String,
     pub role: ApiKeyRole,
+    pub scopes: Vec<Scope>,
     pub name: String,
+}
+
+impl KeyIdentity {
+    /// Check if this identity has the required scopes for a tool.
+    pub fn can_call(&self, tool: &str) -> bool {
+        let required = required_scopes(tool);
+        required.iter().all(|r| self.scopes.contains(r))
+    }
 }
 
 // ═══════════════════════════════════════════════
@@ -114,22 +277,42 @@ pub fn key_prefix(key: &str) -> String {
 pub struct ApiKeyRepo;
 
 impl ApiKeyRepo {
-    /// Create a new API key. Returns the info + the secret (shown once).
+    /// Create a new API key.
+    /// `scopes` overrides role-based defaults if provided (fine-grained).
+    /// Scopes are capped to caller's org permissions (no privilege escalation).
     pub async fn create(
         db: &PgPool,
         org_id: Uuid,
         account_id: &str,
         name: &str,
         role: &ApiKeyRole,
+        custom_scopes: Option<&[Scope]>,
+        caller_max_scopes: &[Scope], // caller's org-granted scopes (ceiling)
         expires_at: Option<DateTime<Utc>>,
     ) -> Result<ApiKeyWithSecret> {
         let secret = generate_key();
         let hash = hash_key(&secret);
         let prefix = key_prefix(&secret);
 
+        // Determine final scopes: custom (capped) or role defaults (capped)
+        let final_scopes = if let Some(custom) = custom_scopes {
+            // Cap custom scopes to caller's permissions
+            custom.iter()
+                .filter(|s| caller_max_scopes.contains(s))
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            // Role defaults, capped
+            role.scopes().into_iter()
+                .filter(|s| caller_max_scopes.contains(s))
+                .collect::<Vec<_>>()
+        };
+
+        let scopes_str = Scope::join(&final_scopes);
+
         let row = sqlx::query_as::<_, (Uuid, DateTime<Utc>)>(
-            "INSERT INTO api_keys (org_id, account_id, key_hash, key_prefix, name, role, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "INSERT INTO api_keys (org_id, account_id, key_hash, key_prefix, name, role, scopes, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING id, created_at",
         )
         .bind(org_id)
@@ -138,28 +321,22 @@ impl ApiKeyRepo {
         .bind(&prefix)
         .bind(name)
         .bind(role.as_str())
+        .bind(&scopes_str)
         .bind(expires_at)
         .fetch_one(db)
         .await?;
 
         Ok(ApiKeyWithSecret {
-            info: ApiKeyInfo {
-                id: row.0,
-                org_id,
-                account_id: account_id.to_string(),
-                key_prefix: prefix,
-                name: name.to_string(),
-                role: role.as_str().to_string(),
-                created_at: row.1,
-                last_used: None,
-                expires_at,
-                active: true,
-            },
-            secret,
+            id: row.0,
+            key: secret,
+            key_prefix: prefix,
+            name: name.to_string(),
+            role: role.as_str().to_string(),
+            scopes: scopes_str,
         })
     }
 
-    /// Validate an API key by hash. Returns identity if valid.
+    /// Validate an API key by hash. Returns identity with scopes.
     pub async fn validate(db: &PgPool, key: &str) -> Result<Option<KeyIdentity>> {
         if !key.starts_with("flk_") {
             return Ok(None);
@@ -167,15 +344,15 @@ impl ApiKeyRepo {
 
         let hash = hash_key(key);
 
-        let row = sqlx::query_as::<_, (Uuid, Uuid, String, String, Option<DateTime<Utc>>, bool)>(
-            "SELECT id, org_id, account_id, role, expires_at, active
+        let row = sqlx::query_as::<_, (Uuid, Uuid, String, String, String, Option<DateTime<Utc>>, bool)>(
+            "SELECT id, org_id, account_id, role, scopes, expires_at, active
              FROM api_keys WHERE key_hash = $1",
         )
         .bind(&hash)
         .fetch_optional(db)
         .await?;
 
-        let (id, org_id, account_id, role_str, expires_at, active) = match row {
+        let (id, org_id, account_id, role_str, scopes_str, expires_at, active) = match row {
             Some(r) => r,
             None => return Ok(None),
         };
@@ -184,15 +361,16 @@ impl ApiKeyRepo {
             return Ok(None);
         }
 
-        // Check expiration
         if let Some(exp) = expires_at {
             if exp < Utc::now() {
                 return Ok(None);
             }
         }
 
-        let role = ApiKeyRole::from_str(&role_str)
-            .unwrap_or(ApiKeyRole::Viewer);
+        let role = ApiKeyRole::from_str(&role_str).unwrap_or(ApiKeyRole::Viewer);
+        let scopes = Scope::parse_list(&scopes_str);
+        // If scopes empty, fall back to role defaults
+        let scopes = if scopes.is_empty() { role.scopes() } else { scopes };
 
         // Update last_used (fire and forget)
         let db2 = db.clone();
@@ -208,28 +386,30 @@ impl ApiKeyRepo {
             org_id,
             account_id,
             role,
-            name: String::new(), // not needed for auth context
+            scopes,
+            name: String::new(),
         }))
     }
 
-    /// List API keys for an organization. Admin sees all, others see only their own.
+    /// List API keys for an organization.
+    /// Admin/owner sees all org keys. Others see only their own.
     pub async fn list_by_org(
         db: &PgPool,
         org_id: Uuid,
         caller_account_id: &str,
-        caller_role: &ApiKeyRole,
+        caller_org_role: &str,
     ) -> Result<Vec<ApiKeyInfo>> {
-        let rows = if matches!(caller_role, ApiKeyRole::Admin) {
-            sqlx::query_as::<_, (Uuid, Uuid, String, String, String, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<DateTime<Utc>>, bool)>(
-                "SELECT id, org_id, account_id, key_prefix, name, role, created_at, last_used, expires_at, active
+        let rows = if caller_org_role == "owner" || caller_org_role == "admin" {
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, String, String, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<DateTime<Utc>>, bool)>(
+                "SELECT id, org_id, account_id, key_prefix, name, role, scopes, created_at, last_used, expires_at, active
                  FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC",
             )
             .bind(org_id)
             .fetch_all(db)
             .await?
         } else {
-            sqlx::query_as::<_, (Uuid, Uuid, String, String, String, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<DateTime<Utc>>, bool)>(
-                "SELECT id, org_id, account_id, key_prefix, name, role, created_at, last_used, expires_at, active
+            sqlx::query_as::<_, (Uuid, Uuid, String, String, String, String, String, DateTime<Utc>, Option<DateTime<Utc>>, Option<DateTime<Utc>>, bool)>(
+                "SELECT id, org_id, account_id, key_prefix, name, role, scopes, created_at, last_used, expires_at, active
                  FROM api_keys WHERE org_id = $1 AND account_id = $2 ORDER BY created_at DESC",
             )
             .bind(org_id)
@@ -238,26 +418,12 @@ impl ApiKeyRepo {
             .await?
         };
 
-        Ok(rows
-            .into_iter()
-            .map(|(id, org_id, account_id, key_prefix, name, role, created_at, last_used, expires_at, active)| {
-                ApiKeyInfo {
-                    id,
-                    org_id,
-                    account_id,
-                    key_prefix,
-                    name,
-                    role,
-                    created_at,
-                    last_used,
-                    expires_at,
-                    active,
-                }
-            })
-            .collect())
+        Ok(rows.into_iter().map(|(id, org_id, account_id, key_prefix, name, role, scopes, created_at, last_used, expires_at, active)| {
+            ApiKeyInfo { id, org_id, account_id, key_prefix, name, role, scopes, created_at, last_used, expires_at, active }
+        }).collect())
     }
 
-    /// Revoke (deactivate) an API key. Only admin or key owner can do this.
+    /// Revoke (deactivate) an API key. Admin/owner can revoke any, others only own.
     pub async fn revoke(
         db: &PgPool,
         key_id: Uuid,
@@ -278,16 +444,63 @@ impl ApiKeyRepo {
             .execute(db)
             .await?
         };
-
         Ok(result.rows_affected() > 0)
     }
 
-    /// Delete an API key permanently. Admin only.
+    /// Permanently delete an API key. Admin only.
     pub async fn delete(db: &PgPool, key_id: Uuid) -> Result<bool> {
         let result = sqlx::query("DELETE FROM api_keys WHERE id = $1")
             .bind(key_id)
             .execute(db)
             .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Rotate: revoke old key and create a new one with same permissions.
+    /// Returns the new key's secret (shown once).
+    pub async fn rotate(
+        db: &PgPool,
+        old_key_id: Uuid,
+        caller_account_id: &str,
+        caller_is_admin: bool,
+        caller_max_scopes: &[Scope],
+    ) -> Result<Option<ApiKeyWithSecret>> {
+        // Fetch old key info
+        let row = sqlx::query_as::<_, (Uuid, String, String, String, String, Option<DateTime<Utc>>)>(
+            "SELECT org_id, account_id, name, role, scopes, expires_at FROM api_keys WHERE id = $1",
+        )
+        .bind(old_key_id)
+        .fetch_optional(db)
+        .await?;
+
+        let (org_id, owner_id, name, role_str, scopes_str, expires_at) = match row {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        // Only admin or key owner can rotate
+        if !caller_is_admin && owner_id != caller_account_id {
+            return Ok(None);
+        }
+
+        // Create new key with same permissions
+        let role = ApiKeyRole::from_str(&role_str).unwrap_or(ApiKeyRole::Viewer);
+        let old_scopes = Scope::parse_list(&scopes_str);
+        let new_key = Self::create(
+            db, org_id, &caller_account_id,
+            &format!("{} (rotated)", name),
+            &role,
+            Some(&old_scopes),
+            caller_max_scopes,
+            expires_at,
+        ).await?;
+
+        // Revoke old key
+        sqlx::query("UPDATE api_keys SET active = false WHERE id = $1")
+            .bind(old_key_id)
+            .execute(db)
+            .await?;
+
+        Ok(Some(new_key))
     }
 }

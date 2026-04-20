@@ -413,13 +413,8 @@ async fn reject_approval(
 #[derive(Deserialize)]
 struct CreateApiKeyRequest {
     name: String,
-    role: String,
+    scopes: Option<String>,         // optional fine-grained scopes (capped to caller)
     expires_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Deserialize)]
-struct RevokeApiKeyRequest {
-    key_id: Uuid,
 }
 
 async fn create_api_key(
@@ -440,7 +435,7 @@ async fn create_api_key(
         None => return (StatusCode::FORBIDDEN, Json(json!({"error": "No organization context"}))).into_response(),
     };
 
-    // Get caller's role in org
+    // Get caller's org role → key inherits it
     let caller_org_role: String = match sqlx::query_scalar::<_, String>(
         "SELECT role FROM org_members WHERE org_id = $1 AND account_id = $2"
     )
@@ -453,25 +448,21 @@ async fn create_api_key(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     };
 
-    // Determine key role:
-    // - owner/admin: can choose any role
-    // - member/viewer: key inherits their org role (mapped: owner/admin→admin, member→operator, viewer→viewer)
-    let role = if caller_org_role == "owner" || caller_org_role == "admin" {
-        // Admin chooses role
-        match crate::api_keys::ApiKeyRole::from_str(&body.role) {
-            Some(r) => r,
-            None => return (StatusCode::BAD_REQUEST, Json(json!({"error": "Invalid role. Use: admin, operator, viewer"}))).into_response(),
-        }
-    } else {
-        // Non-admin: inherit from org membership
-        match caller_org_role.as_str() {
-            "member" => crate::api_keys::ApiKeyRole::Operator,
-            "viewer" => crate::api_keys::ApiKeyRole::Viewer,
-            _ => crate::api_keys::ApiKeyRole::Viewer,
-        }
+    // Key inherits org role: owner/admin → Admin, member → Operator, viewer → Viewer
+    let role = match caller_org_role.as_str() {
+        "owner" | "admin" => crate::api_keys::ApiKeyRole::Admin,
+        "member" => crate::api_keys::ApiKeyRole::Operator,
+        _ => crate::api_keys::ApiKeyRole::Viewer,
     };
+    let caller_max_scopes = crate::api_keys::Scope::for_org_role(&caller_org_role);
 
-    match crate::api_keys::ApiKeyRepo::create(db, org_id, &claims.account_id, &body.name, &role, body.expires_at).await {
+    // Parse optional custom scopes (capped to caller's permissions)
+    let custom_scopes = body.scopes.as_deref().map(crate::api_keys::Scope::parse_list);
+
+    match crate::api_keys::ApiKeyRepo::create(
+        db, org_id, &claims.account_id, &body.name, &role,
+        custom_scopes.as_deref(), &caller_max_scopes, body.expires_at,
+    ).await {
         Ok(key) => (StatusCode::OK, Json(serde_json::to_value(key).unwrap())).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
@@ -494,15 +485,55 @@ async fn list_api_keys(
         None => return (StatusCode::FORBIDDEN, Json(json!({"error": "No organization context"}))).into_response(),
     };
 
-    // Determine caller role from their JWT (is_admin = admin, otherwise viewer)
-    let caller_role = if claims.is_admin {
-        crate::api_keys::ApiKeyRole::Admin
-    } else {
-        crate::api_keys::ApiKeyRole::Viewer
+    // Get caller org role for visibility
+    let caller_org_role: String = match sqlx::query_scalar::<_, String>(
+        "SELECT role FROM org_members WHERE org_id = $1 AND account_id = $2"
+    )
+    .bind(org_id)
+    .bind(&claims.account_id)
+    .fetch_optional(db)
+    .await {
+        Ok(Some(r)) => r,
+        Ok(None) => "viewer".to_string(),
+        Err(_) => "viewer".to_string(),
     };
 
-    match crate::api_keys::ApiKeyRepo::list_by_org(db, org_id, &claims.account_id, &caller_role).await {
+    match crate::api_keys::ApiKeyRepo::list_by_org(db, org_id, &claims.account_id, &caller_org_role).await {
         Ok(keys) => (StatusCode::OK, Json(json!({"keys": keys}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
+async fn rotate_api_key(
+    State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    Path(key_id): Path<Uuid>,
+) -> impl IntoResponse {
+    let db = match &state.db {
+        Some(db) => db.pool(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
+    };
+
+    let caller_org_role: String = match &claims.org_id {
+        Some(org_id) => match sqlx::query_scalar::<_, String>(
+            "SELECT role FROM org_members WHERE org_id = $1 AND account_id = $2"
+        )
+        .bind(org_id)
+        .bind(&claims.account_id)
+        .fetch_optional(db)
+        .await {
+            Ok(Some(r)) => r,
+            _ => "viewer".to_string(),
+        },
+        None => return (StatusCode::FORBIDDEN, Json(json!({"error": "No org context"}))).into_response(),
+    };
+
+    let is_admin = caller_org_role == "owner" || caller_org_role == "admin";
+    let caller_max_scopes = crate::api_keys::Scope::for_org_role(&caller_org_role);
+
+    match crate::api_keys::ApiKeyRepo::rotate(db, key_id, &claims.account_id, is_admin, &caller_max_scopes).await {
+        Ok(Some(new_key)) => (StatusCode::OK, Json(serde_json::to_value(new_key).unwrap())).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "Key not found or not owned by you"}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
 }
@@ -1688,6 +1719,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/api-keys", get(list_api_keys))
         .route("/api/v1/api-keys/{key_id}", axum::routing::delete(delete_api_key))
         .route("/api/v1/api-keys/{key_id}/revoke", post(revoke_api_key))
+        .route("/api/v1/api-keys/{key_id}/rotate", post(rotate_api_key))
         .route("/api/exec/{agent_id}", post(exec_agent))
         // Devices
         .route("/api/devices/pair", axum::routing::post(crate::devices::pair_device))

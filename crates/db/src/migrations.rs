@@ -578,6 +578,12 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             ALTER TABLE approval_log ADD COLUMN IF NOT EXISTS api_key_id UUID REFERENCES api_keys(id) ON DELETE SET NULL;
             "#,
         ),
+        (
+            "033_api_keys_scopes",
+            r#"
+            ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS scopes TEXT NOT NULL DEFAULT '';
+            "#,
+        ),
     ]
 }
 
@@ -588,7 +594,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 32);
+        assert_eq!(migrations.len(), 33);
     }
 
     #[test]
@@ -627,6 +633,7 @@ mod tests {
             "030_policy_framework",
             "031_approval_log",
             "032_api_keys",
+            "033_api_keys_scopes",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(
