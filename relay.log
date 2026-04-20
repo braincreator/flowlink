@@ -4,3 +4,13 @@ time=2026-04-15T13:21:08.353+03:00 level=WARN msg="LLM backends не настр�
 time=2026-04-15T13:21:08.353+03:00 level=INFO msg="запуск реле-сервера" wss=127.0.0.1:8444 api="" tls_mode=""
 time=2026-04-15T13:21:08.353+03:00 level=INFO msg="HTTP API запущен" addr=""
 time=2026-04-15T13:21:08.353+03:00 level=INFO msg="WSS сервер запущен (без TLS)" addr=127.0.0.1:8444
+time=2026-04-20T09:11:59.601+03:00 level=INFO msg="HTTP запрос" method=GET path=/ status=401 duration_ms=0 client_id=anonymous remote_addr=127.0.0.1:59278 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3.1 Safari/605.1.15"
+time=2026-04-20T09:11:59.603+03:00 level=WARN msg="HTTP ошибка" method=GET path=/ status=401 client_id=anonymous
+time=2026-04-20T09:11:59.629+03:00 level=INFO msg="HTTP запрос" method=GET path=/favicon.ico status=401 duration_ms=0 client_id=anonymous remote_addr=127.0.0.1:59278 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.3.1 Safari/605.1.15"
+time=2026-04-20T09:11:59.629+03:00 level=WARN msg="HTTP ошибка" method=GET path=/favicon.ico status=401 client_id=anonymous
+time=2026-04-20T09:11:59.630+03:00 level=INFO msg="HTTP запрос" method=GET path=/apple-touch-icon-precomposed.png status=401 duration_ms=0 client_id=anonymous remote_addr=127.0.0.1:59279 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Safari"
+time=2026-04-20T09:11:59.630+03:00 level=WARN msg="HTTP ошибка" method=GET path=/apple-touch-icon-precomposed.png status=401 client_id=anonymous
+time=2026-04-20T09:11:59.674+03:00 level=INFO msg="HTTP запрос" method=GET path=/apple-touch-icon.png status=401 duration_ms=0 client_id=anonymous remote_addr=127.0.0.1:59279 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Safari"
+time=2026-04-20T09:11:59.674+03:00 level=WARN msg="HTTP ошибка" method=GET path=/apple-touch-icon.png status=401 client_id=anonymous
+time=2026-04-20T09:11:59.724+03:00 level=INFO msg="HTTP запрос" method=GET path=/favicon.ico status=401 duration_ms=0 client_id=anonymous remote_addr=127.0.0.1:59279 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Safari"
+time=2026-04-20T09:11:59.724+03:00 level=WARN msg="HTTP ошибка" method=GET path=/favicon.ico status=401 client_id=anonymous

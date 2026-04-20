@@ -20,7 +20,7 @@ GITHUB_REPO="braincreator/flowlink"
 BINARY_NAME="flowlink"
 INSTALL_DIR="/usr/local/bin"
 FLOWLINK_HOME="${FLOWLINK_HOME:-$HOME/.flowlink}"
-RELAY_URL="${RELAY_URL:-wss://relay.flow-masters.ru/ws}"
+RELAY_URL="${RELAY_URL:-wss://relay.flow-masters.ru:9093}"
 TOKEN=""
 LABEL=""
 
