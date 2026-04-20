@@ -238,9 +238,8 @@ async fn handle_exec(
     }
 
     // ── User commands: full policy pipeline ──
-
-    // Policy check
     let policy_result = policy.check(&payload);
+    info!("[dispatch] policy check done: blocked={}, risk={:?}", policy_result.blocked, policy_result.risk_level);
     if policy_result.blocked {
         warn!("Command blocked: {}", policy_result.reason);
         let agent_id = msg.agent_id.as_deref().unwrap_or("");
@@ -286,7 +285,6 @@ async fn handle_exec(
         );
     }
 
-    // Execute
     match executor.exec(&payload, Priority::User).await {
         Ok(result) => Some(exec_done_response(msg, &result)),
         Err(e) => Some(error_response(
@@ -302,6 +300,8 @@ fn exec_done_response(msg: &Message, result: &ExecResult) -> Message {
         request_id: result.request_id.clone(),
         exit_code: result.exit_code,
         duration_ms: result.duration_ms as i64,
+        stdout: result.stdout.clone(),
+        stderr: String::new(),
         error: if result.timed_out {
             Some("Command timed out".into())
         } else {

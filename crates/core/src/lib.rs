@@ -258,6 +258,8 @@ pub struct ExecDonePayload {
     pub request_id: String,
     pub exit_code: i32,
     pub duration_ms: i64,
+    pub stdout: String,
+    pub stderr: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -620,6 +622,8 @@ mod tests {
             request_id: "r1".into(),
             exit_code: 0,
             duration_ms: 100,
+            stdout: String::new(),
+            stderr: String::new(),
             error: None,
         };
         let json = serde_json::to_string(&p).unwrap();

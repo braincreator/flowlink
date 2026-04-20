@@ -29,11 +29,17 @@ pub async fn run(pool: &PgPool) -> Result<()> {
 
         if !applied {
             tracing::info!("📦 Migration: {}", name);
-            sqlx::raw_sql(sql).execute(pool).await?;
-            sqlx::query("INSERT INTO _migrations (name) VALUES ($1)")
-                .bind(name)
-                .execute(pool)
-                .await?;
+            match sqlx::raw_sql(sql).execute(pool).await {
+                Ok(_) => {
+                    sqlx::query("INSERT INTO _migrations (name) VALUES ($1)")
+                        .bind(name)
+                        .execute(pool)
+                        .await?;
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ Migration {} failed (skipping): {}", name, e);
+                }
+            }
         }
     }
 
