@@ -159,7 +159,8 @@ fn mcp_tools() -> Vec<Value> {
                     "agent": { "type": "string", "description": "Agent ID or label" },
                     "read_only": { "type": "boolean", "description": "Set agent to read-only mode" },
                     "label": { "type": "string", "description": "Update agent label" },
-                    "work_dir": { "type": "string", "description": "Set agent working directory" }
+                    "work_dir": { "type": "string", "description": "Set agent working directory" },
+                    "approval_mode": { "type": "string", "enum": ["auto", "soft_ask", "hard_ask"], "description": "Set approval mode: auto=execute all, soft_ask=approve medium/high risk, hard_ask=approve all commands" }
                 }
             }
         }),
@@ -541,6 +542,9 @@ async fn mcp_config_update(state: &AppState, id: Option<Value>, args: &Value) ->
     if let Some(workdir) = args.get("work_dir").and_then(|v| v.as_str()) {
         payload["work_dir"] = json!(workdir);
     }
+    if let Some(mode) = args.get("approval_mode").and_then(|v| v.as_str()) {
+        payload["approval_mode"] = json!(mode);
+    }
 
     let msg = flowlink_core::Message::new(flowlink_core::MessageType::ConfigUpdate)
         .with_agent_id(&resolved)
@@ -553,10 +557,11 @@ async fn mcp_config_update(state: &AppState, id: Option<Value>, args: &Value) ->
                 args.get("read_only").map(|v| format!("read_only={}", v.as_bool().unwrap_or(false))),
                 args.get("label").map(|v| format!("label={}", v.as_str().unwrap_or(""))),
                 args.get("work_dir").map(|v| format!("work_dir={}", v.as_str().unwrap_or(""))),
+                args.get("approval_mode").map(|v| format!("approval_mode={}", v.as_str().unwrap_or(""))),
             ].into_iter().flatten().collect();
 
             if changes.is_empty() {
-                mcp_err(id, -32602, "No fields to update. Provide at least one of: read_only, label, work_dir").into_response()
+                mcp_err(id, -32602, "No fields to update. Provide at least one of: read_only, label, work_dir, approval_mode").into_response()
             } else {
                 mcp_ok(id, json!({
                     "content": [{ "type": "text", "text": format!("✅ Config update sent to agent {}. Changes: {}", resolved, changes.join(", ")) }]

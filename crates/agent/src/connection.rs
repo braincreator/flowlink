@@ -122,36 +122,54 @@ impl Connection {
         let json = serde_json::to_string(&connect_msg)?;
         ws_stream.send(WsMessage::Text(json.into())).await?;
 
-        // Message loop
-        while let Some(msg) = ws_stream.next().await {
-            match msg {
-                Ok(WsMessage::Text(text)) => {
-                    let response = self.handle_message(&text).await;
-                    // Send the primary response
-                    if let Some(resp) = response {
-                        let json = serde_json::to_string(&resp)?;
-                        if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
-                            warn!("Failed to send response: {e}");
+        // Message loop with heartbeat
+        let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        heartbeat_interval.tick().await; // skip first immediate tick
+
+        loop {
+            tokio::select! {
+                msg = ws_stream.next() => {
+                    match msg {
+                        Some(Ok(WsMessage::Text(text))) => {
+                            let response = self.handle_message(&text).await;
+                            if let Some(resp) = response {
+                                let json = serde_json::to_string(&resp)?;
+                                if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
+                                    warn!("Failed to send response: {e}");
+                                }
+                            }
+                            for alert in self.collect_shield_alerts() {
+                                let json = serde_json::to_string(&alert)?;
+                                if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
+                                    warn!("Failed to send shield alert: {e}");
+                                }
+                                info!("Sent ShieldAlert to relay");
+                            }
                         }
-                    }
-                    // Send any shield alerts queued during dispatch
-                    for alert in self.collect_shield_alerts() {
-                        let json = serde_json::to_string(&alert)?;
-                        if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
-                            warn!("Failed to send shield alert: {e}");
+                        Some(Ok(WsMessage::Ping(data))) => {
+                            ws_stream.send(WsMessage::Pong(data)).await?;
                         }
-                        info!("Sent ShieldAlert to relay");
+                        Some(Ok(WsMessage::Close(_))) => {
+                            info!("Relay closed connection");
+                            return Ok(());
+                        }
+                        Some(Err(e)) => return Err(e.into()),
+                        None => {
+                            info!("WebSocket stream ended");
+                            return Ok(());
+                        }
+                        _ => {}
                     }
                 }
-                Ok(WsMessage::Ping(data)) => {
-                    ws_stream.send(WsMessage::Pong(data)).await?;
+                _ = heartbeat_interval.tick() => {
+                    let hb = Message::new(MessageType::Heartbeat)
+                        .with_agent_id(&self.agent_id);
+                    let json = serde_json::to_string(&hb)?;
+                    if let Err(e) = ws_stream.send(WsMessage::Text(json.into())).await {
+                        warn!("Heartbeat send failed: {e}");
+                        return Err(e.into());
+                    }
                 }
-                Ok(WsMessage::Close(_)) => {
-                    info!("Relay closed connection");
-                    return Ok(());
-                }
-                Err(e) => return Err(e.into()),
-                _ => {}
             }
         }
 
