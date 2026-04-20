@@ -244,11 +244,8 @@ pub async fn handle_mcp(
             }
         }
         None => {
-            // No API key provided — check if auth is enforced
-            // For now: allow through with no identity (backward compat)
-            // TODO: make this configurable (enforce_auth: bool)
-            log::debug!("MCP request without API key");
-            None
+            log::warn!("MCP request without API key — rejected");
+            return mcp_err(req.id, -32001, "Unauthorized: API key required. Use Authorization: Bearer flk_... or x-api-key header").into_response();
         }
     };
 
@@ -257,7 +254,7 @@ pub async fn handle_mcp(
             let result = json!({
                 "protocolVersion": "2024-11-05",
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "flowlink-relay", "version": "0.1.0" }
+                "serverInfo": { "name": "flowlink-relay", "version": "0.2.0" }
             });
             mcp_ok(req.id, result).into_response()
         }
@@ -270,7 +267,13 @@ pub async fn handle_mcp(
             mcp_ok(req.id, json!({ "tools": mcp_tools() })).into_response()
         }
 
-        "tools/call" => handle_tools_call(state, req, identity).await,
+        "tools/call" => {
+            // Enforce auth for tool calls
+            if identity.is_none() {
+                return mcp_err(req.id, -32001, "Unauthorized: API key required for tool calls. Use Authorization: Bearer flk_... or x-api-key header").into_response();
+            }
+            handle_tools_call(state, req, identity).await
+        }
 
         _ => mcp_err(req.id, -32601, format!("method not found: {}", req.method)).into_response(),
     }

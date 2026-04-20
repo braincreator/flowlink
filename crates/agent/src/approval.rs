@@ -107,6 +107,7 @@ impl ApprovalManager {
             .await
             .insert(request_id.clone(), pending);
 
+
         // Wait for response with timeout
         let result = if self.timeout_sec > 0 {
             tokio::time::timeout(
@@ -138,7 +139,7 @@ impl ApprovalManager {
         let mut pending = self.pending.lock().await;
         if let Some(p) = pending.remove(request_id) {
             let is_approved = matches!(decision, ApprovalDecision::Approved);
-            let _ = p.responder.send(decision);
+            let send_result = p.responder.send(decision);
             if is_approved {
                 p.exec_payload
             } else {
@@ -210,21 +211,29 @@ mod tests {
     #[tokio::test]
     async fn test_approve_flow() {
         let mgr = ApprovalManager::new(ApprovalMode::SoftAsk);
-        let handle = tokio::spawn({
-            let mgr = ApprovalManager {
-                mode: mgr.mode.clone(),
-                pending: mgr.pending.clone(),
-            };
-            async move {
-                mgr.request_approval("r1".into(), "ls".into(), "high".into())
-                    .await
-            }
+        let cloned = ApprovalManager {
+            mode: mgr.mode.clone(),
+            pending: mgr.pending.clone(),
+            timeout_sec: mgr.timeout_sec,
+        };
+
+        // Spawn the waiter
+        let handle = tokio::spawn(async move {
+            cloned.request_approval("r1".into(), "ls".into(), "high".into(), None).await
         });
 
-        // Give it a moment to register
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        // Yield to let spawned task run
+        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Check pending exists
+        {
+            let p = mgr.pending.lock().await;
+            assert!(p.contains_key("r1"), "pending should contain r1, got: {:?}", p.keys().collect::<Vec<_>>());
+        }
+
         let responded = mgr.respond("r1", ApprovalDecision::Approved).await;
-        assert!(responded);
+        // respond returns the exec_payload (None if not provided), but the key operation is sending the decision
         let decision = handle.await.unwrap();
         assert_eq!(decision, ApprovalDecision::Approved);
     }
@@ -236,9 +245,10 @@ mod tests {
             let mgr = ApprovalManager {
                 mode: mgr.mode.clone(),
                 pending: mgr.pending.clone(),
+                timeout_sec: mgr.timeout_sec,
             };
             async move {
-                mgr.request_approval("r2".into(), "rm -rf".into(), "high".into())
+                mgr.request_approval("r2".into(), "rm -rf".into(), "high".into(), None)
                     .await
             }
         });
@@ -253,7 +263,7 @@ mod tests {
     async fn test_respond_unknown_id() {
         let mgr = ApprovalManager::new(ApprovalMode::Auto);
         let responded = mgr.respond("nonexistent", ApprovalDecision::Approved).await;
-        assert!(!responded);
+        assert!(responded.is_none());
     }
 
     #[tokio::test]
@@ -263,7 +273,7 @@ mod tests {
         let mgr = ApprovalManager::new(ApprovalMode::Auto);
         // In auto mode, immediately approved — so this test just verifies no deadlock.
         let decision = mgr
-            .request_approval("r3".into(), "cmd".into(), "none".into())
+            .request_approval("r3".into(), "cmd".into(), "none".into(), None)
             .await;
         assert_eq!(decision, ApprovalDecision::Approved);
     }

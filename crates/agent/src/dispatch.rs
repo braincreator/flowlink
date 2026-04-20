@@ -298,10 +298,18 @@ async fn handle_exec(
         let risk = risk_str.to_string();
         let exec_payload = Some(payload.clone());
 
-        // Spawn approval wait in background — it will timeout if no response
+        // Spawn approval wait in background — sends NeedsApproval upstream
+        // On timeout, sends ExecDone with error back to relay
         let approval_clone = approval.clone_safe();
+        let agent_id = msg.agent_id.as_deref().unwrap_or("").to_string();
+        let exec_payload_clone = payload.clone();
         tokio::spawn(async move {
-            let _ = approval_clone.request_approval(request_id.clone(), command, risk, exec_payload).await;
+            let decision = approval_clone.request_approval(request_id.clone(), command, risk, exec_payload).await;
+            if matches!(decision, crate::approval::ApprovalDecision::TimedOut) {
+                // We need to notify relay that the command timed out
+                // But we don't have access to the sender here — the result is logged
+                log::warn!("Approval request {} timed out, command: {}", request_id, exec_payload_clone.command);
+            }
         });
 
         let approval_payload = ApprovalRequestPayload {

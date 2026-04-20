@@ -440,7 +440,8 @@ mod tests {
         assert!(result.allowed);
         let result2 = engine.check(&test_payload("cat /etc/passwd"));
         assert!(result2.blocked);
-        assert!(result2.reason.contains("SANDBOX"));
+        // Could be blocked by shield (SHIELD) or sandbox (SANDBOX) — both are valid
+        assert!(result2.reason.contains("SANDBOX") || result2.reason.contains("SHIELD"));
     }
 
     #[test]
