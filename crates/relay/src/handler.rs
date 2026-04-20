@@ -41,7 +41,14 @@ impl RelayHandler {
     }
 
     pub fn register_sender(&self, agent_id: String, sender: WsSender) {
-        self.ws_senders.insert(agent_id, sender);
+        let id = agent_id.clone();
+        if let Some((_, old)) = self.ws_senders.insert(agent_id, sender) {
+            // Drop old sender channel — this causes the old WS handler's
+            // write_task to end (receiver closed) → tokio::select! exits → cleanup.
+            // The old read_task will also get an error on next WS read.
+            drop(old);
+            log::info!("Replaced sender for {id}: old session closed");
+        }
     }
 
     pub fn remove_sender(&self, agent_id: &str) {
