@@ -282,6 +282,7 @@ impl Relay {
             tiered_rate_limiter: Arc::new(crate::rate_limiter::TieredRateLimiter::new()),
             key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)), // 100 req/min per key
             saml_config: None,
+            rusiem_config: None,
         };
 
         // Email queue worker (requires both email_service and db)
@@ -551,3 +552,9 @@ pub mod playground;
 pub mod policy_db;
 pub mod api_keys;
 pub mod saml;
+pub mod rusiem;
+pub mod custom_roles_api;
+pub mod agent_tags_api;
+pub mod command_history_api;
+pub mod agent_health_api;
+pub mod webhook_delivery;

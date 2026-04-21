@@ -47,6 +47,7 @@ export default function RootLayout({
     <html lang="ru" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <head>
         <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+        <meta name="yandex-verification" content="2e05f823a50c3445" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{

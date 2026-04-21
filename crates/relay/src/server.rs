@@ -70,6 +70,7 @@ pub struct AppState {
     pub tiered_rate_limiter: Arc<crate::rate_limiter::TieredRateLimiter>,
     pub key_rate_limiter: Arc<crate::api_keys::KeyRateLimiter>,
     pub saml_config: Option<Arc<tokio::sync::Mutex<crate::saml::SamlConfig>>>,
+    pub rusiem_config: Option<Arc<tokio::sync::RwLock<crate::rusiem::RusiemConfig>>>,
 }
 
 // ═══════════════════════════════════════════════
@@ -1860,6 +1861,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/saml/login", axum::routing::get(crate::saml::saml_login))
         .route("/auth/saml/acs", axum::routing::post(crate::saml::saml_acs))
         .route("/auth/saml/metadata", axum::routing::get(crate::saml::saml_metadata))
+        // RuSIEM
+        .route("/api/v1/rusiem/test", axum::routing::get(crate::rusiem::test_connection))
         // 2FA (public: setup done authed, but complete is public for temp_token flow)
         .route("/api/auth/2fa/complete", axum::routing::post(crate::auth_2fa::complete_2fa))
         // Auth providers listing
@@ -2040,6 +2043,22 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/invites", axum::routing::get(crate::orgs_api::list_invites).post(crate::orgs_api::invite_member))
         .route("/api/orgs/invites/accept", axum::routing::post(crate::orgs_api::accept_invite))
         .route("/api/orgs/{org_id}/members/{account_id}", axum::routing::delete(crate::orgs_api::remove_member).patch(crate::orgs_api::change_member_role))
+        // Custom RBAC Roles
+        .route("/api/orgs/{org_id}/roles", axum::routing::get(crate::custom_roles_api::list_roles).post(crate::custom_roles_api::create_role))
+        .route("/api/orgs/{org_id}/roles/{role_id}", axum::routing::put(crate::custom_roles_api::update_role).delete(crate::custom_roles_api::delete_role))
+        .route("/api/orgs/{org_id}/members/{account_id}/assign-role", axum::routing::post(crate::custom_roles_api::assign_role))
+        // Agent Tags
+        .route("/api/v1/agents/{agent_id}/tags", axum::routing::get(crate::agent_tags_api::get_tags).put(crate::agent_tags_api::set_tags).delete(crate::agent_tags_api::delete_tags))
+        .route("/api/v1/agents/tags", axum::routing::get(crate::agent_tags_api::list_by_tag))
+        .route("/api/v1/tags", axum::routing::get(crate::agent_tags_api::list_all_tags))
+        // Command History
+        .route("/api/v1/commands/history", axum::routing::get(crate::command_history_api::list_history))
+        .route("/api/v1/commands/history/{id}", axum::routing::get(crate::command_history_api::get_entry))
+        .route("/api/v1/commands/stats", axum::routing::get(crate::command_history_api::command_stats))
+        // Agent Health
+        .route("/api/v1/agents/{agent_id}/health", axum::routing::get(crate::agent_health_api::get_latest))
+        .route("/api/v1/agents/{agent_id}/health/timeseries", axum::routing::get(crate::agent_health_api::get_timeseries))
+        .route("/api/v1/agents/health/overview", axum::routing::get(crate::agent_health_api::overview))
         // Audit log + Webhooks
         .route("/api/orgs/{org_id}/audit", axum::routing::get(crate::webhooks_api::list_org_audit))
         .route("/api/orgs/{org_id}/webhooks", axum::routing::get(crate::webhooks_api::list_webhooks).post(crate::webhooks_api::create_webhook))
@@ -2147,6 +2166,7 @@ mod tests {
             tiered_rate_limiter: Arc::new(crate::rate_limiter::TieredRateLimiter::new()),
             key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)),
             saml_config: None,
+            rusiem_config: None,
         }
     }
 

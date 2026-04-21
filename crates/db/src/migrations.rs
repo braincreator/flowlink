@@ -605,6 +605,98 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_patterns_hash ON command_patterns(agent_id, command_hash);
             "#,
         ),
+        (
+            "035_custom_rbac_roles",
+            r#"
+            CREATE TABLE IF NOT EXISTS custom_roles (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+                name VARCHAR(100) NOT NULL,
+                description TEXT DEFAULT '',
+                permissions TEXT[] NOT NULL DEFAULT '{}',
+                base_role VARCHAR(20) NOT NULL DEFAULT 'viewer' CHECK (base_role IN ('admin','operator','viewer','agent')),
+                created_by TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_roles_org_name ON custom_roles(org_id, name);
+            CREATE INDEX IF NOT EXISTS idx_custom_roles_org ON custom_roles(org_id);
+
+            ALTER TABLE org_members ADD COLUMN IF NOT EXISTS custom_role_id UUID REFERENCES custom_roles(id) ON DELETE SET NULL;
+
+            ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS custom_role_id UUID REFERENCES custom_roles(id) ON DELETE SET NULL;
+            "#,
+        ),
+        (
+            "036_agent_tags",
+            r#"
+            CREATE TABLE IF NOT EXISTS agent_tags (
+                agent_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                PRIMARY KEY (agent_id, tag)
+            );
+            CREATE INDEX IF NOT EXISTS idx_agent_tags_tag ON agent_tags(tag);
+            "#,
+        ),
+        (
+            "037_command_history",
+            r#"
+            CREATE TABLE IF NOT EXISTS command_history (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                agent_id TEXT NOT NULL,
+                org_id UUID REFERENCES organizations(org_id) ON DELETE SET NULL,
+                command TEXT NOT NULL,
+                args TEXT DEFAULT '',
+                exit_code INT,
+                duration_ms INT,
+                shield_result TEXT DEFAULT 'allowed',
+                shield_risk TEXT DEFAULT 'none',
+                approval_id TEXT,
+                account_id TEXT,
+                api_key_id UUID REFERENCES api_keys(id) ON DELETE SET NULL,
+                executed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_cmd_history_agent ON command_history(agent_id, executed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_cmd_history_org ON command_history(org_id, executed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_cmd_history_time ON command_history(executed_at DESC);
+            "#,
+        ),
+        (
+            "038_agent_health_metrics",
+            r#"
+            CREATE TABLE IF NOT EXISTS agent_health_metrics (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                agent_id TEXT NOT NULL,
+                cpu_percent REAL,
+                ram_percent REAL,
+                disk_percent REAL,
+                load_avg_1m REAL,
+                uptime_seconds BIGINT,
+                reported_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_health_agent_time ON agent_health_metrics(agent_id, reported_at DESC);
+            "#,
+        ),
+        (
+            "039_webhook_deliveries",
+            r#"
+            CREATE TABLE IF NOT EXISTS webhook_deliveries (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                webhook_id UUID NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                payload JSONB NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','failed','retrying')),
+                attempts INT NOT NULL DEFAULT 0,
+                last_attempt_at TIMESTAMPTZ,
+                next_retry_at TIMESTAMPTZ,
+                response_code INT,
+                error_message TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_webhook ON webhook_deliveries(webhook_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_pending ON webhook_deliveries(status, next_retry_at) WHERE status IN ('pending', 'retrying');
+            "#,
+        ),
     ]
 }
 
@@ -615,7 +707,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 34);
+        assert_eq!(migrations.len(), 39);
     }
 
     #[test]
@@ -656,6 +748,11 @@ mod tests {
             "032_api_keys",
             "033_api_keys_scopes",
             "034_command_patterns",
+            "035_custom_rbac_roles",
+            "036_agent_tags",
+            "037_command_history",
+            "038_agent_health_metrics",
+            "039_webhook_deliveries",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(
