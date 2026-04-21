@@ -27,6 +27,17 @@ pub struct SubscriptionRow {
 pub struct SubscriptionRepo;
 
 impl SubscriptionRepo {
+    /// Get subscription by ID
+    pub async fn get_by_id(pool: &PgPool, id: &str) -> Result<Option<SubscriptionRow>> {
+        let row = sqlx::query_as::<_, SubscriptionRow>(
+            "SELECT * FROM subscriptions WHERE id = $1"
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+        Ok(row)
+    }
+
     /// Создать новую подписку
     pub async fn create(
         pool: &PgPool,

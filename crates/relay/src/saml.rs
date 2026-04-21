@@ -96,6 +96,10 @@ pub struct SamlAssertion {
 
 /// Parse a base64-encoded SAML Response
 fn parse_saml_response(response_b64: &str) -> Result<SamlAssertion, String> {
+    // WARNING: This is a simplified SAML parser without signature verification.
+    // Production deployments MUST use a proper SAML library (e.g., saml-rs) with
+    // IdP certificate verification. Without it, assertions can be forged.
+    log::warn!("SAML: Parsing assertion WITHOUT signature verification — not safe for production!");
     let xml_bytes = base64::engine::general_purpose::STANDARD
         .decode(response_b64)
         .map_err(|e| format!("Base64 decode error: {e}"))?;

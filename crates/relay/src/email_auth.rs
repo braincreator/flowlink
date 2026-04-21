@@ -42,6 +42,18 @@ struct Claims {
 // Endpoints
 // ═══════════════════════════════════════════════
 
+fn is_valid_email(email: &str) -> bool {
+    if email.len() > 254 || email.len() < 5 { return false; }
+    let parts: Vec<&str> = email.rsplitn(2, '@').collect();
+    if parts.len() != 2 { return false; }
+    let (domain, local) = (parts[0], parts[1]);
+    if local.is_empty() || local.len() > 64 || domain.is_empty() { return false; }
+    if !domain.contains('.') || domain.starts_with('.') || domain.ends_with('.') { return false; }
+    // Reject obvious injection chars
+    if local.contains(' ') || local.contains('<') || local.contains('>') || local.contains('"') { return false; }
+    true
+}
+
 /// POST /api/auth/email/send-code
 pub async fn send_code(
     State(state): State<AppState>,
@@ -49,7 +61,7 @@ pub async fn send_code(
 ) -> impl IntoResponse {
     let email = req.email.trim().to_lowercase();
 
-    if email.is_empty() || !email.contains('@') {
+    if !is_valid_email(&email) {
         return (StatusCode::BAD_REQUEST, Json(json!({
             "ok": false, "error": "Invalid email address"
         }))).into_response();

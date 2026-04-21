@@ -134,6 +134,9 @@ pub async fn create_role(
     if body.name.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Role name is required".into()));
     }
+    if body.name.len() > 64 {
+        return Err((StatusCode::BAD_REQUEST, "Role name too long (max 64 chars)".into()));
+    }
     if !["admin", "operator", "viewer", "agent"].contains(&body.base_role.as_str()) {
         return Err((StatusCode::BAD_REQUEST, format!("Invalid base_role: {}", body.base_role)));
     }

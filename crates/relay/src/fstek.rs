@@ -133,7 +133,10 @@ pub async fn ensure_fstek_table(pool: &sqlx::PgPool) -> Result<(), String> {
             hash TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (org_id, seq)
-        )"
+        );
+        -- PRODUCTION: Add trigger to prevent DELETE/UPDATE on this table
+        -- CREATE OR REPLACE FUNCTION fstek_no_modify() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'fstek_audit_chain is immutable'; END; $$ LANGUAGE plpgsql;
+        -- CREATE TRIGGER fstek_no_delete BEFORE DELETE OR UPDATE ON fstek_audit_chain FOR EACH ROW EXECUTE FUNCTION fstek_no_modify();"
     )
     .execute(pool)
     .await

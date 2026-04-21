@@ -368,6 +368,7 @@ pub async fn list_invoices(
 /// GET /api/billing/invoices/{id} — get specific invoice
 pub async fn get_invoice(
     State(state): State<AppState>,
+    claims: ClaimsExtractor,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let billing_engine = match get_billing_engine(&state) {
@@ -376,7 +377,13 @@ pub async fn get_invoice(
     };
 
     match billing_engine.invoices().get(&id) {
-        Some(invoice) => (StatusCode::OK, Json(invoice)).into_response(),
+        Some(invoice) => {
+            // Scope check: only owner or admin can view
+            if invoice.account_id != claims.0.sub && !claims.0.is_admin {
+                return (StatusCode::FORBIDDEN, Json(json!({"error": "Not your invoice"}))).into_response();
+            }
+            (StatusCode::OK, Json(invoice)).into_response()
+        }
         None => {
             (StatusCode::NOT_FOUND, Json(json!({
                 "error": "Invoice not found",
@@ -791,6 +798,13 @@ pub async fn cancel_subscription(
         Some(db) => db,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
     };
+    // Verify ownership: only the subscriber or admin can cancel
+    match flowlink_db::subscriptions::SubscriptionRepo::get_by_id(db.pool(), &id).await {
+        Ok(Some(sub)) if sub.account_id == claims.0.account_id || claims.0.is_admin => {},
+        Ok(Some(_)) => return (StatusCode::FORBIDDEN, Json(json!({"error": "Not your subscription"}))).into_response(),
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "Subscription not found"}))).into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+    }
     match flowlink_db::subscriptions::SubscriptionRepo::cancel(db.pool(), &id).await {
         Ok(()) => {
             let _ = audit::log_event(db.pool(), None, &claims.0.account_id, "subscription.cancelled", Some("subscription"), Some(&id), json!({}), None).await;
