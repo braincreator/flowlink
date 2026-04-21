@@ -42,6 +42,7 @@ pub struct HistoryQuery {
 
 pub async fn list_history(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Query(q): Query<HistoryQuery>,
 ) -> Result<(StatusCode, Json<Vec<CommandHistoryEntry>>), (StatusCode, String)> {
     let limit = q.limit.unwrap_or(50).min(200);
@@ -73,6 +74,7 @@ pub async fn list_history(
 
 pub async fn get_entry(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<CommandHistoryEntry>), (StatusCode, String)> {
     let row = sqlx::query(
@@ -106,6 +108,7 @@ pub struct TopCommand { pub command: String, pub count: i64, pub last_risk: Stri
 
 pub async fn command_stats(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Query(q): Query<HistoryQuery>,
 ) -> Result<(StatusCode, Json<CommandStats>), (StatusCode, String)> {
     let total: i64 = sqlx::query_scalar::<_, i64>(

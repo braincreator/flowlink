@@ -238,6 +238,7 @@ pub async fn update_channel(
 /// Unbind a notification channel.
 pub async fn unbind_channel(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     _account_id: axum::Extension<String>,
     Path(id): Path<uuid::Uuid>,
 ) -> impl IntoResponse {
@@ -261,6 +262,7 @@ pub async fn unbind_channel(
 /// Mark a channel binding as verified.
 pub async fn verify_channel(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     _account_id: axum::Extension<String>,
     Path(id): Path<uuid::Uuid>,
 ) -> impl IntoResponse {
@@ -284,6 +286,7 @@ pub async fn verify_channel(
 /// Set a channel as the primary notification channel.
 pub async fn set_primary(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     _account_id: axum::Extension<String>,
     Path(id): Path<uuid::Uuid>,
 ) -> impl IntoResponse {
@@ -426,6 +429,7 @@ pub async fn generate_link_code(
 /// Matches code → links channel → returns account info.
 pub async fn confirm_link_code(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(req): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     let code = match req.get("code").and_then(|v| v.as_str()) {

@@ -274,6 +274,7 @@ pub async fn heartbeat(
 /// GET /api/v1/agents — list all agents (admin only)
 pub async fn list_agents(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
 ) -> impl IntoResponse {
     let registry = state.control_plane.registry.read().await;
     let agents: Vec<AgentInfo> = registry.list().await.into_iter().cloned().collect();
@@ -283,6 +284,7 @@ pub async fn list_agents(
 /// GET /api/v1/agents/:id — get agent detail
 pub async fn get_agent(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> impl IntoResponse {
     let registry = state.control_plane.registry.read().await;

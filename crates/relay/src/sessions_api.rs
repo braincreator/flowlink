@@ -125,6 +125,7 @@ pub struct UpdateSessionRequest {
 
 pub async fn update_session(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateSessionRequest>,
 ) -> Result<(StatusCode, Json<Session>), (StatusCode, String)> {

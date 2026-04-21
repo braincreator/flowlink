@@ -457,6 +457,7 @@ pub struct DevicesQuery {
 
 pub async fn pair_device(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<PairRequest>,
 ) -> impl IntoResponse {
     let code = state.device_manager.generate_pairing_code(&body.user_id);
@@ -465,6 +466,7 @@ pub async fn pair_device(
 
 pub async fn confirm_pairing(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<ConfirmRequest>,
 ) -> impl IntoResponse {
     match state.device_manager.confirm_pairing(&body.code, &body.name, &body.device_type, body.push_token) {
@@ -491,6 +493,7 @@ pub async fn confirm_pairing(
 
 pub async fn list_devices(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Query(query): Query<DevicesQuery>,
 ) -> Json<Vec<Device>> {
     Json(state.device_manager.list_devices(&query.user_id))
@@ -498,6 +501,7 @@ pub async fn list_devices(
 
 pub async fn remove_device(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.device_manager.remove_device(&id) {
@@ -511,6 +515,7 @@ pub async fn remove_device(
 
 pub async fn get_device_trust(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.device_manager.get_trust_score(&id) {

@@ -64,6 +64,7 @@ pub async fn set_tags(
 
 pub async fn get_tags(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> Result<(StatusCode, Json<TagsResponse>), (StatusCode, String)> {
     let rows = sqlx::query("SELECT tag FROM agent_tags WHERE agent_id = $1 ORDER BY tag")
@@ -76,6 +77,7 @@ pub async fn get_tags(
 
 pub async fn delete_tags(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     sqlx::query("DELETE FROM agent_tags WHERE agent_id = $1")
@@ -89,6 +91,7 @@ pub struct AgentWithTag { pub agent_id: String, pub tags: Vec<String> }
 
 pub async fn list_by_tag(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Query(query): Query<TagFilterQuery>,
 ) -> Result<(StatusCode, Json<Vec<AgentWithTag>>), (StatusCode, String)> {
     let tags: Vec<String> = query.tag.into_iter()
@@ -119,6 +122,7 @@ pub async fn list_by_tag(
 
 pub async fn list_all_tags(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
 ) -> Result<(StatusCode, Json<Vec<String>>), (StatusCode, String)> {
     let rows = sqlx::query("SELECT DISTINCT tag FROM agent_tags ORDER BY tag")
         .fetch_all(gp(&state)?).await

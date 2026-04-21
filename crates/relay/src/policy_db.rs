@@ -163,6 +163,7 @@ pub async fn push_rules_to_agent(
 /// List all policies with rules.
 pub async fn list_policies(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
 ) -> impl IntoResponse {
     let db = match state.db {
         Some(ref db) => db.write_pool(),
@@ -178,6 +179,7 @@ pub async fn list_policies(
 /// Get a single policy with rules.
 pub async fn get_policy(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     axum::extract::Path(policy_id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     let db = match state.db {

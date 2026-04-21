@@ -62,6 +62,7 @@ pub async fn get_latest(
 
 pub async fn get_timeseries(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
     Query(q): Query<MetricsQuery>,
 ) -> Result<(StatusCode, Json<Vec<HealthTimePoint>>), (StatusCode, String)> {
@@ -107,6 +108,7 @@ pub struct AgentHealthOverview {
 
 pub async fn overview(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
 ) -> Result<(StatusCode, Json<Vec<AgentHealthOverview>>), (StatusCode, String)> {
     let rows = sqlx::query(
         "SELECT agent_id, cpu_percent, ram_percent, disk_percent, reported_at::text as last_report FROM (SELECT DISTINCT ON (agent_id) agent_id, cpu_percent, ram_percent, disk_percent, reported_at FROM agent_health_metrics ORDER BY agent_id, reported_at DESC) sub ORDER BY agent_id"
