@@ -278,16 +278,14 @@ pub async fn billing_enforcement_middleware(
                             })),
                         ).into_response();
                     }
-                } else {
-                    if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
-                        return (
-                            axum::http::StatusCode::FORBIDDEN,
-                            axum::Json(serde_json::json!({
-                                "error": "trial_expired",
-                                "message": "Пробный период завершён.",
-                            })),
-                        ).into_response();
-                    }
+                } else if method != axum::http::Method::GET && method != axum::http::Method::HEAD {
+                    return (
+                        axum::http::StatusCode::FORBIDDEN,
+                        axum::Json(serde_json::json!({
+                            "error": "trial_expired",
+                            "message": "Пробный период завершён.",
+                        })),
+                    ).into_response();
                 }
             }
         }

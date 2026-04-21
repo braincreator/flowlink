@@ -38,6 +38,12 @@ pub struct NotificationStore {
     notifications: tokio::sync::RwLock<std::collections::HashMap<String, Vec<Notification>>>,
 }
 
+impl Default for NotificationStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NotificationStore {
     pub fn new() -> Self {
         Self {

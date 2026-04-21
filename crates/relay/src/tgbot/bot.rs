@@ -304,9 +304,7 @@ async fn handle_callback(
             // TODO: store code + chat_id for verification callback
         }
         "notif:bind:slack" => {
-            bot.send_message(chat_id, format!(
-                "🔗 Привязка Slack\n\nОткройте: https://flowlink.flow-masters.ru/api/notifications/slack/install\n\n⏳ После OAuth вы получите подтверждение."
-            )).await?;
+            bot.send_message(chat_id, "🔗 Привязка Slack\n\nОткройте: https://flowlink.flow-masters.ru/api/notifications/slack/install\n\n⏳ После OAuth вы получите подтверждение.".to_string()).await?;
         }
         "dismiss" => {
             let _ = bot.edit_message_reply_markup(chat_id, msg_id).await;
@@ -352,11 +350,8 @@ async fn handle_callback(
                         let is_upgrade = new_p.price_kopecks >= cur.price_kopecks;
 
                         if is_upgrade {
-                            match tochka.get_subscription_by_customer(&account_id).await {
-                                Ok(old_sub) => {
-                                    let _ = tochka.cancel_subscription(&old_sub.subscription_id).await;
-                                }
-                                _ => {}
+                            if let Ok(old_sub) = tochka.get_subscription_by_customer(&account_id).await {
+                                let _ = tochka.cancel_subscription(&old_sub.subscription_id).await;
                             }
 
                             let req = flowlink_billing::tochka::CreateSubscriptionRequest {

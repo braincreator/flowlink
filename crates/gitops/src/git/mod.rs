@@ -322,7 +322,7 @@ impl GitOpsEngine {
 
                 repo.tag(
                     &tag_name,
-                    &head_commit.as_object(),
+                    head_commit.as_object(),
                     &signature,
                     &format!("Snapshot: {:?} at {}", snapshot_type, chrono::Utc::now()),
                     false,

@@ -38,16 +38,13 @@ pub enum BackupStrategy {
 
 /// Compression algorithm
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub enum CompressionType {
+    #[default]
     Gzip,
     Zstd(u8), // level 1-22
 }
 
-impl Default for CompressionType {
-    fn default() -> Self {
-        CompressionType::Gzip
-    }
-}
 
 impl CompressionType {
     pub fn from_str_opt(s: &str) -> Option<Self> {

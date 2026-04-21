@@ -39,6 +39,12 @@ pub struct PendingApproval {
     pub created_at: String,
 }
 
+impl Default for McpServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpServer {
     pub fn new() -> Self {
         Self {
@@ -350,7 +356,7 @@ impl McpServer {
         let arguments = &params["arguments"];
 
         let result = match tool_name {
-            "scan_command" => { let r = self.scan_command(arguments); self.audit("scan_command", &arguments["command"].as_str().unwrap_or(""), &r); r }
+            "scan_command" => { let r = self.scan_command(arguments); self.audit("scan_command", arguments["command"].as_str().unwrap_or(""), &r); r }
             "scan_script" => self.scan_script(arguments),
             "scan_file" => self.scan_file(arguments),
             "scan_url" => self.scan_url(arguments),
@@ -768,7 +774,7 @@ impl McpServer {
         }
 
         // Hidden files
-        if path.split('/').last().map(|s| s.starts_with('.')).unwrap_or(false) {
+        if path.split('/').next_back().map(|s| s.starts_with('.')).unwrap_or(false) {
             risks.push(json!({"category": "hidden_file", "detail": "File is hidden (starts with dot)"}));
             score += 10;
         }

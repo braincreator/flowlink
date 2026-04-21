@@ -314,7 +314,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         total_requests_24h: {
             let total: f64 = ["GET", "POST", "PUT", "DELETE", "PATCH"].iter()
                 .filter_map(|m| state.metrics.http_requests_total.get_metric_with_label_values(&[m]).ok())
-                .map(|c| c.get() as f64)
+                .map(|c| c.get())
                 .sum();
             total as i64
         },
@@ -432,7 +432,7 @@ async fn apply_pattern_suggestion(
         "INSERT INTO policy_rules (policy_id, rule_type, pattern, priority) 
          SELECT id, $2, $3, 100 FROM policies WHERE name = 'Default' LIMIT 1"
     )
-    .bind(&rule_type)
+    .bind(rule_type)
     .bind(&pattern)
     .execute(db)
     .await;

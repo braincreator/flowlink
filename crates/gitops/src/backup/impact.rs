@@ -257,7 +257,6 @@ impl ImpactAnalyzer {
     fn extract_identifier_after_keyword(sql: &str, keyword: &str) -> Option<String> {
         let after_keyword = sql.split(keyword).nth(1)?;
         let identifier = after_keyword
-            .trim()
             .split_whitespace()
             .next()?
             .trim_matches(|c| c == '`' || c == '"' || c == '\'' || c == ';')

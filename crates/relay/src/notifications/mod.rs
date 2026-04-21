@@ -242,6 +242,12 @@ pub struct NotificationRouter {
     pool: Option<sqlx::PgPool>,
 }
 
+impl Default for NotificationRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NotificationRouter {
     pub fn new() -> Self {
         Self {

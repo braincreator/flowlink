@@ -489,7 +489,7 @@ impl ApiKeyRepo {
         let role = ApiKeyRole::from_str(&role_str).unwrap_or(ApiKeyRole::Viewer);
         let old_scopes = Scope::parse_list(&scopes_str);
         let new_key = Self::create(
-            db, org_id, &caller_account_id,
+            db, org_id, caller_account_id,
             &format!("{} (rotated)", name),
             &role,
             Some(&old_scopes),
@@ -566,6 +566,6 @@ impl KeyRateLimiter {
         let now = std::time::Instant::now();
         let window_dur = std::time::Duration::from_secs(self.window_secs);
         let mut buckets = self.buckets.write().await;
-        buckets.retain(|_, b| b.window_start.map_or(false, |ws| now.duration_since(ws) < window_dur));
+        buckets.retain(|_, b| b.window_start.is_some_and(|ws| now.duration_since(ws) < window_dur));
     }
 }

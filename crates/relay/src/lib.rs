@@ -252,7 +252,7 @@ impl Relay {
                 None
             },
             auth: auth.clone(),
-            auth_engine: auth_engine,
+            auth_engine,
             email_service: if !self.config.smtp.host.is_empty() && !self.config.smtp.username.is_empty() {
                 match crate::email::EmailService::new(
                     &self.config.smtp.host,

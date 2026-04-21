@@ -300,7 +300,7 @@ impl Classifier {
             "passwd",
         ];
 
-        let is_dangerous = dangerous_binaries.iter().any(|b| *b == comm);
+        let is_dangerous = dangerous_binaries.contains(&comm);
         let is_root = uid == 0;
 
         if is_dangerous && is_root {
@@ -370,7 +370,7 @@ impl Classifier {
         }
 
         // File deleted
-        if kind == "remove" && exists == false {
+        if kind == "remove" && !exists {
             event.severity = Severity::High;
             event.action = ActionTier::Escalate;
             return;

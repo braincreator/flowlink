@@ -150,8 +150,7 @@ impl FileBackupEngine {
             .iter()
             .filter(|(path, hash)| {
                 previous_hashes
-                    .get(*path)
-                    .map_or(true, |old_hash| old_hash != *hash)
+                    .get(*path) != Some(*hash)
             })
             .map(|(path, _)| path.clone())
             .collect();
@@ -211,7 +210,7 @@ impl FileBackupEngine {
                 if entry
                     .file_type()
                     .await
-                    .map_or(false, |ft: std::fs::FileType| ft.is_dir())
+                    .is_ok_and(|ft: std::fs::FileType| ft.is_dir())
                 {
                     stack.push(path);
                 } else {
@@ -265,7 +264,7 @@ impl FileBackupEngine {
             let mut builder = Builder::new(encoder);
 
             // Add each file to the archive (use relative name)
-            for (path, _) in &file_hashes {
+            for path in file_hashes.keys() {
                 if path.exists() {
                     let name = path.file_name().unwrap_or_default().to_string_lossy();
                     builder

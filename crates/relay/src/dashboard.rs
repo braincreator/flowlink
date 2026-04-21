@@ -54,7 +54,7 @@ fn serve_file(path: &str) -> Response {
     let file_path = dashboard_dir.join(path);
 
     if let Ok(content) = std::fs::read(&file_path) {
-        let mime_type = mime_guess(&path);
+        let mime_type = mime_guess(path);
 
         let response = Response::builder()
             .status(StatusCode::OK)

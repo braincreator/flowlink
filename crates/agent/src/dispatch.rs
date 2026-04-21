@@ -402,7 +402,7 @@ fn handle_file_read(msg: &Message, fileops: &FileOps) -> Option<Message> {
         }
         Err(e) => Some(error_response(
             msg,
-            &e.split(':').next().unwrap_or("FILE_READ_ERROR"),
+            e.split(':').next().unwrap_or("FILE_READ_ERROR"),
             &e,
         )),
     }
@@ -452,7 +452,7 @@ fn handle_file_write(msg: &Message, fileops: &FileOps) -> Option<Message> {
         ),
         Err(e) => Some(error_response(
             msg,
-            &e.split(':').next().unwrap_or("FILE_WRITE_ERROR"),
+            e.split(':').next().unwrap_or("FILE_WRITE_ERROR"),
             &e,
         )),
     }
@@ -508,7 +508,7 @@ fn handle_file_list(msg: &Message, fileops: &FileOps) -> Option<Message> {
         }
         Err(e) => Some(error_response(
             msg,
-            &e.split(':').next().unwrap_or("FILE_READ_ERROR"),
+            e.split(':').next().unwrap_or("FILE_READ_ERROR"),
             &e,
         )),
     }
@@ -529,7 +529,7 @@ use std::cell::RefCell;
 
 thread_local! {
     /// Queue of shield alerts generated during dispatch (picked up by connection layer)
-    pub static SHIELD_ALERT_QUEUE: RefCell<Vec<Message>> = RefCell::new(Vec::new());
+    pub static SHIELD_ALERT_QUEUE: RefCell<Vec<Message>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Drain any shield alerts queued during dispatch. Call from connection layer after dispatch.

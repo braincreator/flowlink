@@ -203,13 +203,12 @@ impl KillSwitch {
         }
 
         // Disk monitoring
-        if disk_usage > self.disk_threshold {
-            if s.mode == KillSwitchMode::Running {
+        if disk_usage > self.disk_threshold
+            && s.mode == KillSwitchMode::Running {
                 s.mode = KillSwitchMode::Readonly;
                 s.pause_reason = format!("disk almost full: {:.1}%", disk_usage);
                 warn!("auto-readonly: disk {:.1}%", disk_usage);
             }
-        }
 
         KillSwitchStatus {
             mode: s.mode,
@@ -409,7 +408,7 @@ fn get_disk_usage() -> f64 {
         return 0.0;
     }
 
-    let bsize = stat.f_bsize as u64;
+    let bsize = stat.f_bsize;
     let total = stat.f_blocks as u64 * bsize;
     let free = stat.f_bavail as u64 * bsize;
 

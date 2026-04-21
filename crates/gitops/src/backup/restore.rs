@@ -162,8 +162,8 @@ impl RestoreEngine {
             let mut errors: Vec<String> = Vec::new();
 
             // Extract each entry with path traversal protection
-            let mut archive_entries = archive.entries()?;
-            while let Some(entry) = archive_entries.next() {
+            let archive_entries = archive.entries()?;
+            for entry in archive_entries {
                 match entry {
                     Ok(mut entry) => {
                         let entry_path = match entry.path() {

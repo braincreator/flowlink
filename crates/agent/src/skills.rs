@@ -190,7 +190,7 @@ impl SkillManager {
 }
 
 fn sanitize_id(id: &str) -> String {
-    id.replace('/', "_").replace('\\', "_").replace("..", "_")
+    id.replace(['/', '\\'], "_").replace("..", "_")
 }
 
 #[cfg(test)]

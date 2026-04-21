@@ -74,7 +74,7 @@ pub async fn query_org_audit(
 ) -> Result<(Vec<OrgAuditRow>, i64)> {
     let offset = (page - 1) * limit;
     let where_clause = match action_filter {
-        Some(_a) => format!("WHERE org_id = $1 AND action = $2"),
+        Some(_a) => "WHERE org_id = $1 AND action = $2".to_string(),
         None => "WHERE org_id = $1".to_string(),
     };
     let count_sql = format!("SELECT COUNT(*) FROM audit_log {}", where_clause);

@@ -7,21 +7,13 @@ use std::net::SocketAddr;
 
 // OAuth configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct OAuthConfig {
     pub vk: VkConfig,
     pub yandex: YandexConfig,
     pub github: GithubConfig,
 }
 
-impl Default for OAuthConfig {
-    fn default() -> Self {
-        Self {
-            vk: VkConfig::default(),
-            yandex: YandexConfig::default(),
-            github: GithubConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VkConfig {
@@ -446,6 +438,7 @@ impl Default for AuthConfig {
 /// When set, the relay starts a separate TLS listener on `wss_addr`.
 /// Agents connect via `wss://` directly (bypassing nginx).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct WssTlsConfig {
     /// Path to the TLS certificate (PEM).
     #[serde(default)]
@@ -455,14 +448,6 @@ pub struct WssTlsConfig {
     pub key_path: Option<String>,
 }
 
-impl Default for WssTlsConfig {
-    fn default() -> Self {
-        Self {
-            cert_path: None,
-            key_path: None,
-        }
-    }
-}
 
 impl WssTlsConfig {
     /// Returns true if both cert and key paths are set (WSS is enabled).

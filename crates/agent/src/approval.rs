@@ -157,7 +157,7 @@ impl ApprovalManager {
     /// List pending approvals (for MCP/API).
     pub async fn list_pending(&self) -> Vec<(String, String, String, i64)> {
         let pending = self.pending.lock().await;
-        pending.iter().map(|(_, p)| {
+        pending.values().map(|p| {
             (p.request_id.clone(), p.command.clone(), p.risk_level.clone(), p.created_at.timestamp())
         }).collect()
     }

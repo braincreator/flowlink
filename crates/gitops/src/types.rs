@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[derive(Default)]
 pub enum RiskLevel {
+    #[default]
     Safe,
     Low,
     Medium,
@@ -13,11 +15,6 @@ pub enum RiskLevel {
     Critical,
 }
 
-impl Default for RiskLevel {
-    fn default() -> Self {
-        RiskLevel::Safe
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum DriftSeverity {
@@ -72,7 +69,9 @@ pub enum ShieldVerdict {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Default)]
 pub enum ShieldVerdictType {
+    #[default]
     Allow,
     Deny,
     AutoBackup,
@@ -211,6 +210,7 @@ pub struct GitSnapshot {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Default)]
 pub struct OsInfo {
     pub name: String,
     pub version: String,
@@ -218,16 +218,6 @@ pub struct OsInfo {
     pub kernel: String,
 }
 
-impl Default for OsInfo {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            version: String::new(),
-            arch: String::new(),
-            kernel: String::new(),
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct HardwareInfo {
@@ -273,11 +263,6 @@ pub struct ImpactReport {
     pub rollback_possible: bool,
 }
 
-impl Default for ShieldVerdictType {
-    fn default() -> Self {
-        ShieldVerdictType::Allow
-    }
-}
 
 impl Default for BackupType {
     fn default() -> Self {

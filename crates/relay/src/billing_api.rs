@@ -333,7 +333,7 @@ pub async fn change_plan(
                             let svc = email_svc.clone();
                             let to = email.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = svc.send_plan_changed(&to, &to.split('@').next().unwrap_or(&to), &old_plan, &new_plan).await {
+                                if let Err(e) = svc.send_plan_changed(&to, to.split('@').next().unwrap_or(&to), &old_plan, &new_plan).await {
                                     log::warn!("Failed to send plan changed email to {to}: {e}");
                                 }
                             });
@@ -461,7 +461,7 @@ pub async fn subscribe(
     };
 
     // 54-ФЗ: require email or phone for receipt
-    let customer_email = body.customer_email.clone().or_else(|| {
+    let customer_email = body.customer_email.clone().or({
         // Try to get email from account DB
         if let Some(_db) = &state.db {
             // Synchronous-ish: use try_get via account_id
@@ -499,7 +499,7 @@ pub async fn subscribe(
         description,
         start_date: None,
         trial_days: body.trial_days.unwrap_or(0),
-        customer_email: customer_email,
+        customer_email,
     };
 
     match tochka.create_subscription(&req).await {
@@ -1108,7 +1108,7 @@ pub async fn tochka_webhook(
                                                 let svc = email_service.clone();
                                                 let to = email.clone();
                                                 async move {
-                                                    if let Err(e) = svc.send_payment_failed(&to, &to.split('@').next().unwrap_or(&to), &plan_id).await {
+                                                    if let Err(e) = svc.send_payment_failed(&to, to.split('@').next().unwrap_or(&to), &plan_id).await {
                                                         log::warn!("Failed to send payment failed email to {to}: {e}");
                                                     }
                                                 }

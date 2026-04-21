@@ -33,13 +33,13 @@ pub async fn playground_scan(
     if !state.rate_limiter.allow("playground") {
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "Rate limit exceeded. Max 10 requests per minute."}))).into_response();
     }
-    let result = match req {
+    
+    match req {
         PlaygroundRequest::Command { command } => scan_command(&command),
         PlaygroundRequest::Script { script, language } => scan_script(&script, &language),
         PlaygroundRequest::File { path, operation } => scan_file(&path, &operation),
         PlaygroundRequest::Url { url, purpose } => scan_url(&url, &purpose),
-    };
-    result
+    }
 }
 
 fn scan_command(command: &str) -> axum::response::Response {

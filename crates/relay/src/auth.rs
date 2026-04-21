@@ -684,7 +684,7 @@ impl AuthEngine {
             .await?;
             if let Some(user) = row {
                 sqlx::query("UPDATE users SET last_login = now() WHERE id = $1")
-                    .bind(&user.id).execute(&self.db).await?;
+                    .bind(user.id).execute(&self.db).await?;
                 return Ok(user.into());
             }
         }
@@ -699,7 +699,7 @@ impl AuthEngine {
             .await?;
             if let Some(user) = row {
                 sqlx::query("UPDATE users SET last_login = now() WHERE id = $1")
-                    .bind(&user.id).execute(&self.db).await?;
+                    .bind(user.id).execute(&self.db).await?;
                 return Ok(user.into());
             }
         }
@@ -714,7 +714,7 @@ impl AuthEngine {
             .await?;
             if let Some(user) = row {
                 sqlx::query("UPDATE users SET last_login = now() WHERE id = $1")
-                    .bind(&user.id).execute(&self.db).await?;
+                    .bind(user.id).execute(&self.db).await?;
                 return Ok(user.into());
             }
         }
@@ -733,21 +733,21 @@ impl AuthEngine {
                 if let Some(ref vk) = vk_id {
                     sqlx::query("UPDATE users SET oauth_vk_id = $1, last_login = now() WHERE id = $2 AND oauth_vk_id IS NULL")
                         .bind(vk)
-                        .bind(&user.id)
+                        .bind(user.id)
                         .execute(&self.db)
                         .await?;
                 }
                 if let Some(ref yandex) = yandex_id {
                     sqlx::query("UPDATE users SET oauth_yandex_id = $1, last_login = now() WHERE id = $2 AND oauth_yandex_id IS NULL")
                         .bind(yandex)
-                        .bind(&user.id)
+                        .bind(user.id)
                         .execute(&self.db)
                         .await?;
                 }
                 if let Some(ref gh) = github_id {
                     sqlx::query("UPDATE users SET oauth_github_id = $1, last_login = now() WHERE id = $2 AND oauth_github_id IS NULL")
                         .bind(gh)
-                        .bind(&user.id)
+                        .bind(user.id)
                         .execute(&self.db)
                         .await?;
                 }

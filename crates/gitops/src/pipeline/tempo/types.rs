@@ -28,7 +28,7 @@ impl ToolRateTracker {
             self.timestamps.push(now);
             Ok(())
         } else {
-            Err(count as u32)
+            Err(count)
         }
     }
 
@@ -71,7 +71,7 @@ impl TierRateTracker {
             self.timestamps.push(now);
             Ok(())
         } else {
-            Err(count as u32)
+            Err(count)
         }
     }
 
@@ -114,7 +114,7 @@ impl GlobalTracker {
             self.timestamps.push(now);
             Ok(())
         } else {
-            Err(count as u32)
+            Err(count)
         }
     }
 

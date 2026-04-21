@@ -22,7 +22,7 @@ pub fn check_level2(binary: &str, args: &[String], raw: &str) -> Option<Threat> 
     None
 }
 
-fn extract_script<'a>(args: &'a [String]) -> Option<&'a str> {
+fn extract_script(args: &[String]) -> Option<&str> {
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if a == "-c" {
@@ -292,8 +292,8 @@ fn check_raw_patterns(raw: &str) -> Option<Threat> {
     {
         let args: Vec<&str> = lower.split_whitespace().collect();
         let is_ssh = args.first().map(|a| *a == "ssh").unwrap_or(false);
-        let has_reverse_flag = args.iter().any(|a| *a == "-r" || (a.starts_with("-r") && *a != "-r"));
-        let has_local_forward = args.iter().any(|a| *a == "-l" || *a == "-l");
+        let has_reverse_flag = args.iter().any(|a| *a == "-r" && a.len() >= 2);
+        let has_local_forward = args.iter().any(|a| *a == "-l" || *a == "--local");
         if is_ssh && has_reverse_flag && !has_local_forward {
             return Some(
                 Threat::high(

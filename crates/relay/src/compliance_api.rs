@@ -66,7 +66,7 @@ pub async fn list_reports(
     ).bind(q.org_id).bind(&q.report_type).bind(&q.status).bind(limit)
     .fetch_all(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok((StatusCode::OK, Json(rows.iter().map(|r| row_to_report(r)).collect())))
+    Ok((StatusCode::OK, Json(rows.iter().map(row_to_report).collect())))
 }
 
 pub async fn get_report(

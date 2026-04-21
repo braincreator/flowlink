@@ -15,6 +15,12 @@ pub struct AuthRateLimiter {
     windows: Arc<DashMap<String, (u32, Instant)>>,
 }
 
+impl Default for AuthRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AuthRateLimiter {
     pub fn new() -> Self {
         Self {

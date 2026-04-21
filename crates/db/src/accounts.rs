@@ -252,7 +252,7 @@ impl AccountRepo {
         .bind(account_id)
         .fetch_optional(pool)
         .await?;
-        Ok(row.map(|(e, s)| (e, s)).unwrap_or((false, None)))
+        Ok(row.unwrap_or((false, None)))
     }
 
     /// Set TOTP secret for an account

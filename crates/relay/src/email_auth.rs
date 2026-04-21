@@ -421,7 +421,7 @@ pub async fn verify_code(
                 let _ = audit::log_event(pool, None, &account_id, "auth.login", Some("account"), Some(&account_id), json!({"email": &email, "ip": &client_ip}), Some(&client_ip)).await;
 
                 // Schedule login notification email (skip if sent in last 5 min)
-                if let Some(ref queue) = state.email_queue.get() {
+                if let Some(queue) = state.email_queue.get() {
                     let recent = sqlx::query_scalar::<_, i64>(
                         r#"SELECT COUNT(*) FROM email_queue
                            WHERE account_id = $1 AND email_type = 'new_login'

@@ -141,10 +141,10 @@ fn compute_entry_hmac(entry: &AuditEntry, key: &[u8], prev_hmac: &str) -> Result
 fn serialize_entry_fields(entry: &AuditEntry) -> Result<String> {
     let mut map = serde_json::Map::new();
 
-    map.insert("id".to_string(), serde_json::to_value(&entry.id)?);
+    map.insert("id".to_string(), serde_json::to_value(entry.id)?);
     map.insert(
         "timestamp".to_string(),
-        serde_json::to_value(&entry.timestamp)?,
+        serde_json::to_value(entry.timestamp)?,
     );
     map.insert(
         "agent_id".to_string(),
@@ -192,7 +192,7 @@ fn serialize_entry_fields(entry: &AuditEntry) -> Result<String> {
     );
     map.insert(
         "exit_code".to_string(),
-        serde_json::to_value(&entry.exit_code)?,
+        serde_json::to_value(entry.exit_code)?,
     );
     map.insert(
         "stdout_hash".to_string(),
@@ -204,7 +204,7 @@ fn serialize_entry_fields(entry: &AuditEntry) -> Result<String> {
     );
     map.insert(
         "duration_ms".to_string(),
-        serde_json::to_value(&entry.duration_ms)?,
+        serde_json::to_value(entry.duration_ms)?,
     );
     map.insert(
         "files_modified".to_string(),
@@ -232,7 +232,7 @@ fn serialize_entry_fields(entry: &AuditEntry) -> Result<String> {
     );
     map.insert(
         "rollback_available".to_string(),
-        serde_json::to_value(&entry.rollback_available)?,
+        serde_json::to_value(entry.rollback_available)?,
     );
     map.insert(
         "health_check".to_string(),
@@ -240,7 +240,7 @@ fn serialize_entry_fields(entry: &AuditEntry) -> Result<String> {
     );
     map.insert(
         "auto_restored".to_string(),
-        serde_json::to_value(&entry.auto_restored)?,
+        serde_json::to_value(entry.auto_restored)?,
     );
     map.insert(
         "auto_restore_backup_id".to_string(),

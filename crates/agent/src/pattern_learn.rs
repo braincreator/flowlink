@@ -41,6 +41,12 @@ pub struct PatternLearner {
     max_patterns: usize,
 }
 
+impl Default for PatternLearner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PatternLearner {
     const MAX_PATTERNS: usize = 5000;
 

@@ -203,7 +203,7 @@ impl TempoController {
                 ),
                 remaining_budget: Some(RateBudget {
                     tool_remaining: 0,
-                    tool_reset_in_seconds: global_limit.window_seconds as u64,
+                    tool_reset_in_seconds: global_limit.window_seconds,
                     global_remaining: 0,
                     breaker_state,
                 }),

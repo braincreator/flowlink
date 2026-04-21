@@ -11,6 +11,12 @@ pub struct E2eeSessionManager {
     relay_keypair: KeyPair,
 }
 
+impl Default for E2eeSessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl E2eeSessionManager {
     pub fn new() -> Self {
         Self {
@@ -43,7 +49,7 @@ impl E2eeSessionManager {
     pub async fn encrypt_for_agent(&self, agent_id: &str, plaintext: &[u8]) -> Option<String> {
         let peer_key = self.agent_keys.read().await.get(agent_id)?.clone();
         let envelope = encrypt(&self.relay_keypair, &peer_key, plaintext).ok()?;
-        Some(serde_json::to_string(&envelope).ok()?)
+        serde_json::to_string(&envelope).ok()
     }
 
     /// Decrypt a message from an agent using E2EE.

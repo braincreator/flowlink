@@ -119,7 +119,7 @@ pub async fn list_roles(
     .fetch_all(pool).await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok((StatusCode::OK, Json(rows.iter().map(|r| row_to_role(r)).collect())))
+    Ok((StatusCode::OK, Json(rows.iter().map(row_to_role).collect())))
 }
 
 pub async fn create_role(

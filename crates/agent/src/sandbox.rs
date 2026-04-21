@@ -403,7 +403,7 @@ fn create_dev_node(
         let ret = libc::mknod(path_cstr.as_ptr(), mode, dev);
         if ret != 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            if errno != libc::EEXIST as i32 {
+            if errno != libc::EEXIST {
                 log::debug!("mknod for {} failed (errno={}): may need root", name, errno);
             }
         }

@@ -41,7 +41,7 @@ pub async fn cmd_start(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
     let name = msg.from.as_ref()
         .map(|u| u.first_name.clone())
         .unwrap_or_else(|| "друг".to_string());
-    let tg_chat_id = msg.chat.id.0 as i64;
+    let tg_chat_id = msg.chat.id.0;
 
     // ── Phase 1: Check if already linked ──
     if let Some(db) = &ctx.state.db {

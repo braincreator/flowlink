@@ -41,7 +41,7 @@ impl PlanEngine {
         let result =
             self.classifier
                 .classify(command, args)
-                .unwrap_or_else(|_| ClassificationResult {
+                .unwrap_or(ClassificationResult {
                     tier: ActionTier::Unclassified,
                     verdict: None,
                     rule_name: None,
@@ -88,7 +88,7 @@ impl PlanEngine {
         ExecutionPlan {
             command: format!("{} {}", command, args.join(" ")),
             classification: tier,
-            risk_level: risk_level,
+            risk_level,
             verdict,
             files_at_risk: files,
             databases_at_risk: vec![],

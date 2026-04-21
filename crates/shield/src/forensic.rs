@@ -393,7 +393,7 @@ fn is_service_account(username: &str) -> bool {
         "uucp",
         "games",
     ];
-    service_names.iter().any(|&s| s == username) || username.starts_with("_")
+    service_names.contains(&username) || username.starts_with("_")
 }
 
 fn detect_shell(tree: &[ProcessTreeNode]) -> Option<String> {

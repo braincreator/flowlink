@@ -143,11 +143,10 @@ pub async fn bind_channel(
     };
 
     // For telegram, verify that the chat_id looks valid
-    if req.channel_type == "telegram" {
-        if req.channel_address.parse::<i64>().is_err() {
+    if req.channel_type == "telegram"
+        && req.channel_address.parse::<i64>().is_err() {
             return error_response(StatusCode::BAD_REQUEST, "Invalid Telegram chat_id");
         }
-    }
 
     let is_primary = req.set_primary;
     match flowlink_db::notification_channels::UserChannelRepo::upsert(

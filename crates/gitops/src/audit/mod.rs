@@ -224,7 +224,7 @@ impl AuditTrail {
                 }
             }
 
-            current_date = current_date + chrono::Duration::days(1);
+            current_date += chrono::Duration::days(1);
         }
 
         debug!(

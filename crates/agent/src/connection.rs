@@ -274,9 +274,7 @@ impl Connection {
                 Some(r) => {
                     if r.msg_type == MessageType::Error {
                         // Check if it was a policy block
-                        r.error.as_deref().unwrap_or("").contains("BLOCKED")
-                            .then_some("blocked")
-                            .unwrap_or("allowed")
+                        if r.error.as_deref().unwrap_or("").contains("BLOCKED") { "blocked" } else { "allowed" }
                     } else {
                         "allowed"
                     }

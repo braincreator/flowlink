@@ -85,33 +85,20 @@ pub struct GitOpsConfig {
 
 /// Optional pipeline configuration for the GitOps engine.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Default)]
 pub struct GitOpsPipelineConfig {
     pub max_concurrent_commands: Option<u32>,
     pub command_timeout_secs: Option<u64>,
 }
 
-impl Default for GitOpsPipelineConfig {
-    fn default() -> Self {
-        Self {
-            max_concurrent_commands: None,
-            command_timeout_secs: None,
-        }
-    }
-}
 
 /// Optional server-guard configuration for the GitOps engine.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Default)]
 pub struct GitOpsServerGuardConfig {
     pub state_collect_interval_secs: Option<u64>,
 }
 
-impl Default for GitOpsServerGuardConfig {
-    fn default() -> Self {
-        Self {
-            state_collect_interval_secs: None,
-        }
-    }
-}
 
 impl Default for GitOpsConfig {
     fn default() -> Self {
@@ -602,7 +589,7 @@ impl GitOpsConfig {
                     .git
                     .remote_url
                     .as_ref()
-                    .map_or(true, |u| u.trim().is_empty())
+                    .is_none_or(|u| u.trim().is_empty())
                 {
                     errors.push(
                         "sync_strategy is Realtime but git.remote_url is not set; \
