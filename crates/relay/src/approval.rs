@@ -78,7 +78,7 @@ impl ApprovalQueue {
         }
         for id in &to_remove {
             self.pending.remove(id);
-            // Also clean up responder if present (send TimedOut)
+            // Clean up orphaned responder (send TimedOut)
             if let Some((_, tx)) = self.responders.remove(id) {
                 let _ = tx.send(ApprovalDecision::TimedOut);
             }

@@ -56,6 +56,12 @@ impl RateLimiter {
             .or_insert_with(|| Bucket::new(self.max_tokens, self.refill_rate));
         bucket.try_consume(1.0)
     }
+
+    /// Remove stale buckets not accessed in the last hour.
+    pub fn prune(&self) {
+        let cutoff = std::time::Instant::now() - std::time::Duration::from_secs(3600);
+        self.buckets.retain(|_, b| b.last_refill > cutoff);
+    }
 }
 
 #[cfg(test)]

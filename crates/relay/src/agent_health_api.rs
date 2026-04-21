@@ -8,7 +8,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::server::AppState;
-use crate::auth::Claims;
 
 fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
     state.db.as_ref().map(|db| db.pool()).ok_or((StatusCode::SERVICE_UNAVAILABLE, "Database not configured".to_string()))
@@ -42,7 +41,7 @@ pub struct MetricsQuery {
 
 pub async fn get_latest(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> Result<(StatusCode, Json<HealthMetric>), (StatusCode, String)> {
     let row = sqlx::query(

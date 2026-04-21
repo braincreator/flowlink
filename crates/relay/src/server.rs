@@ -71,6 +71,8 @@ pub struct AppState {
     pub key_rate_limiter: Arc<crate::api_keys::KeyRateLimiter>,
     pub saml_config: Option<Arc<tokio::sync::Mutex<crate::saml::SamlConfig>>>,
     pub rusiem_config: Option<Arc<tokio::sync::RwLock<crate::rusiem::RusiemConfig>>>,
+    /// Shared HTTP client with connection pooling for OAuth, webhooks, etc.
+    pub http_client: reqwest::Client,
 }
 
 // ═══════════════════════════════════════════════
@@ -182,6 +184,32 @@ impl ShieldAlertManager {
     /// Record an incoming shield alert from an agent or shield guard.
     pub fn add(&self, entry: ShieldAlertEntry) {
         self.stats.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // Cap at 10,000 entries to prevent unbounded growth
+        if self.alerts.len() >= 10_000 {
+            // Remove oldest resolved entries first
+            let mut oldest_key = None;
+            let mut oldest_ts = i64::MAX;
+            for e in self.alerts.iter() {
+                if e.value().resolved && e.value().timestamp < oldest_ts {
+                    oldest_ts = e.value().timestamp;
+                    oldest_key = Some(e.key().clone());
+                }
+            }
+            if let Some(key) = oldest_key {
+                self.alerts.remove(&key);
+            } else {
+                // All unresolved — remove the oldest
+                for e in self.alerts.iter() {
+                    if e.value().timestamp < oldest_ts {
+                        oldest_ts = e.value().timestamp;
+                        oldest_key = Some(e.key().clone());
+                    }
+                }
+                if let Some(key) = oldest_key {
+                    self.alerts.remove(&key);
+                }
+            }
+        }
         self.alerts.insert(entry.alert_id.clone(), entry);
     }
 
@@ -1484,6 +1512,7 @@ async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
 
 // ── Admin account management ──
 
+#[allow(unused_assignments)]
 async fn admin_list_accounts(State(state): State<AppState>, Query(params): Query<std::collections::HashMap<String, String>>) -> impl IntoResponse {
     let db = match &state.db {
         Some(db) => db,
@@ -1491,7 +1520,8 @@ async fn admin_list_accounts(State(state): State<AppState>, Query(params): Query
     };
     // Parameterized query — SQL injection fix
     let mut query_str = String::from("SELECT account_id, plan_id, active, email, tg_id, totp_enabled, last_login, created_at FROM accounts WHERE 1=1");
-    let mut pidx = 1u32;
+    #[allow(unused_assignments)]
+    let mut pidx: u32 = 1;
     let has_plan = params.contains_key("plan");
     if has_plan { query_str.push_str(&format!(" AND plan_id = ${}", pidx)); pidx += 1; }
     let has_active = params.contains_key("active");
@@ -2165,6 +2195,8 @@ pub fn build_router(state: AppState) -> Router {
         )))
         .layer(cors_layer(vec!["*".to_string()]))
         .layer(axum::middleware::from_fn(security_headers_middleware))
+        // Request body size limit: 10MB max
+        .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024))
         .fallback(handle_fallback)
 }
 
@@ -2225,6 +2257,10 @@ mod tests {
             key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)),
             saml_config: None,
             rusiem_config: None,
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .pool_max_idle_per_host(4)
+                .build().expect("Failed to create shared HTTP client"),
         }
     }
 

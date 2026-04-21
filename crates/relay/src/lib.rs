@@ -284,6 +284,7 @@ impl Relay {
             key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)), // 100 req/min per key
             saml_config: None,
             rusiem_config: None,
+            http_client: reqwest::Client::new(),
         };
 
         // Email queue worker (requires both email_service and db)

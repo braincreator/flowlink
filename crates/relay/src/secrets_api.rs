@@ -9,8 +9,6 @@ use uuid::Uuid;
 
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 
-use crate::middleware::AccountIdExtractor;
-use crate::auth::Claims;
 use crate::server::AppState;
 use flowlink_core::rbac::Permission;
 

@@ -7,8 +7,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::middleware::AccountIdExtractor;
-use crate::auth::Claims;
 use crate::server::AppState;
 
 fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
@@ -57,7 +55,7 @@ fn row_to_report(r: &sqlx::postgres::PgRow) -> ComplianceReport {
 
 pub async fn list_reports(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Query(q): Query<ReportQuery>,
 ) -> Result<(StatusCode, Json<Vec<ComplianceReport>>), (StatusCode, String)> {
     let pool = gp(&state)?;

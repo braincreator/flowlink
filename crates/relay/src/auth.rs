@@ -92,7 +92,7 @@ impl AuthManager {
         let token_hash = hash_token(&token);
         let id = client.client_id.clone();
         // Remove old token hash if client re-registers with different token
-        if let Some(old_client) = self.clients.get(&id) {
+        if let Some(_old_client) = self.clients.get(&id) {
             // We don't store old plaintext token, so find and remove old hash entry
             // by scanning for this client_id in hash map
             self.token_hash_to_client.retain(|_, v| v != &id);

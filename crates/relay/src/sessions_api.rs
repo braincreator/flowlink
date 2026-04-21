@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::server::AppState;
-use crate::auth::Claims;
 
 fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
     state.db.as_ref().map(|db| db.pool()).ok_or((StatusCode::SERVICE_UNAVAILABLE, "Database not configured".to_string()))
@@ -74,7 +73,7 @@ pub async fn create_session(
 
 pub async fn list_sessions(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Query(q): Query<SessionQuery>,
 ) -> Result<(StatusCode, Json<Vec<Session>>), (StatusCode, String)> {
     let pool = gp(&state)?;
@@ -98,7 +97,7 @@ pub async fn list_sessions(
 
 pub async fn get_session(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<Session>), (StatusCode, String)> {
     let pool = gp(&state)?;

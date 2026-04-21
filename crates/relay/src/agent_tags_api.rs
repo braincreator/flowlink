@@ -8,7 +8,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::middleware::AccountIdExtractor;
-use crate::auth::Claims;
 use crate::server::AppState;
 
 fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
@@ -29,7 +28,7 @@ pub struct TagFilterQuery {
 
 pub async fn set_tags(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     AccountIdExtractor(_account_id): AccountIdExtractor,
     Path(agent_id): Path<String>,
     Json(body): Json<TagRequest>,

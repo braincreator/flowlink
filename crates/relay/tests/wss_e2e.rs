@@ -96,6 +96,7 @@ fn make_state(tmp: &std::path::Path) -> AppState {
         key_rate_limiter: Arc::new(flowlink_relay::api_keys::KeyRateLimiter::new(100, 60)),
         saml_config: None,
         rusiem_config: None,
+        http_client: reqwest::Client::new(),
     }
 }
 

@@ -13,7 +13,7 @@ use chrono::Utc;
 use dashmap::DashMap;
 use serde::Serialize;
 use serde_json::Value;
-use sha2::{Sha256, Digest};
+use sha2::Digest;
 
 use flowlink_core::channels::{AuditEvent, AuditEventType};
 

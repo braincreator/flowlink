@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::middleware::{AccountIdExtractor, ClaimsExtractor};
+use crate::middleware::ClaimsExtractor;
 use crate::server::AppState;
 use flowlink_db::audit;
 use flowlink_db::orgs::OrgRow;
@@ -124,7 +124,7 @@ pub fn check_trial_status(org: &OrgRow) -> TrialStatus {
 
 /// GET /api/billing — get billing info for the authenticated account
 
-/// Extract org_id from Claims, return 403 if missing
+#[allow(dead_code)]
 fn require_org(claims: &crate::auth::Claims) -> Result<uuid::Uuid, (StatusCode, axum::Json<serde_json::Value>)> {
     match &claims.org_id {
         Some(id) => uuid::Uuid::parse_str(id).map_err(|_| (StatusCode::BAD_REQUEST, axum::Json(json!({"error": "Invalid org_id"})))),
