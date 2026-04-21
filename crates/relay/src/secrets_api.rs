@@ -131,6 +131,15 @@ pub async fn create_secret(
     if body.key.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Key is required".into()));
     }
+    if body.key.len() > 128 {
+        return Err((StatusCode::BAD_REQUEST, "Key too long (max 128 chars)".into()));
+    }
+    if !body.key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.') {
+        return Err((StatusCode::BAD_REQUEST, "Key must contain only alphanumeric, underscore, hyphen, dot".into()));
+    }
+    if body.value.len() > 65536 {
+        return Err((StatusCode::BAD_REQUEST, "Value too large (max 64KB)".into()));
+    }
     let (encrypted, nonce) = encrypt(&body.value).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let org_id: uuid::Uuid = match &claims.org_id {
         Some(id) => uuid::Uuid::parse_str(id).unwrap_or_default(),

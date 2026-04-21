@@ -32,6 +32,12 @@ pub async fn set_tags(
     Path(agent_id): Path<String>,
     Json(body): Json<TagRequest>,
 ) -> Result<(StatusCode, Json<TagsResponse>), (StatusCode, String)> {
+    if agent_id.len() > 128 || agent_id.contains('\0') {
+        return Err((StatusCode::BAD_REQUEST, "Invalid agent_id".into()));
+    }
+    if body.tags.len() > 50 {
+        return Err((StatusCode::BAD_REQUEST, "Too many tags (max 50)".into()));
+    }
     sqlx::query("DELETE FROM agent_tags WHERE agent_id = $1")
         .bind(&agent_id).execute(gp(&state)?).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -39,12 +45,17 @@ pub async fn set_tags(
     let mut clean = Vec::new();
     for tag in &body.tags {
         let t = tag.trim().to_lowercase();
-        if !t.is_empty() {
-            sqlx::query("INSERT INTO agent_tags (agent_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-                .bind(&agent_id).bind(&t).execute(gp(&state)?).await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            clean.push(t);
+        if t.is_empty() { continue; }
+        if t.len() > 64 {
+            return Err((StatusCode::BAD_REQUEST, format!("Tag too long (max 64 chars): {}", &t[..32.min(t.len())])));
         }
+        if !t.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == ':' || c == '/') {
+            return Err((StatusCode::BAD_REQUEST, format!("Invalid tag characters: {}", &t)));
+        }
+        sqlx::query("INSERT INTO agent_tags (agent_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+            .bind(&agent_id).bind(&t).execute(gp(&state)?).await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        clean.push(t);
     }
 
     Ok((StatusCode::OK, Json(TagsResponse { agent_id, tags: clean })))
