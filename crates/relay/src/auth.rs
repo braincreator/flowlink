@@ -26,8 +26,16 @@ pub struct Client {
 /// Tokens cached in-memory (DashMap) with optional PostgreSQL backing.
 pub struct AuthManager {
     clients: Arc<DashMap<String, Client>>,
-    token_to_client: Arc<DashMap<String, String>>,
+    /// Maps SHA-256 hash of token → client_id (never stores plaintext tokens)
+    token_hash_to_client: Arc<DashMap<String, String>>,
     db: Option<Arc<sqlx::PgPool>>,
+}
+
+fn hash_token(token: &str) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 impl Default for AuthManager {
@@ -38,29 +46,33 @@ impl AuthManager {
     pub fn new(db: Option<Arc<sqlx::PgPool>>) -> Self {
         let mgr = Self {
             clients: Arc::new(DashMap::new()),
-            token_to_client: Arc::new(DashMap::new()),
+            token_hash_to_client: Arc::new(DashMap::new()),
             db: db.clone(),
         };
         if let Some(ref pool) = db {
             let rt = tokio::runtime::Handle::current();
             let pool = pool.clone();
             let clients = mgr.clients.clone();
-            let token_map = mgr.token_to_client.clone();
+            let token_map = mgr.token_hash_to_client.clone();
             rt.spawn_blocking(move || {
-                let rt = tokio::runtime::Runtime::new().unwrap();
+                let rt = match tokio::runtime::Runtime::new() {
+                    Ok(r) => r,
+                    Err(e) => { log::error!("Failed to create runtime for DB token load: {e}"); return; }
+                };
                 rt.block_on(async move {
                     if let Ok(rows) = sqlx::query_as::<_, (String, String, String, bool)>(
                         "SELECT agent_id, COALESCE(api_token, ''), name, (status = 'connected') FROM agents WHERE api_token IS NOT NULL"
                     ).fetch_all(pool.as_ref()).await {
                         for (agent_id, api_token, name, active) in &rows {
                             if !api_token.is_empty() {
+                                let token_hash = hash_token(api_token);
                                 let client = Client {
                                     client_id: agent_id.clone(),
-                                    api_token: api_token.clone(),
+                                    api_token: String::new(), // never store plaintext in memory
                                     name: name.clone(),
                                     active: *active,
                                 };
-                                token_map.insert(api_token.clone(), agent_id.clone());
+                                token_map.insert(token_hash, agent_id.clone());
                                 clients.insert(agent_id.clone(), client);
                             }
                         }
@@ -77,12 +89,19 @@ impl AuthManager {
 
     pub fn register_client(&self, client: Client) {
         let token = client.api_token.clone();
+        let token_hash = hash_token(&token);
         let id = client.client_id.clone();
-        if let Some(old) = self.clients.get(&id) {
-            self.token_to_client.remove(&old.api_token);
+        // Remove old token hash if client re-registers with different token
+        if let Some(old_client) = self.clients.get(&id) {
+            // We don't store old plaintext token, so find and remove old hash entry
+            // by scanning for this client_id in hash map
+            self.token_hash_to_client.retain(|_, v| v != &id);
         }
-        self.token_to_client.insert(token.clone(), id.clone());
-        self.clients.insert(id.clone(), client.clone());
+        self.token_hash_to_client.insert(token_hash, id.clone());
+        // Store client with empty token in memory
+        let mut safe_client = client.clone();
+        safe_client.api_token = String::new();
+        self.clients.insert(id.clone(), safe_client);
 
         // Persist to DB
         if let Some(ref pool) = self.db {
@@ -108,8 +127,9 @@ impl AuthManager {
     pub fn is_empty(&self) -> bool { self.clients.is_empty() }
 
     pub fn validate_token(&self, token: &str) -> Option<Client> {
-        // Fast path: in-memory cache
-        let client_id = self.token_to_client.get(token)?;
+        // Hash the incoming token and compare against stored hashes
+        let token_hash = hash_token(token);
+        let client_id = self.token_hash_to_client.get(&token_hash)?;
         let id: String = client_id.value().clone();
         self.clients.get(&id).map(|c| c.value().clone())
     }

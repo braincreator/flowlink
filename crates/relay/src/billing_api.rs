@@ -956,7 +956,13 @@ pub async fn tochka_webhook(
             .unwrap_or("");
         if !sig.is_empty() {
             use hmac::Mac;
-            let mut mac: hmac::Hmac<sha2::Sha256> = Mac::new_from_slice(secret.as_bytes()).unwrap();
+            let mut mac: hmac::Hmac<sha2::Sha256> = match Mac::new_from_slice(secret.as_bytes()) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::error!("HMAC init failed: {e}");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response();
+                }
+            };
             mac.update(&body);
             let expected = hex::encode(mac.finalize().into_bytes());
             if !const_eq(sig, &expected) {

@@ -616,7 +616,10 @@ async fn create_api_key(
         db, org_id, &claims.account_id, &body.name, &role,
         custom_scopes.as_deref(), &caller_max_scopes, body.expires_at,
     ).await {
-        Ok(key) => (StatusCode::OK, Json(serde_json::to_value(key).unwrap())).into_response(),
+        Ok(key) => match serde_json::to_value(key) {
+            Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Serialization error: {e}")}))).into_response(),
+        },
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
 }
@@ -685,7 +688,10 @@ async fn rotate_api_key(
     let caller_max_scopes = crate::api_keys::Scope::for_org_role(&caller_org_role);
 
     match crate::api_keys::ApiKeyRepo::rotate(db, key_id, &claims.account_id, is_admin, &caller_max_scopes).await {
-        Ok(Some(new_key)) => (StatusCode::OK, Json(serde_json::to_value(new_key).unwrap())).into_response(),
+        Ok(Some(new_key)) => match serde_json::to_value(new_key) {
+            Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Serialization error: {e}")}))).into_response(),
+        },
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "Key not found or not owned by you"}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
@@ -2137,9 +2143,9 @@ pub fn build_router(state: AppState) -> Router {
                 if let Some(rest) = path.strip_prefix("/api/v1") {
                     let new_path = if rest.is_empty() { "/api".to_string() } else { format!("/api{}", rest) };
                     let new_uri = if let Some(q) = req.uri().query() {
-                        format!("{}?{}", new_path, q).parse::<axum::http::Uri>().unwrap()
+                        format!("{}?{}", new_path, q).parse::<axum::http::Uri>().unwrap_or_else(|_| new_path.parse().unwrap_or_else(|_| "/".parse().unwrap()))
                     } else {
-                        new_path.parse::<axum::http::Uri>().unwrap()
+                        new_path.parse::<axum::http::Uri>().unwrap_or_else(|_| "/".parse().unwrap())
                     };
                     let (mut parts, body) = req.into_parts();
                     parts.uri = new_uri;
