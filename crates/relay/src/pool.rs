@@ -79,6 +79,21 @@ impl AgentPool {
         self.set_offline(agent_id);
     }
 
+    /// Remove agents offline for more than `max_offline_secs`
+    pub fn prune_offline(&self, max_offline_secs: i64) -> usize {
+        let now = chrono::Utc::now().timestamp();
+        let mut removed = 0;
+        self.agents.retain(|_, info| {
+            if !info.online && (now - info.last_heartbeat) > max_offline_secs {
+                removed += 1;
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    }
+
     pub fn get(&self, agent_id: &str) -> Option<AgentInfo> {
         self.agents.get(agent_id).map(|r| r.value().clone())
     }

@@ -345,6 +345,7 @@ impl Relay {
             let rate_limiter = state.rate_limiter.clone();
             let audit_store = state.audit_store.clone();
             let db_bg = state.db.clone();
+            let agent_pool = state.pool.clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(600)); // every 10 min
                 interval.tick().await; // skip first
@@ -362,6 +363,11 @@ impl Relay {
                         if let Err(e) = crate::billing_api::check_expiry_bg(db.pool()).await {
                             log::warn!("Maintenance: subscription expiry check failed: {e}");
                         }
+                    }
+                    // Prune agents offline for >7 days
+                    let pruned_agents = agent_pool.prune_offline(7 * 24 * 3600);
+                    if pruned_agents > 0 {
+                        log::info!("Maintenance: pruned {} stale offline agents", pruned_agents);
                     }
                 }
             });

@@ -769,9 +769,22 @@ async fn list_clients(State(state): State<AppState>) -> Json<Vec<crate::registry
 
 async fn exec_agent(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
     Json(body): Json<ExecBody>,
 ) -> impl IntoResponse {
+    // Verify agent belongs to user's org
+    if let Some(ref org_id) = claims.org_id {
+        if let Some(ref db) = state.db {
+            let owned: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM agents WHERE agent_id = $1 AND org_id = $2)"
+            ).bind(&agent_id).bind(org_id)
+            .fetch_one(db.pool()).await.unwrap_or(false);
+            if !owned && !claims.is_admin {
+                return (StatusCode::FORBIDDEN, Json(SimpleResponse { ok: false, message: Some("Agent not in your org".into()) })).into_response();
+            }
+        }
+    }
     let msg = flowlink_core::Message::new(flowlink_core::MessageType::ExecRequest)
         .with_agent_id(&agent_id)
         .with_payload(flowlink_core::ExecRequestPayload {
@@ -1949,9 +1962,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/plans", axum::routing::get(crate::billing_api::public_plans))
         // Billing webhook (external, needs no auth)
         .route("/api/billing/webhook/tochka", axum::routing::post(crate::billing_api::tochka_webhook))
-        // Billing expiry check (cron-callable, internal)
+        // Billing expiry check (internal, admin-only via API key)
         .route("/api/billing/check-expiry", axum::routing::post(crate::billing_api::check_expiry))
-        // GDPR deletion cleanup (cron-callable, internal)
+        // GDPR deletion cleanup (internal, admin-only)
         .route("/api/billing/cleanup-expired-deletions", axum::routing::post(crate::account_deletion_api::cleanup_expired_deletions))
         // Shield ingest (external agent reporting)
         .route("/api/shield/ingest", post(shield_ingest_alert))

@@ -1119,7 +1119,16 @@ pub async fn tochka_webhook(
 /// For orgs with expired grace: auto-downgrades to free plan.
 pub async fn check_expiry(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
+    // Require admin API key or internal secret
+    let admin_key = std::env::var("FLOWLINK_ADMIN_KEY").unwrap_or_default();
+    if !admin_key.is_empty() {
+        let key = headers.get("x-admin-key").and_then(|v| v.to_str().ok()).unwrap_or("");
+        if key != admin_key {
+            return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Admin key required"}))).into_response();
+        }
+    }
     let db = match &state.db {
         Some(db) => db,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
