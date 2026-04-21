@@ -349,6 +349,9 @@ pub struct RelayConfig {
     /// Public URL for dashboard (used in OAuth redirects). Defaults to http://{http_addr}
     #[serde(default)]
     pub dashboard_url: Option<String>,
+    /// CORS allowed origins. Empty or ["*"] = allow all.
+    #[serde(default)]
+    pub cors_allowed_origins: Vec<String>,
 }
 
 /// SMTP configuration for transactional emails

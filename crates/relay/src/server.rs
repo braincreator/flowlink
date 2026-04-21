@@ -73,6 +73,8 @@ pub struct AppState {
     pub rusiem_config: Option<Arc<tokio::sync::RwLock<crate::rusiem::RusiemConfig>>>,
     /// Shared HTTP client with connection pooling for OAuth, webhooks, etc.
     pub http_client: reqwest::Client,
+    /// CORS allowed origins (empty = wildcard)
+    pub cors_origins: Vec<String>,
 }
 
 // ═══════════════════════════════════════════════
@@ -2022,6 +2024,7 @@ async fn admin_list_orders(State(state): State<AppState>) -> impl IntoResponse {
 
 pub fn build_router(state: AppState) -> Router {
     let rate_limiter = state.rate_limiter.clone();
+    let cors_origins = state.cors_origins.clone();
 
     // ── Public routes (no JWT auth required) ──
     let public_routes = Router::new()
@@ -2297,7 +2300,7 @@ pub fn build_router(state: AppState) -> Router {
             rate_limiter,
             vec!["/healthz".to_string(), "/ws".to_string(), "/api/playground/scan".to_string()],
         )))
-        .layer(cors_layer(vec!["*".to_string()]))
+        .layer(cors_layer(cors_origins))
         .layer(axum::middleware::from_fn(security_headers_middleware))
         // Request body size limit: 10MB max
         .layer(axum::extract::DefaultBodyLimit::max(10 * 1024 * 1024))
@@ -2365,6 +2368,7 @@ mod tests {
                 .timeout(std::time::Duration::from_secs(10))
                 .pool_max_idle_per_host(4)
                 .build().expect("Failed to create shared HTTP client"),
+            cors_origins: vec!["*".to_string()], // test: wildcard
         }
     }
 

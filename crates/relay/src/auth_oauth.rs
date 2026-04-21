@@ -516,6 +516,8 @@ pub async fn refresh_token(
 
     match engine.validate_refresh_token(&req.refresh_token) {
         Ok(claims) => {
+            // Blacklist old refresh token to prevent replay
+            engine.blacklist_token(&req.refresh_token);
             match engine.create_tokens(&claims.sub, &claims.account_id, claims.email.as_deref(), claims.name.as_deref(), claims.is_admin, claims.org_id.as_deref()) {
                 Ok(tokens) => (StatusCode::OK, Json(json!({
                     "access_token": tokens.access_token,

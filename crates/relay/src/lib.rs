@@ -285,6 +285,7 @@ impl Relay {
             saml_config: None,
             rusiem_config: None,
             http_client: reqwest::Client::new(),
+            cors_origins: self.config.cors_allowed_origins.clone(),
         };
 
         // Email queue worker (requires both email_service and db)
