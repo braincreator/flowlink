@@ -590,6 +590,7 @@ async fn account_update_settings(
 
 async fn list_approvals(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
 ) -> Json<Vec<crate::approval::ApprovalRequest>> {
     Json(state.approvals.list_pending())
 }
@@ -1380,6 +1381,7 @@ async fn shield_resolve(
 
 async fn llm_chat(
     State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<LlmRequest>,
 ) -> impl IntoResponse {
     let proxy = match &state.llm_proxy {
