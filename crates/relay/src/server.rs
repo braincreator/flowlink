@@ -364,7 +364,10 @@ async fn list_agents(
     }
 }
 
-async fn list_pattern_suggestions(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_pattern_suggestions(
+    State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
+) -> impl IntoResponse {
     let db = match &state.db {
         Some(db) => db.pool(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
@@ -403,8 +406,12 @@ struct ApplyPatternRequest {
 /// Apply a pattern suggestion as a policy rule
 async fn apply_pattern_suggestion(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<ApplyPatternRequest>,
 ) -> impl IntoResponse {
+    if !claims.is_admin {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "Admin required"}))).into_response();
+    }
     let db = match &state.db {
         Some(db) => db.pool(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "DB not configured"}))).into_response(),
@@ -522,6 +529,7 @@ async fn account_info(
 /// GET /api/account/settings
 async fn account_get_settings(
     State(_state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
 ) -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({
         "name": "",
@@ -588,9 +596,14 @@ async fn list_approvals(
 
 async fn approve_approval(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<String>,
 ) -> Json<SimpleResponse> {
+    if !claims.is_admin && claims.org_id.is_none() {
+        return Json(SimpleResponse { ok: false, message: Some("Forbidden".into()) });
+    }
     let ok = state.approvals.resolve(&id, ApprovalDecision::Approved);
+    if ok { log::info!("Approval {} approved by {}", id, claims.account_id); }
     Json(SimpleResponse {
         ok,
         message: if ok { Some("Approved".into()) } else { Some("Not found".into()) },
@@ -599,9 +612,14 @@ async fn approve_approval(
 
 async fn reject_approval(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<String>,
 ) -> Json<SimpleResponse> {
+    if !claims.is_admin && claims.org_id.is_none() {
+        return Json(SimpleResponse { ok: false, message: Some("Forbidden".into()) });
+    }
     let ok = state.approvals.resolve(&id, ApprovalDecision::Rejected);
+    if ok { log::info!("Approval {} rejected by {}", id, claims.account_id); }
     Json(SimpleResponse {
         ok,
         message: if ok { Some("Rejected".into()) } else { Some("Not found".into()) },
@@ -1255,14 +1273,16 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
 // Shield Alert Routes
 // ═══════════════════════════════════════════════
 
-async fn shield_list_alerts(State(state): State<AppState>) -> Json<Vec<ShieldAlertEntry>> {
+async fn shield_list_alerts(State(state): State<AppState>, _claims: axum::extract::Extension<crate::auth::Claims>) -> Json<Vec<ShieldAlertEntry>> {
     Json(state.shield_alerts.list_active())
 }
 
 async fn shield_approve(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(pid): Path<u32>,
 ) -> Json<SimpleResponse> {
+    if !claims.is_admin { return Json(SimpleResponse { ok: false, message: Some("Admin required".into()) }); }
     let ok = state.shield_alerts.resolve_by_pid(pid, true);
     Json(SimpleResponse {
         ok,
@@ -1272,8 +1292,10 @@ async fn shield_approve(
 
 async fn shield_reject(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(pid): Path<u32>,
 ) -> Json<SimpleResponse> {
+    if !claims.is_admin { return Json(SimpleResponse { ok: false, message: Some("Admin required".into()) }); }
     let ok = state.shield_alerts.resolve_by_pid(pid, false);
     Json(SimpleResponse {
         ok,
@@ -1341,8 +1363,10 @@ struct ResolveAlertBody {
 
 async fn shield_resolve(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<ResolveAlertBody>,
 ) -> Json<SimpleResponse> {
+    if !claims.is_admin { return Json(SimpleResponse { ok: false, message: Some("Admin required".into()) }); }
     let ok = state.shield_alerts.resolve_by_pid(body.pid, body.approved);
     Json(SimpleResponse {
         ok,
@@ -1382,7 +1406,7 @@ async fn llm_chat(
     }
 }
 
-async fn llm_backends(State(state): State<AppState>) -> Json<serde_json::Value> {
+async fn llm_backends(State(state): State<AppState>, _claims: axum::extract::Extension<crate::auth::Claims>) -> Json<serde_json::Value> {
     match &state.llm_proxy {
         Some(proxy) => {
             let models = proxy.list_models().await;
@@ -1392,7 +1416,7 @@ async fn llm_backends(State(state): State<AppState>) -> Json<serde_json::Value> 
     }
 }
 
-async fn llm_health(State(state): State<AppState>) -> Json<serde_json::Value> {
+async fn llm_health(State(state): State<AppState>, _claims: axum::extract::Extension<crate::auth::Claims>) -> Json<serde_json::Value> {
     match &state.llm_proxy {
         Some(proxy) => {
             let health = proxy.check_health().await;
@@ -1437,7 +1461,10 @@ async fn audit_query(State(state): State<AppState>, Query(params): Query<AuditQu
     Json(state.audit_store.query(&filter))
 }
 
-async fn audit_stats_handler(State(state): State<AppState>) -> Json<crate::audit::AuditStats> {
+async fn audit_stats_handler(
+    State(state): State<AppState>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
+) -> Json<crate::audit::AuditStats> {
     Json(state.audit_store.stats())
 }
 
@@ -1491,7 +1518,8 @@ async fn canary_alert_handler(State(state): State<AppState>, Json(alert): Json<s
 // ═══════════════════════════════════════════════
 
 /// Reload relay config from disk and broadcast to all agents.
-async fn config_reload(State(state): State<AppState>) -> impl IntoResponse {
+async fn config_reload(State(state): State<AppState>, axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>) -> impl IntoResponse {
+    if !claims.is_admin { return (StatusCode::FORBIDDEN, Json(SimpleResponse { ok: false, message: Some("Admin required".into()) })).into_response(); }
     let reloader = match &state.config_reloader {
         Some(r) => r,
         None => return (
@@ -1533,7 +1561,7 @@ async fn config_push_agent(
 }
 
 /// Get current relay config (read-only).
-async fn config_get(State(state): State<AppState>) -> impl IntoResponse {
+async fn config_get(State(state): State<AppState>, _claims: axum::extract::Extension<crate::auth::Claims>) -> impl IntoResponse {
     let reloader = match &state.config_reloader {
         Some(r) => r,
         None => return (
