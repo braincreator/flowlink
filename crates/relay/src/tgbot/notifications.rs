@@ -9,7 +9,7 @@ use teloxide::types::ParseMode;
 pub async fn notify(bot: &Bot, state: &Arc<AppState>, message: &str) {
     if let Some(db) = &state.db {
         match sqlx::query_scalar::<_, i64>(
-            "SELECT tg_chat_id FROM accounts WHERE tg_chat_id IS NOT NULL"
+            "SELECT tg_id FROM accounts WHERE tg_id IS NOT NULL"
         )
         .fetch_all(db.pool())
         .await
@@ -80,7 +80,7 @@ pub async fn approval_request(bot: &Bot, state: &Arc<AppState>, approval_id: &st
 
     if let Some(db) = &state.db {
         match sqlx::query_scalar::<_, i64>(
-            "SELECT tg_chat_id FROM accounts WHERE tg_chat_id IS NOT NULL"
+            "SELECT tg_id FROM accounts WHERE tg_id IS NOT NULL"
         )
         .fetch_all(db.pool())
         .await
