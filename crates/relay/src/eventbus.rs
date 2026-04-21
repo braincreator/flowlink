@@ -43,6 +43,11 @@ impl EventBus {
     pub fn channel_count(&self) -> usize {
         self.channels.len()
     }
+
+    /// Remove channels with no active receivers
+    pub fn prune_empty(&self) {
+        self.channels.retain(|_, tx| tx.receiver_count() > 0);
+    }
 }
 
 #[cfg(test)]

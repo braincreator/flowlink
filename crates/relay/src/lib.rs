@@ -346,6 +346,7 @@ impl Relay {
             let audit_store = state.audit_store.clone();
             let db_bg = state.db.clone();
             let agent_pool = state.pool.clone();
+            let eventbus = state.eventbus.clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(600)); // every 10 min
                 interval.tick().await; // skip first
@@ -375,6 +376,8 @@ impl Relay {
                         let _ = sqlx::query("DELETE FROM email_verification_codes WHERE expires_at < NOW()").execute(db.pool()).await;
                         let _ = sqlx::query("DELETE FROM org_invitations WHERE expires_at < NOW() AND status = 'pending'").execute(db.pool()).await;
                     }
+                    // Prune empty event bus channels
+                    eventbus.prune_empty();
                 }
             });
         }

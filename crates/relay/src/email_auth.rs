@@ -117,7 +117,7 @@ pub async fn send_code(
     let send_result = if let Some(ref email_svc) = state.email_service {
         email_svc.send_verification_code(&email, &code).await
     } else {
-        log::info!("📧 Dev mode (no SMTP): code for {email}: {code}");
+        log::info!("📧 Dev mode (no SMTP): code generated for {email}");
         Ok(())
     };
 
@@ -220,7 +220,7 @@ pub async fn change_email_start(
     let send_result = if let Some(ref email_svc) = state.email_service {
         email_svc.send_verification_code(&new_email, &code).await
     } else {
-        log::info!("📧 Dev mode (no SMTP): email change code for {new_email}: {code}");
+        log::info!("📧 Dev mode (no SMTP): email change code generated for {new_email}");
         Ok(())
     };
 
