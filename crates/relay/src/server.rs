@@ -25,7 +25,7 @@ use crate::handler::RelayHandler;
 use crate::llm::{LlmProxy, LlmRequest};
 use crate::metrics::Metrics;
 use axum::middleware;
-use crate::middleware::{rate_limit_layer, request_id_middleware, logging_middleware, cors_layer};
+use crate::middleware::{rate_limit_layer, request_id_middleware, logging_middleware, cors_layer, security_headers_middleware};
 use crate::ratelimit::RateLimiter;
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
@@ -1479,24 +1479,39 @@ async fn admin_list_accounts(State(state): State<AppState>, Query(params): Query
         Some(db) => db,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
     };
-    let mut query = String::from(
-        "SELECT account_id, plan_id, active, email, tg_id, totp_enabled, last_login, created_at FROM accounts WHERE 1=1"
-    );
-    if let Some(plan) = params.get("plan") { query.push_str(&format!(" AND plan_id = '{}'", plan)); }
-    if let Some(active) = params.get("active") { query.push_str(&format!(" AND active = {}", active)); }
-    if let Some(search) = params.get("search") { query.push_str(&format!(" AND (email ILIKE '%{}%' OR account_id ILIKE '%{}%')", search, search)); }
-    if let Some(from) = params.get("from") { query.push_str(&format!(" AND created_at >= '{}'", from)); }
-    if let Some(to) = params.get("to") { query.push_str(&format!(" AND created_at <= '{}'", to)); }
-    query.push_str(" ORDER BY created_at DESC LIMIT 100");
-    match sqlx::query_as::<_, flowlink_db::accounts::AccountRow>(&query)
-        .fetch_all(db.pool())
-        .await
+    // Parameterized query — SQL injection fix
+    let mut query_str = String::from("SELECT account_id, plan_id, active, email, tg_id, totp_enabled, last_login, created_at FROM accounts WHERE 1=1");
+    let mut pidx = 1u32;
+    let has_plan = params.contains_key("plan");
+    if has_plan { query_str.push_str(&format!(" AND plan_id = ${}", pidx)); pidx += 1; }
+    let has_active = params.contains_key("active");
+    if has_active { query_str.push_str(&format!(" AND active = ${}", pidx)); pidx += 1; }
+    let has_search = params.contains_key("search");
+    if has_search { query_str.push_str(&format!(" AND (email ILIKE ${} OR account_id ILIKE ${})", pidx, pidx + 1)); pidx += 2; }
+    let has_from = params.contains_key("from");
+    if has_from { query_str.push_str(&format!(" AND created_at >= ${}", pidx)); pidx += 1; }
+    let has_to = params.contains_key("to");
+    if has_to { query_str.push_str(&format!(" AND created_at <= ${}", pidx)); pidx += 1; }
+    query_str.push_str(" ORDER BY created_at DESC LIMIT 100");
+    let mut q = sqlx::query(&query_str);
+    if let Some(plan) = params.get("plan") { q = q.bind(plan); }
+    if let Some(active) = params.get("active") { q = q.bind(active == "true" || active == "1"); }
+    if let Some(search) = params.get("search") { let pattern1 = format!("%{}%", search); let pattern2 = pattern1.clone(); q = q.bind(pattern1).bind(pattern2); }
+    if let Some(from) = params.get("from") { q = q.bind(from); }
+    if let Some(to) = params.get("to") { q = q.bind(to); }
+    match q.fetch_all(db.pool()).await
     {
         Ok(accounts) => {
-            let data: Vec<_> = accounts.into_iter().map(|a| serde_json::json!({
-                "account_id": a.account_id, "plan_id": a.plan_id, "active": a.active,
-                "email": a.email, "tg_id": a.tg_id, "totp_enabled": a.totp_enabled,
-                "last_login": a.last_login.map(|d| d.to_rfc3339()), "created_at": a.created_at.to_rfc3339(),
+            use sqlx::Row;
+            let data: Vec<_> = accounts.iter().map(|r| serde_json::json!({
+                "account_id": r.get::<String, _>("account_id"),
+                "plan_id": r.get::<String, _>("plan_id"),
+                "active": r.get::<bool, _>("active"),
+                "email": r.get::<Option<String>, _>("email"),
+                "tg_id": r.get::<Option<String>, _>("tg_id"),
+                "totp_enabled": r.get::<Option<bool>, _>("totp_enabled").unwrap_or(false),
+                "last_login": r.get::<Option<String>, _>("last_login"),
+                "created_at": r.get::<String, _>("created_at"),
             })).collect();
             (StatusCode::OK, Json(serde_json::json!({ "accounts": data }))).into_response()
         }
@@ -1561,21 +1576,32 @@ async fn admin_dashboard_stats(State(state): State<AppState>, Query(params): Que
     let date_from = params.get("from").cloned();
     let date_to = params.get("to").cloned();
 
-    // Date filter clause
-    let date_clause = match (&date_from, &date_to) {
-        (Some(f), Some(t)) => format!("WHERE created_at >= '{}' AND created_at <= '{}'", f, t),
-        (Some(f), None) => format!("WHERE created_at >= '{}'", f),
-        (None, Some(t)) => format!("WHERE created_at <= '{}'", t),
-        _ => String::new(),
+    // Date filter — parameterized (SQL injection fix)
+    let (date_clause, date_params): (String, Vec<&String>) = match (&date_from, &date_to) {
+        (Some(f), Some(t)) => ("WHERE created_at >= $1 AND created_at <= $2".into(), vec![f, t]),
+        (Some(f), None) => ("WHERE created_at >= $1".into(), vec![f]),
+        (None, Some(t)) => ("WHERE created_at <= $1".into(), vec![t]),
+        _ => (String::new(), vec![]),
     };
 
     // Total users
-    let total_users: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM accounts {}", date_clause))
-        .fetch_one(pool).await.unwrap_or(0);
+    let total_users: i64 = if date_params.is_empty() {
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts").fetch_one(pool).await.unwrap_or(0)
+    } else if date_params.len() == 1 {
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM accounts {}", date_clause)).bind(date_params[0]).fetch_one(pool).await.unwrap_or(0)
+    } else {
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM accounts {}", date_clause)).bind(date_params[0]).bind(date_params[1]).fetch_one(pool).await.unwrap_or(0)
+    };
 
     // Active users
-    let active_users: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM accounts WHERE active = true {}", if date_clause.is_empty() { String::new() } else { "AND ".to_string() + &date_clause.replace("WHERE ", "") }))
-        .fetch_one(pool).await.unwrap_or(0);
+    let active_clause = if date_params.is_empty() { String::new() } else { date_clause.replace("WHERE", "AND") };
+    let active_users: i64 = if date_params.is_empty() {
+        sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE active = true").fetch_one(pool).await.unwrap_or(0)
+    } else if date_params.len() == 1 {
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM accounts WHERE active = true {}", active_clause)).bind(date_params[0]).fetch_one(pool).await.unwrap_or(0)
+    } else {
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM accounts WHERE active = true {}", active_clause)).bind(date_params[0]).bind(date_params[1]).fetch_one(pool).await.unwrap_or(0)
+    };
 
     // Users with 2FA
     let users_2fa: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accounts WHERE totp_enabled = true")
@@ -2128,6 +2154,7 @@ pub fn build_router(state: AppState) -> Router {
             vec!["/healthz".to_string(), "/ws".to_string(), "/api/playground/scan".to_string()],
         )))
         .layer(cors_layer(vec!["*".to_string()]))
+        .layer(axum::middleware::from_fn(security_headers_middleware))
         .fallback(handle_fallback)
 }
 

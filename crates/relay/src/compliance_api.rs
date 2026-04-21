@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::middleware::AccountIdExtractor;
+use crate::auth::Claims;
 use crate::server::AppState;
 
 fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
@@ -56,7 +57,7 @@ fn row_to_report(r: &sqlx::postgres::PgRow) -> ComplianceReport {
 
 pub async fn list_reports(
     State(state): State<AppState>,
-    _account: AccountIdExtractor,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Query(q): Query<ReportQuery>,
 ) -> Result<(StatusCode, Json<Vec<ComplianceReport>>), (StatusCode, String)> {
     let pool = gp(&state)?;
@@ -87,7 +88,7 @@ pub async fn get_report(
 
 pub async fn generate_report(
     State(state): State<AppState>,
-    AccountIdExtractor(account_id): AccountIdExtractor,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<GenerateReportRequest>,
 ) -> Result<(StatusCode, Json<ComplianceReport>), (StatusCode, String)> {
     let pool = gp(&state)?;
@@ -101,7 +102,7 @@ pub async fn generate_report(
 
     let row = sqlx::query(
         "INSERT INTO compliance_reports (org_id, report_type, period_start, period_end, status, generated_by, data) VALUES ($1, $2, $3::timestamptz, $4::timestamptz, 'ready', $5, $6) RETURNING id, org_id, report_type, period_start::text, period_end::text, status, generated_by, data, pdf_path, created_at::text"
-    ).bind(body.org_id).bind(&body.report_type).bind(&body.period_start).bind(&body.period_end).bind(&account_id).bind(&data)
+    ).bind(body.org_id).bind(&body.report_type).bind(&body.period_start).bind(&body.period_end).bind(&claims.account_id).bind(&data)
     .fetch_one(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((StatusCode::CREATED, Json(row_to_report(&row))))

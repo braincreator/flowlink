@@ -63,32 +63,36 @@ fn hex_str_to_bytes(s: &str) -> Result<Vec<u8>, String> {
         .collect()
 }
 
-fn get_encryption_key() -> [u8; 32] {
-    // Prefer env var for production (hex-encoded 32 bytes)
+fn get_encryption_key() -> Result<[u8; 32], String> {
+    // Production: must set FLOWLINK_SECRETS_KEY env var (hex-encoded 32 bytes)
     if let Ok(key_hex) = std::env::var("FLOWLINK_SECRETS_KEY") {
         if key_hex.len() == 64 {
             if let Ok(bytes) = hex_str_to_bytes(&key_hex) {
                 if bytes.len() == 32 {
                     let mut key = [0u8; 32];
                     key.copy_from_slice(&bytes);
-                    return key;
+                    return Ok(key);
                 }
             }
         }
+        return Err("FLOWLINK_SECRETS_KEY must be 64 hex chars (32 bytes)".into());
     }
-    // Fallback: SHA-256 of a config string (not ideal, but better than XOR)
+    // Dev-only fallback with warning
+    log::warn!("⚠️  FLOWLINK_SECRETS_KEY not set — using dev fallback. DO NOT use in production!");
     use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
-    hasher.update(b"flowlink-secrets-vault-key-2026");
-    hasher.update(b"-do-not-use-in-production");
+    // Include machine-specific salt to make fallback less predictable
+    hasher.update(b"flowlink-secrets-dev-key");
+    hasher.update(std::env::var("HOSTNAME").unwrap_or_default().as_bytes());
+    hasher.update(std::env::var("USER").unwrap_or_default().as_bytes());
     let result = hasher.finalize();
     let mut key = [0u8; 32];
     key.copy_from_slice(&result);
-    key
+    Ok(key)
 }
 
 fn encrypt(plaintext: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
-    let key = get_encryption_key();
+    let key = get_encryption_key()?;
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init: {}", e))?;
     let nonce_bytes: [u8; 12] = rand::random();
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -97,7 +101,7 @@ fn encrypt(plaintext: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
 }
 
 fn decrypt(encrypted: &[u8], nonce: &[u8]) -> Result<String, String> {
-    let key = get_encryption_key();
+    let key = get_encryption_key()?;
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init: {}", e))?;
     let nonce = Nonce::from_slice(nonce);
     let decrypted = cipher.decrypt(nonce, encrypted).map_err(|e| format!("Decrypt: {}", e))?;

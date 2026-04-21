@@ -169,11 +169,15 @@ impl AgentRegistry {
 // Endpoints
 // ═══════════════════════════════════════════════
 
-/// POST /api/v1/signup — register a new agent
+/// POST /api/v1/signup — register a new agent (rate limited)
 pub async fn signup(
     State(state): State<AppState>,
     Json(req): Json<SignupRequest>,
 ) -> impl IntoResponse {
+    // Rate limit: 5 signups per minute per instance
+    if !state.rate_limiter.allow("signup") {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": "Rate limit exceeded"}))).into_response();
+    }
     // Validate agent_id format (UUID-like)
     if req.agent_id.is_empty() || req.agent_id.len() > 128 {
         return (

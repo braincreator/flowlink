@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::server::AppState;
+use crate::auth::Claims;
 
 fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
     state.db.as_ref().map(|db| db.pool()).ok_or((StatusCode::SERVICE_UNAVAILABLE, "Database not configured".to_string()))
@@ -45,8 +46,12 @@ pub struct SessionQuery {
 
 pub async fn create_session(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<Session>), (StatusCode, String)> {
+    if !claims.is_admin && claims.org_id.is_none() {
+        return Err((StatusCode::FORBIDDEN, "Organization required".into()));
+    }
     let pool = gp(&state)?;
     let shell = body.shell.unwrap_or_else(|| "/bin/sh".to_string());
     let cwd = body.cwd.unwrap_or_else(|| "/".to_string());
@@ -69,6 +74,7 @@ pub async fn create_session(
 
 pub async fn list_sessions(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Query(q): Query<SessionQuery>,
 ) -> Result<(StatusCode, Json<Vec<Session>>), (StatusCode, String)> {
     let pool = gp(&state)?;
@@ -92,6 +98,7 @@ pub async fn list_sessions(
 
 pub async fn get_session(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<Session>), (StatusCode, String)> {
     let pool = gp(&state)?;
@@ -142,8 +149,10 @@ pub async fn update_session(
 
 pub async fn close_session(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    if !claims.is_admin { return Err((StatusCode::FORBIDDEN, "Admin required".into())); }
     let pool = gp(&state)?;
     let result = sqlx::query(
         "UPDATE interactive_sessions SET status = 'closed', closed_at = NOW() WHERE id = $1 AND status = 'active'"

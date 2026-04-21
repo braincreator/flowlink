@@ -24,11 +24,15 @@ pub enum PlaygroundRequest {
 fn default_write() -> String { "write".into() }
 fn default_download() -> String { "download".into() }
 
-/// POST /api/playground/scan — public playground endpoint (no auth)
+/// POST /api/playground/scan — public playground endpoint (rate limited)
 pub async fn playground_scan(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<PlaygroundRequest>,
 ) -> impl IntoResponse {
+    // Rate limit playground: 10 requests per minute per instance
+    if !state.rate_limiter.allow("playground") {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "Rate limit exceeded. Max 10 requests per minute."}))).into_response();
+    }
     let result = match req {
         PlaygroundRequest::Command { command } => scan_command(&command),
         PlaygroundRequest::Script { script, language } => scan_script(&script, &language),

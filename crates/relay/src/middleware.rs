@@ -376,19 +376,45 @@ pub fn cors_layer(allowed_origins: Vec<String>) -> tower_http::cors::CorsLayer {
     use tower_http::cors::Any;
 
     if allowed_origins.is_empty() || allowed_origins.iter().any(|o| o == "*") {
+        // Wildcard: allow all origins but restrict methods
         return tower_http::cors::CorsLayer::new()
             .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
+            .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE, axum::http::Method::PATCH, axum::http::Method::OPTIONS])
+            .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION, axum::http::header::HeaderName::from_static("x-api-key")])
             .allow_credentials(false);
     }
 
-    let _origins: Vec<axum::http::HeaderValue> = allowed_origins
+    // Specific origins
+    let origins: Vec<axum::http::HeaderValue> = allowed_origins
         .iter()
         .filter_map(|o| o.parse().ok())
         .collect();
 
-    tower_http::cors::CorsLayer::permissive()
+    if origins.is_empty() {
+        // Fallback: no CORS if no valid origins
+        return tower_http::cors::CorsLayer::new()
+            .allow_origin("http://localhost:3000".parse::<axum::http::HeaderValue>().unwrap())
+            .allow_methods(Any)
+            .allow_headers(Any);
+    }
+
+    tower_http::cors::CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods(Any)
+        .allow_headers(Any)
+        .allow_credentials(false)
+}
+
+/// Security headers middleware
+pub async fn security_headers_middleware(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
+    headers.insert("X-Frame-Options", "DENY".parse().unwrap());
+    headers.insert("X-XSS-Protection", "1; mode=block".parse().unwrap());
+    headers.insert("Referrer-Policy", "strict-origin-when-cross-origin".parse().unwrap());
+    headers.insert("Permissions-Policy", "camera=(), microphone=(), geolocation=()".parse().unwrap());
+    response
 }
 
 // ── Logging Middleware ──
