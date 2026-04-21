@@ -343,7 +343,7 @@ pub async fn change_plan(
             }
             (StatusCode::OK, Json(resp)).into_response()
         }
-        Err(e) => {
+        Err(_e) => {
             (StatusCode::BAD_REQUEST, Json(json!({
                 "error": "Internal error",
             }))).into_response()
@@ -546,7 +546,7 @@ pub async fn get_subscription(
 
     match tochka.get_subscription_by_customer(&claims.0.account_id).await {
         Ok(sub) => (StatusCode::OK, Json(json!({"subscription_id": sub.subscription_id, "customer_id": sub.customer_id, "plan_id": sub.plan_id, "status": sub.status, "amount": sub.amount, "period": sub.period, "current_period_start": sub.current_period_start, "current_period_end": sub.current_period_end}))).into_response(),
-        Err(e) => (StatusCode::NOT_FOUND, Json(json!({
+        Err(_e) => (StatusCode::NOT_FOUND, Json(json!({
             "error": "No active subscription",
             "details": "Check logs for details"
         }))).into_response(),
@@ -568,7 +568,7 @@ pub async fn pause_subscription(
     // First find subscription by customer
     let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
         Ok(s) => s,
-        Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
+        Err(_e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No active subscription",
             "details": "Check logs for details"
         }))).into_response(),
@@ -596,7 +596,7 @@ pub async fn resume_subscription(
 
     let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
         Ok(s) => s,
-        Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
+        Err(_e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No subscription found",
             "details": "Check logs for details"
         }))).into_response(),
@@ -624,7 +624,7 @@ pub async fn cancel_tochka_subscription(
 
     let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
         Ok(s) => s,
-        Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
+        Err(_e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No subscription found",
             "details": "Check logs for details"
         }))).into_response(),
@@ -686,7 +686,7 @@ pub async fn change_subscription_plan(
         // UPGRADE: immediate — cancel old, create new
         let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
             Ok(s) => s,
-            Err(e) => return (StatusCode::NOT_FOUND, Json(json!({"error": "No active subscription", "details": "Check logs for details"}))).into_response(),
+            Err(_e) => return (StatusCode::NOT_FOUND, Json(json!({"error": "No active subscription", "details": "Check logs for details"}))).into_response(),
         };
 
         let period = flowlink_billing::tochka::BillingPeriod::from_str_opt(&account_billing.plan_id)
@@ -778,13 +778,13 @@ pub async fn list_subscriptions(
                     let subs: Vec<serde_json::Value> = rows.into_iter().map(|r| r.0).collect();
                     return (StatusCode::OK, Json(json!(subs))).into_response();
                 }
-                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+                Err(_e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
             }
         }
     }
     match flowlink_db::subscriptions::SubscriptionRepo::list_for_account(db.pool(), &claims.0.account_id).await {
         Ok(subs) => (StatusCode::OK, Json(json!(subs))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -810,7 +810,7 @@ pub async fn cancel_subscription(
             let _ = audit::log_event(db.pool(), None, &claims.0.account_id, "subscription.cancelled", Some("subscription"), Some(&id), json!({}), None).await;
             (StatusCode::OK, Json(json!({"cancelled": true}))).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -833,7 +833,7 @@ pub async fn create_order(
         db.pool(), &id, &claims.0.account_id, body.amount_kopecks, body.description.as_deref(), &body.payment_method,
     ).await {
         Ok(order) => (StatusCode::CREATED, Json(json!(order))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -856,13 +856,13 @@ pub async fn list_orders(
                     let orders: Vec<serde_json::Value> = rows.into_iter().map(|r| r.0).collect();
                     return (StatusCode::OK, Json(json!(orders))).into_response();
                 }
-                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+                Err(_e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
             }
         }
     }
     match flowlink_db::orders::OrderRepo::list_for_account(db.pool(), &claims.0.account_id).await {
         Ok(orders) => (StatusCode::OK, Json(json!(orders))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 

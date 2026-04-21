@@ -139,7 +139,7 @@ impl ApprovalManager {
         let mut pending = self.pending.lock().await;
         if let Some(p) = pending.remove(request_id) {
             let is_approved = matches!(decision, ApprovalDecision::Approved);
-            let send_result = p.responder.send(decision);
+            let _send_result = p.responder.send(decision);
             if is_approved {
                 p.exec_payload
             } else {

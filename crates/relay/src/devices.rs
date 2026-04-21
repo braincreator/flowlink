@@ -449,7 +449,7 @@ pub struct ConfirmRequest {
 
 #[derive(Deserialize)]
 pub struct DevicesQuery {
-    user_id: Option<String>,
+    pub user_id: Option<String>,
 }
 
 // ═══════════════════════════════════════════════

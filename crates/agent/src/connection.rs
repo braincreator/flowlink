@@ -210,7 +210,6 @@ impl Connection {
             }
         }
 
-        Ok(())
     }
 
     async fn handle_message(&self, text: &str) -> Option<Message> {
@@ -349,8 +348,16 @@ impl Connection {
                 format!("policy replaced from {}: {} allows, {} denies", source, allows.len(), denies.len())
             }
             "list" => {
-                let (allows, denies) = policy.runtime_rules();
-                format!("Allow: {:?}\nDeny: {:?}", allows, denies)
+                let (allow, deny) = policy.runtime_rules();
+                return Some(
+                    Message::new(MessageType::PolicyAck)
+                        .with_agent_id(&self.agent_id)
+                        .with_payload(serde_json::json!({
+                            "status": "ok",
+                            "allow_rules": allow,
+                            "deny_rules": deny,
+                        })),
+                );
             }
             "add_allow" => {
                 let p = pattern.unwrap();
@@ -376,18 +383,6 @@ impl Connection {
                             })),
                     );
                 }
-            }
-            "list" => {
-                let (allow, deny) = policy.runtime_rules();
-                return Some(
-                    Message::new(MessageType::PolicyAck)
-                        .with_agent_id(&self.agent_id)
-                        .with_payload(serde_json::json!({
-                            "status": "ok",
-                            "allow_rules": allow,
-                            "deny_rules": deny,
-                        })),
-                );
             }
             other => {
                 return Some(Message::new(MessageType::PolicyAck)

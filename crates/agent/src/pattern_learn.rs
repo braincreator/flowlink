@@ -36,6 +36,8 @@ pub struct PatternLearner {
     auto_approve_threshold: u32,
     /// Minimum blocks before suggesting permanent deny
     deny_threshold: u32,
+    /// Max patterns to track (prevent unbounded growth)
+    #[allow(dead_code)]
     max_patterns: usize,
 }
 

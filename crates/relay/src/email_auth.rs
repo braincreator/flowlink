@@ -366,7 +366,7 @@ pub async fn verify_code(
 
     // Verify and consume code
     // Rate limit: max 10 attempts per email
-    let attempt_key = format!("verify_attempts:{email}");
+    let _attempt_key = format!("verify_attempts:{email}");
     let attempts: i32 = sqlx::query_scalar(
         "SELECT COALESCE(attempt_count, 0) FROM email_verification WHERE email = $1 AND purpose = 'auth' ORDER BY created_at DESC LIMIT 1"
     ).bind(&email)

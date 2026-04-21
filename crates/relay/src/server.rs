@@ -394,7 +394,7 @@ async fn list_pattern_suggestions(
             }).collect();
             (StatusCode::OK, Json(json!({"suggestions": suggestions}))).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -461,7 +461,7 @@ async fn apply_pattern_suggestion(
                 (StatusCode::NOT_FOUND, Json(json!({"error": "Default policy not found"}))).into_response()
             }
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -668,7 +668,7 @@ async fn create_api_key(
     .await {
         Ok(Some(r)) => r,
         Ok(None) => return (StatusCode::FORBIDDEN, Json(json!({"error": "Not a member of this organization"}))).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     };
 
     // Key inherits org role: owner/admin → Admin, member → Operator, viewer → Viewer
@@ -690,7 +690,7 @@ async fn create_api_key(
             Ok(v) => (StatusCode::OK, Json(v)).into_response(),
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Serialization error: {e}")}))).into_response(),
         },
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -726,7 +726,7 @@ async fn list_api_keys(
 
     match crate::api_keys::ApiKeyRepo::list_by_org(db, org_id, &claims.account_id, &caller_org_role).await {
         Ok(keys) => (StatusCode::OK, Json(json!({"keys": keys}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -763,7 +763,7 @@ async fn rotate_api_key(
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Serialization error: {e}")}))).into_response(),
         },
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "Key not found or not owned by you"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -780,7 +780,7 @@ async fn revoke_api_key(
     match crate::api_keys::ApiKeyRepo::revoke(db, key_id, &claims.account_id, claims.is_admin).await {
         Ok(true) => (StatusCode::OK, Json(json!({"ok": true, "message": "API key revoked"}))).into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"ok": false, "error": "Key not found or not owned by you"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -801,7 +801,7 @@ async fn delete_api_key(
     match crate::api_keys::ApiKeyRepo::delete(db, key_id).await {
         Ok(true) => (StatusCode::OK, Json(json!({"ok": true, "message": "API key deleted"}))).into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "Key not found"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+        Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 

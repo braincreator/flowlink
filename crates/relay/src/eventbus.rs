@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 
 pub struct EventBus {
     channels: Arc<DashMap<String, broadcast::Sender<String>>>,
-    max_subscribers: usize, // future: reject subscribes above this
+    pub max_subscribers: usize, // future: reject subscribes above this
 }
 
 impl Default for EventBus {

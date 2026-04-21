@@ -175,7 +175,7 @@ async fn handle_approval_response(
     msg: &Message,
     approval: &ApprovalManager,
     executor: &Executor,
-    policy: &PolicyEngine,
+    _policy: &PolicyEngine,
 ) -> Option<Message> {
     let payload = match &msg.payload {
         Some(p) => p,
@@ -302,7 +302,7 @@ async fn handle_exec(
         // Spawn approval wait in background — sends NeedsApproval upstream
         // On timeout, sends ExecDone with error back to relay
         let approval_clone = approval.clone_safe();
-        let agent_id = msg.agent_id.as_deref().unwrap_or("").to_string();
+        let _agent_id = msg.agent_id.as_deref().unwrap_or("").to_string();
         let exec_payload_clone = payload.clone();
         tokio::spawn(async move {
             let decision = approval_clone.request_approval(request_id.clone(), command, risk, exec_payload).await;

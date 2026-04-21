@@ -448,7 +448,7 @@ async fn mcp_exec(state: &AppState, id: Option<Value>, args: &Value, identity: O
         Ok(()) => mcp_ok(id, json!({
             "content": [{ "type": "text", "text": format!("Command sent to agent {}", resolved) }]
         })).into_response(),
-        Err(e) => mcp_err(id, -32603, "agent error").into_response(),
+        Err(_e) => mcp_err(id, -32603, "agent error").into_response(),
     }
 }
 
@@ -478,7 +478,7 @@ async fn mcp_read(state: &AppState, id: Option<Value>, args: &Value) -> axum::re
         Ok(()) => mcp_ok(id, json!({
             "content": [{ "type": "text", "text": format!("Read request sent: {path}") }]
         })).into_response(),
-        Err(e) => mcp_err(id, -32603, "agent error").into_response(),
+        Err(_e) => mcp_err(id, -32603, "agent error").into_response(),
     }
 }
 
@@ -517,7 +517,7 @@ async fn mcp_write(state: &AppState, id: Option<Value>, args: &Value) -> axum::r
         Ok(()) => mcp_ok(id, json!({
             "content": [{ "type": "text", "text": format!("✅ File written: {path}") }]
         })).into_response(),
-        Err(e) => mcp_err(id, -32603, "agent error").into_response(),
+        Err(_e) => mcp_err(id, -32603, "agent error").into_response(),
     }
 }
 
@@ -543,7 +543,7 @@ async fn mcp_list(state: &AppState, id: Option<Value>, args: &Value) -> axum::re
         Ok(()) => mcp_ok(id, json!({
             "content": [{ "type": "text", "text": format!("List request sent: {path}") }]
         })).into_response(),
-        Err(e) => mcp_err(id, -32603, "agent error").into_response(),
+        Err(_e) => mcp_err(id, -32603, "agent error").into_response(),
     }
 }
 
@@ -566,7 +566,7 @@ async fn mcp_sysinfo(state: &AppState, id: Option<Value>, args: &Value) -> axum:
         Ok(()) => mcp_ok(id, json!({
             "content": [{ "type": "text", "text": format!("Sysinfo request sent to {resolved}") }]
         })).into_response(),
-        Err(e) => mcp_err(id, -32603, "agent error").into_response(),
+        Err(_e) => mcp_err(id, -32603, "agent error").into_response(),
     }
 }
 
@@ -726,7 +726,7 @@ async fn mcp_config_update(state: &AppState, id: Option<Value>, args: &Value) ->
                 })).into_response()
             }
         }
-        Err(e) => mcp_err(id, -32603, "agent error").into_response(),
+        Err(_e) => mcp_err(id, -32603, "agent error").into_response(),
     }
 }
 
@@ -974,7 +974,7 @@ async fn mcp_policy(state: &AppState, id: Option<Value>, args: &Value) -> axum::
                 "content": [{ "type": "text", "text": format!("🔒 {}", action_text) }]
             })).into_response()
         }
-        Err(e) => mcp_err(id, -32603, "agent error").into_response(),
+        Err(_e) => mcp_err(id, -32603, "agent error").into_response(),
     }
 }
 
