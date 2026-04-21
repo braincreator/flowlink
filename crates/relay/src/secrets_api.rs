@@ -7,6 +7,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
+
 use crate::middleware::AccountIdExtractor;
 use crate::server::AppState;
 
@@ -51,44 +53,52 @@ pub struct SecretQuery {
     pub prefix: Option<String>,
 }
 
-/// Simple AES-256-GCM encryption using a server-side key derived from relay config
+/// Get encryption key from ENV or fallback to a config-derived key
+fn hex_str_to_bytes(s: &str) -> Result<Vec<u8>, String> {
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i+2], 16).map_err(|e| e.to_string()))
+        .collect()
+}
+
 fn get_encryption_key() -> [u8; 32] {
-    use std::hash::{Hash, Hasher};
-    // In production, this should come from config/vault. Using a deterministic key for now.
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    "flowlink-secrets-vault-key-2026".hash(&mut hasher);
-    let h1 = hasher.finish();
-    let h2 = {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        "flowlink-secrets-vault-key-2026-salt".hash(&mut h);
-        h.finish()
-    };
-    let mut key = [0u8; 32];
-    key[..8].copy_from_slice(&h1.to_le_bytes());
-    key[8..16].copy_from_slice(&h2.to_le_bytes());
-    // Fill remaining with derived bytes
-    for i in 16..32 {
-        key[i] = key[i - 16] ^ key[i - 8] ^ (i as u8);
+    // Prefer env var for production (hex-encoded 32 bytes)
+    if let Ok(key_hex) = std::env::var("FLOWLINK_SECRETS_KEY") {
+        if key_hex.len() == 64 {
+            if let Ok(bytes) = hex_str_to_bytes(&key_hex) {
+                if bytes.len() == 32 {
+                    let mut key = [0u8; 32];
+                    key.copy_from_slice(&bytes);
+                    return key;
+                }
+            }
+        }
     }
+    // Fallback: SHA-256 of a config string (not ideal, but better than XOR)
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(b"flowlink-secrets-vault-key-2026");
+    hasher.update(b"-do-not-use-in-production");
+    let result = hasher.finalize();
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&result);
     key
 }
 
 fn encrypt(plaintext: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
-    // XOR-based encryption with random nonce (placeholder for real AES-GCM)
-    // In production, use aes-gcm crate
     let key = get_encryption_key();
-    let nonce: [u8; 12] = rand::random();
-    let encrypted: Vec<u8> = plaintext.as_bytes().iter().enumerate()
-        .map(|(i, b)| b ^ key[i % key.len()] ^ nonce[i % nonce.len()])
-        .collect();
-    Ok((encrypted, nonce.to_vec()))
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init: {}", e))?;
+    let nonce_bytes: [u8; 12] = rand::random();
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let encrypted = cipher.encrypt(nonce, plaintext.as_bytes()).map_err(|e| format!("Encrypt: {}", e))?;
+    Ok((encrypted, nonce_bytes.to_vec()))
 }
 
 fn decrypt(encrypted: &[u8], nonce: &[u8]) -> Result<String, String> {
     let key = get_encryption_key();
-    let decrypted: Vec<u8> = encrypted.iter().enumerate()
-        .map(|(i, b)| b ^ key[i % key.len()] ^ nonce.get(i % nonce.len()).copied().unwrap_or(0))
-        .collect();
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init: {}", e))?;
+    let nonce = Nonce::from_slice(nonce);
+    let decrypted = cipher.decrypt(nonce, encrypted).map_err(|e| format!("Decrypt: {}", e))?;
     String::from_utf8(decrypted).map_err(|e| e.to_string())
 }
 

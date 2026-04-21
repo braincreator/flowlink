@@ -84,6 +84,46 @@ pub async fn jwt_auth(
     let auth_engine = match &state.auth_engine {
         Some(e) => e,
         None => {
+            // Dev mode: no JWT auth, but still check API keys
+            let auth_header = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+            if let Some(h) = auth_header {
+                if let Some(token) = h.strip_prefix("Bearer ") {
+                    if token.starts_with("flk_") {
+                        if let Some(ref db_opt) = state.db {
+                            let pool = db_opt.pool();
+                            if let Ok(Some(identity)) = crate::api_keys::ApiKeyRepo::validate(pool, token).await {
+                                let rate_key = identity.key_id.to_string();
+                                if !state.key_rate_limiter.check(&rate_key).await {
+                                    return json_error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "API key rate limit exceeded");
+                                }
+                                let is_admin = matches!(identity.role, crate::api_keys::ApiKeyRole::Admin);
+                                let claims = crate::auth::Claims {
+                                    sub: identity.account_id.clone(),
+                                    account_id: identity.account_id.clone(),
+                                    email: None,
+                                    name: Some(identity.name.clone()),
+                                    is_admin,
+                                    org_id: Some(identity.org_id.to_string()),
+                                    iat: 0,
+                                    exp: 0,
+                                };
+                                req.extensions_mut().insert(AccountId(identity.account_id.clone()));
+                                req.extensions_mut().insert(claims);
+                                req.extensions_mut().insert(identity);
+                                return next.run(req).await;
+                            }
+                        }
+                    }
+                }
+            }
+            // Insert default Claims for unauthenticated dev mode
+            let default_claims = crate::auth::Claims {
+                sub: "dev".into(), account_id: "dev".into(),
+                email: None, name: Some("Dev User".into()),
+                is_admin: true, org_id: None, iat: 0, exp: 0,
+            };
+            req.extensions_mut().insert(AccountId("dev".into()));
+            req.extensions_mut().insert(default_claims);
             warn!("JWT_AUTH_DISABLED: no auth_engine configured (dev mode)");
             return next.run(req).await;
         }
@@ -104,7 +144,46 @@ pub async fn jwt_auth(
             req.extensions_mut().insert(claims);
             next.run(req).await
         }
-        Err(_) => json_error(StatusCode::UNAUTHORIZED, "token_invalid", "Invalid or expired token"),
+        Err(_) => {
+            // Fallback: check if this is an API key (flk_...)
+            if token.starts_with("flk_") {
+                if let Some(ref db_opt) = state.db {
+                    let pool = db_opt.pool();
+                    match crate::api_keys::ApiKeyRepo::validate(pool, token).await {
+                        Ok(Some(identity)) => {
+                            // Rate limit check
+                            let rate_key = identity.key_id.to_string();
+                            if !state.key_rate_limiter.check(&rate_key).await {
+                                return json_error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "API key rate limit exceeded");
+                            }
+                            // Create synthetic Claims from API key identity
+                            let is_admin = matches!(identity.role, crate::api_keys::ApiKeyRole::Admin);
+                            let claims = crate::auth::Claims {
+                                sub: identity.account_id.clone(),
+                                account_id: identity.account_id.clone(),
+                                email: None,
+                                name: Some(identity.name.clone()),
+                                is_admin,
+                                org_id: Some(identity.org_id.to_string()),
+                                iat: 0,
+                                exp: 0,
+                            };
+                            req.extensions_mut().insert(AccountId(identity.account_id.clone()));
+                            req.extensions_mut().insert(claims);
+                            // Also store KeyIdentity for scope-aware handlers
+                            req.extensions_mut().insert(identity);
+                            return next.run(req).await;
+                        }
+                        Ok(None) => return json_error(StatusCode::UNAUTHORIZED, "api_key_invalid", "Invalid or expired API key"),
+                        Err(e) => {
+                            warn!("API key validation error: {}", e);
+                            return json_error(StatusCode::INTERNAL_SERVER_ERROR, "auth_error", "Authentication error");
+                        }
+                    }
+                }
+            }
+            json_error(StatusCode::UNAUTHORIZED, "token_invalid", "Invalid or expired token")
+        }
     }
 }
 
