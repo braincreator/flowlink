@@ -149,7 +149,8 @@ impl RusiemForwarder {
 #[derive(Serialize)]
 pub struct TestResponse { pub ok: bool, pub message: String }
 
-pub async fn test_connection(State(state): State<AppState>) -> axum::Json<TestResponse> {
+pub async fn test_connection(State(state): State<AppState>, axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>) -> axum::Json<TestResponse> {
+    if !claims.is_admin { return axum::Json(TestResponse { ok: false, message: "Admin required".into() }); }
     let config = match &state.rusiem_config {
         Some(c) => c.read().await.clone(),
         None => return axum::Json(TestResponse { ok: false, message: "RuSIEM not configured".into() }),
@@ -157,7 +158,7 @@ pub async fn test_connection(State(state): State<AppState>) -> axum::Json<TestRe
     if !config.enabled {
         return axum::Json(TestResponse { ok: false, message: "Disabled".into() });
     }
-    axum::Json(TestResponse { ok: true, message: format!("Configured → {}", config.syslog_host) })
+    axum::Json(TestResponse { ok: true, message: "Configured".into() })
 }
 
 // ═══════════════════════════════════════════════════

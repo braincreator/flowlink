@@ -2045,8 +2045,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/saml/login", axum::routing::get(crate::saml::saml_login))
         .route("/auth/saml/acs", axum::routing::post(crate::saml::saml_acs))
         .route("/auth/saml/metadata", axum::routing::get(crate::saml::saml_metadata))
-        // RuSIEM
-        .route("/api/v1/rusiem/test", axum::routing::get(crate::rusiem::test_connection))
+
         // 2FA (public: setup done authed, but complete is public for temp_token flow)
         .route("/api/auth/2fa/complete", axum::routing::post(crate::auth_2fa::complete_2fa))
         // Auth providers listing
@@ -2059,16 +2058,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/billing/check-expiry", axum::routing::post(crate::billing_api::check_expiry))
         // GDPR deletion cleanup (internal, admin-only)
         .route("/api/billing/cleanup-expired-deletions", axum::routing::post(crate::account_deletion_api::cleanup_expired_deletions))
-        // Shield ingest (external agent reporting)
-        .route("/api/shield/ingest", post(shield_ingest_alert))
-        // Audit ingest (external)
-        .route("/api/audit/event", post(audit_ingest))
-        .route("/api/shield/canary", post(canary_alert_handler))
         // Control Plane
         .route("/api/v1/signup", axum::routing::post(crate::control_plane::signup))
         .route("/api/v1/heartbeat", axum::routing::post(crate::control_plane::heartbeat))
-        // Metrics
-        .route("/metrics", axum::routing::get(crate::metrics::metrics_handler))
         // WS (has its own token validation)
         .route("/ws", get(ws_upgrade))
         // MCP (has its own validation)
@@ -2078,6 +2070,8 @@ pub fn build_router(state: AppState) -> Router {
 
     // ── Protected routes (require JWT auth) ──
     let protected_routes = Router::new()
+        // Metrics (protected)
+        .route("/metrics", axum::routing::get(crate::metrics::metrics_handler))
         // Agents
         .route("/api/agents", get(list_agents))
         .route("/api/approvals", get(list_approvals))
@@ -2136,6 +2130,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/policies/{id}", axum::routing::get(crate::policy_db::get_policy).delete(crate::policy_db::delete_policy))
         .route("/api/v1/policies/bind", axum::routing::post(crate::policy_db::bind_policy_to_agent))
         .route("/api/v1/policies/unbind", axum::routing::post(crate::policy_db::unbind_policy_from_agent))
+        // Shield & Audit ingest (protected)
+        .route("/api/shield/ingest", post(shield_ingest_alert))
+        .route("/api/audit/event", post(audit_ingest))
+        .route("/api/shield/canary", post(canary_alert_handler))
         // Pattern suggestions
         .route("/api/v1/patterns", get(list_pattern_suggestions))
         .route("/api/v1/patterns/apply", post(apply_pattern_suggestion))
