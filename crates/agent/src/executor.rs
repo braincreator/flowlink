@@ -80,10 +80,11 @@ impl Executor {
     /// The actual command execution logic.
     async fn exec_inner_static(payload: &ExecRequestPayload) -> anyhow::Result<ExecResult> {
         let request_id = payload.request_id.clone();
+        // Clamp timeout: 1-600 seconds (10 min max)
         let timeout_secs = if payload.timeout_sec == 0 {
             60
         } else {
-            payload.timeout_sec as u64
+            (payload.timeout_sec as u64).clamp(1, 600)
         };
         let shell = payload.shell.as_deref().unwrap_or("/bin/sh");
 

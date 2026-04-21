@@ -36,14 +36,18 @@ pub struct PatternLearner {
     auto_approve_threshold: u32,
     /// Minimum blocks before suggesting permanent deny
     deny_threshold: u32,
+    max_patterns: usize,
 }
 
 impl PatternLearner {
+    const MAX_PATTERNS: usize = 5000;
+
     pub fn new() -> Self {
         Self {
             patterns: HashMap::new(),
             auto_approve_threshold: 20,
             deny_threshold: 5,
+            max_patterns: Self::MAX_PATTERNS,
         }
     }
 
