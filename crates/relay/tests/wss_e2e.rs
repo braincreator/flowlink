@@ -97,6 +97,7 @@ fn make_state(tmp: &std::path::Path) -> AppState {
         saml_config: None,
         rusiem_config: None,
         http_client: reqwest::Client::new(),
+        cors_origins: vec!["*".to_string()],
     }
 }
 

@@ -81,6 +81,7 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         saml_config: None,
         rusiem_config: None,
         http_client: reqwest::Client::new(),
+        cors_origins: vec!["*".to_string()],
     };
     (state, tmp)
 }
