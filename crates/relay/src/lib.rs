@@ -369,6 +369,12 @@ impl Relay {
                     if pruned_agents > 0 {
                         log::info!("Maintenance: pruned {} stale offline agents", pruned_agents);
                     }
+                    // Prune expired tokens/codes from DB
+                    if let Some(ref db) = db_bg {
+                        let _ = sqlx::query("DELETE FROM linking_codes WHERE expires_at < NOW()").execute(db.pool()).await;
+                        let _ = sqlx::query("DELETE FROM email_verification_codes WHERE expires_at < NOW()").execute(db.pool()).await;
+                        let _ = sqlx::query("DELETE FROM org_invitations WHERE expires_at < NOW() AND status = 'pending'").execute(db.pool()).await;
+                    }
                 }
             });
         }
