@@ -69,7 +69,7 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
 }
 
 fn jwt_secret() -> String {
-    std::env::var("JWT_SECRET").unwrap_or_else(|_| "flowlink-dev-secret".to_string())
+    std::env::var("JWT_SECRET").unwrap_or_else(|_| { log::error!("JWT_SECRET not set — using random fallback. SET JWT_SECRET IN PRODUCTION!"); format!("insecure-{}", rand::random::<u64>()) })
 }
 
 fn create_temp_token(account_id: &str, email: Option<&str>, name: Option<&str>, is_admin: bool) -> Result<String, jsonwebtoken::errors::Error> {

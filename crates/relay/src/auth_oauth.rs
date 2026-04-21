@@ -240,7 +240,10 @@ pub async fn oauth_url(
 
     // Generate CSRF state: random 32 hex chars, sign with JWT secret
     let raw_state = format!("{:x}", rand::random::<u64>()) + &format!("{:x}", rand::random::<u64>());
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "flowlink-dev-secret".to_string());
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
+        log::error!("JWT_SECRET not set — OAuth CSRF protection is insecure!");
+        format!("insecure-{}", rand::random::<u64>())
+    });
     use hmac::{Hmac, Mac};
     type HmacSha256 = Hmac<sha2::Sha256>;
     let mut mac = HmacSha256::new_from_slice(jwt_secret.as_bytes()).expect("HMAC key");
@@ -292,7 +295,7 @@ fn verify_state(state_param: &Option<String>) -> bool {
     let sig_part = parts[0];
     let raw = parts[1];
 
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "flowlink-dev-secret".to_string());
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| { log::error!("JWT_SECRET not set — using random fallback. SET JWT_SECRET IN PRODUCTION!"); format!("insecure-{}", rand::random::<u64>()) });
     use hmac::{Hmac, Mac};
     type HmacSha256 = Hmac<sha2::Sha256>;
     let mut mac = HmacSha256::new_from_slice(jwt_secret.as_bytes()).expect("HMAC key");

@@ -13,7 +13,7 @@ pub fn check_level2(binary: &str, args: &[String], raw: &str) -> Option<Threat> 
         let script = extract_script(args)?;
         return bash_ast(script);
     }
-    if raw.contains("| bash") || raw.contains("| sh ") || raw.contains("base64 -d |") {
+    if raw.contains("| bash") || raw.contains("| sh ") || raw.contains("base64 -d |") || raw.contains("base64 --decode |") || raw.contains("base64 -di") || raw.contains("|/bin/sh") || raw.contains("|/bin/bash") {
         return bash_ast(raw);
     }
     if raw.starts_with("eval ") || raw.starts_with("exec ") {
@@ -162,6 +162,7 @@ fn check_ast(node: tree_sitter::Node, src: &str) -> Option<Threat> {
 }
 
 fn has_obfuscation(text: &str) -> bool {
+    // Hex escape: $'\x72\x6d'
     let re = regex::Regex::new(r"\\x([0-9a-fA-F]{2})").ok();
     if let Some(re) = re {
         let dec: String = re
@@ -169,13 +170,27 @@ fn has_obfuscation(text: &str) -> bool {
             .filter_map(|c| u8::from_str_radix(c.get(1)?.as_str(), 16).ok())
             .map(|b| b as char)
             .collect();
-        for kw in &["rm -rf", "mkfs", "dd if", "DROP", "shutdown"] {
+        for kw in &["rm -rf", "mkfs", "dd if", "DROP", "shutdown", "/etc/shadow", "/etc/passwd"] {
             if dec.contains(kw) {
                 return true;
             }
         }
     }
-    if text.contains("base64") && (text.contains("| bash") || text.contains("| sh")) {
+    // Octal escape: $'\162\155'
+    let oct_re = regex::Regex::new(r"\\([0-7]{3})").ok();
+    if let Some(re) = oct_re {
+        let dec: String = re
+            .captures_iter(text)
+            .filter_map(|c| u8::from_str_radix(c.get(1)?.as_str(), 8).ok())
+            .map(|b| b as char)
+            .collect();
+        for kw in &["rm -rf", "mkfs", "dd if", "DROP", "shutdown", "/etc/shadow"] {
+            if dec.contains(kw) {
+                return true;
+            }
+        }
+    }
+    if text.contains("base64") && (text.contains("| bash") || text.contains("| sh") || text.contains("|/bin/") || text.contains("-d |") || text.contains("--decode |")) {
         return true;
     }
     false

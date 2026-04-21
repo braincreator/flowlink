@@ -458,7 +458,7 @@ pub async fn verify_code(
     }
 
     // Fallback: raw JWT without AuthEngine (dev mode)
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "flowlink-dev-secret".to_string());
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| { log::error!("JWT_SECRET not set — using random fallback. SET JWT_SECRET IN PRODUCTION!"); format!("insecure-{}", rand::random::<u64>()) });
     let now = Utc::now();
     let claims = Claims {
         sub: account_id.clone(),
