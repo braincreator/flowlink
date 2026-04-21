@@ -230,8 +230,15 @@ pub struct CreateRuleRequest {
 
 pub async fn create_policy(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<CreatePolicyRequest>,
 ) -> impl IntoResponse {
+    // Verify org ownership
+    if let Some(ref user_org) = claims.org_id {
+        if Some(user_org.as_str()) != body.org_id.as_deref() && !claims.is_admin {
+            return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Not your org"}))).into_response();
+        }
+    }
     let db = match state.db {
         Some(ref db) => db.write_pool(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "DB not configured"}))).into_response(),
@@ -283,8 +290,12 @@ pub async fn create_policy(
 /// Delete a policy.
 pub async fn delete_policy(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     axum::extract::Path(policy_id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
+    if !claims.is_admin {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Admin required"}))).into_response();
+    }
     let db = match state.db {
         Some(ref db) => db.write_pool(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "DB not configured"}))).into_response(),
@@ -305,8 +316,12 @@ pub struct BindRequest {
 
 pub async fn bind_policy_to_agent(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<BindRequest>,
 ) -> impl IntoResponse {
+    if !claims.is_admin {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Admin required"}))).into_response();
+    }
     let db = match state.db {
         Some(ref db) => db.write_pool(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "DB not configured"}))).into_response(),
@@ -327,8 +342,12 @@ pub async fn bind_policy_to_agent(
 /// Unbind a policy from an agent.
 pub async fn unbind_policy_from_agent(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<BindRequest>,
 ) -> impl IntoResponse {
+    if !claims.is_admin {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Admin required"}))).into_response();
+    }
     let db = match state.db {
         Some(ref db) => db.write_pool(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "DB not configured"}))).into_response(),
