@@ -339,8 +339,29 @@ async fn healthz() -> Json<serde_json::Value> {
     }))
 }
 
-async fn list_agents(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
-    Json(state.pool.list())
+async fn list_agents(
+    State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+) -> Json<Vec<AgentInfo>> {
+    // Filter by org_id if not admin
+    let agents = state.pool.list();
+    if claims.is_admin {
+        Json(agents)
+    } else if let Some(ref org_id) = claims.org_id {
+        // Filter to agents in user's org
+        if let Some(ref db) = state.db {
+            let org_agents: std::collections::HashSet<String> = sqlx::query_scalar(
+                "SELECT agent_id FROM agents WHERE org_id = $1"
+            ).bind(org_id)
+            .fetch_all(db.pool()).await.unwrap_or_default()
+            .into_iter().collect();
+            Json(agents.into_iter().filter(|a| org_agents.contains(&a.agent_id)).collect())
+        } else {
+            Json(agents)
+        }
+    } else {
+        Json(vec![])
+    }
 }
 
 async fn list_pattern_suggestions(State(state): State<AppState>) -> impl IntoResponse {
@@ -763,8 +784,26 @@ async fn delete_api_key(
     }
 }
 
-async fn list_clients(State(state): State<AppState>) -> Json<Vec<crate::registry::RegisteredClient>> {
-    Json(state.registry.list_clients())
+async fn list_clients(
+    State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+) -> impl IntoResponse {
+    if !claims.is_admin {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Admin required"}))).into_response();
+    }
+    // Mask tokens in response
+    let clients: Vec<serde_json::Value> = state.registry.list_clients().into_iter().map(|c| {
+        serde_json::json!({
+            "id": c.id,
+            "name": c.name,
+            "token_prefix": &c.api_token[..8.min(c.api_token.len())],
+            "email": c.email,
+            "created_at": c.created_at,
+            "active": c.active,
+            "max_hosts": c.max_hosts,
+        })
+    }).collect();
+    Json(clients).into_response()
 }
 
 async fn exec_agent(
