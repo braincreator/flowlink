@@ -340,6 +340,33 @@ impl Relay {
 
         let app = server::build_router(state.clone());
 
+        // ── Periodic maintenance tasks ──
+        {
+            let rate_limiter = state.rate_limiter.clone();
+            let audit_store = state.audit_store.clone();
+            let db_bg = state.db.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(600)); // every 10 min
+                interval.tick().await; // skip first
+                loop {
+                    interval.tick().await;
+                    // Prune stale rate limiter buckets
+                    rate_limiter.prune();
+                    // Prune audit events older than 90 days
+                    let pruned = audit_store.prune(std::time::Duration::from_secs(90 * 24 * 3600));
+                    if pruned > 0 {
+                        log::info!("Maintenance: pruned {} old audit events", pruned);
+                    }
+                    // Check subscription expiry (if DB available)
+                    if let Some(ref db) = db_bg {
+                        if let Err(e) = crate::billing_api::check_expiry_bg(db.pool()).await {
+                            log::warn!("Maintenance: subscription expiry check failed: {e}");
+                        }
+                    }
+                }
+            });
+        }
+
         let addr = self.config.http_addr;
         info!("relay listening on {addr} (HTTP API)");
 

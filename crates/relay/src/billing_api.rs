@@ -1185,6 +1185,27 @@ pub async fn check_expiry(
     }))).into_response()
 }
 
+/// Background version of check_expiry — called by maintenance task
+pub async fn check_expiry_bg(pool: &sqlx::PgPool) -> anyhow::Result<()> {
+    let now = chrono::Utc::now();
+    // Grace-enter trials expiring in next 24h
+    let grace = sqlx::query(
+        "UPDATE subscriptions SET status = 'grace' WHERE status = 'active' AND current_period_end < $1 AND current_period_end > $2"
+    ).bind(now).bind(now - chrono::Duration::hours(24))
+    .execute(pool).await?.rows_affected();
+
+    // Auto-downgrade expired grace subscriptions
+    let downgraded = sqlx::query(
+        "UPDATE subscriptions SET status = 'cancelled' WHERE status = 'grace' AND current_period_end < $1"
+    ).bind(now - chrono::Duration::days(7))
+    .execute(pool).await?.rows_affected();
+
+    if grace > 0 || downgraded > 0 {
+        log::info!("check_expiry_bg: grace_entered={grace}, downgraded={downgraded}");
+    }
+    Ok(())
+}
+
 /// GET /api/v1/account/tg-link-code — generate a link code for Telegram binding
 /// Returns the account_id as the code (user sends /start <code> in TG bot)
 pub async fn tg_link_code(
