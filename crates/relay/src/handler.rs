@@ -115,7 +115,7 @@ mod tests {
     async fn test_register_and_remove_sender() {
         let h = test_handler();
         let (tx, _rx) = mpsc::channel(10);
-        h.register_sender("a1".into(), tx);
+        h.register_sender("a1".into(), (tx, 0));
         h.remove_sender("a1");
         let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);
         assert!(h.send_to_agent("a1", msg).await.is_err());
@@ -125,7 +125,7 @@ mod tests {
     async fn test_send_to_connected_agent() {
         let h = test_handler();
         let (tx, mut rx) = mpsc::channel(10);
-        h.register_sender("a1".into(), tx);
+        h.register_sender("a1".into(), (tx, 0));
         let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);
         assert!(h.send_to_agent("a1", msg).await.is_ok());
         let received = rx.recv().await.unwrap();
@@ -145,8 +145,8 @@ mod tests {
         let h = test_handler();
         let (tx1, _rx1) = mpsc::channel(10);
         let (tx2, _rx2) = mpsc::channel(10);
-        h.register_sender("agent-alpha".into(), tx1);
-        h.register_sender("agent-beta".into(), tx2);
+        h.register_sender("agent-alpha".into(), (tx1, 0));
+        h.register_sender("agent-beta".into(), (tx2, 0));
 
         let mut agents = h.connected_agents();
         agents.sort();
@@ -157,7 +157,7 @@ mod tests {
     async fn test_connected_agents_after_disconnect() {
         let h = test_handler();
         let (tx, _rx) = mpsc::channel(10);
-        h.register_sender("agent-1".into(), tx);
+        h.register_sender("agent-1".into(), (tx, 0));
         assert_eq!(h.connected_agents().len(), 1);
         h.remove_sender("agent-1");
         assert!(h.connected_agents().is_empty());
@@ -169,7 +169,7 @@ mod tests {
     async fn test_sent_message_is_valid_json() {
         let h = test_handler();
         let (tx, mut rx) = mpsc::channel(10);
-        h.register_sender("a1".into(), tx);
+        h.register_sender("a1".into(), (tx, 0));
 
         let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);
         h.send_to_agent("a1", msg).await.unwrap();
@@ -187,7 +187,7 @@ mod tests {
     async fn test_send_message_with_payload() {
         let h = test_handler();
         let (tx, mut rx) = mpsc::channel(10);
-        h.register_sender("a1".into(), tx);
+        h.register_sender("a1".into(), (tx, 0));
 
         let msg = flowlink_core::Message::new(flowlink_core::MessageType::ExecRequest)
             .with_payload(serde_json::json!({"command": "ls"}));
@@ -301,7 +301,7 @@ mod tests {
     async fn test_send_fails_when_channel_full() {
         let h = test_handler();
         let (tx, _rx) = mpsc::channel(1);
-        h.register_sender("a1".into(), tx);
+        h.register_sender("a1".into(), (tx, 0));
 
         // Fill the channel
         let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);
@@ -331,7 +331,7 @@ mod tests {
 
         // Connect
         let (tx, mut rx) = mpsc::channel(10);
-        h.register_sender("lifecycle-agent".into(), tx);
+        h.register_sender("lifecycle-agent".into(), (tx, 0));
         assert_eq!(h.connected_agents().len(), 1);
 
         // Send message
@@ -352,14 +352,14 @@ mod tests {
     async fn test_reconnect_same_agent() {
         let h = test_handler();
         let (tx1, mut rx1) = mpsc::channel(10);
-        h.register_sender("reconnect-agent".into(), tx1);
+        h.register_sender("reconnect-agent".into(), (tx1, 0));
         h.send_to_agent("reconnect-agent", flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat)).await.unwrap();
         assert!(rx1.recv().await.is_some());
 
         // Simulate reconnect: remove old, register new
         h.remove_sender("reconnect-agent");
         let (tx2, mut rx2) = mpsc::channel(10);
-        h.register_sender("reconnect-agent".into(), tx2);
+        h.register_sender("reconnect-agent".into(), (tx2, 0));
         h.send_to_agent("reconnect-agent", flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat)).await.unwrap();
         assert!(rx2.recv().await.is_some());
     }
@@ -375,7 +375,7 @@ mod tests {
         for i in 0..20 {
             let (tx, rx) = mpsc::channel(10);
             let agent_id = format!("agent-{}", i);
-            h.register_sender(agent_id.clone(), tx);
+            h.register_sender(agent_id.clone(), (tx, 0));
             handles.push((agent_id, rx));
         }
 
@@ -397,7 +397,7 @@ mod tests {
     async fn test_concurrent_sends_to_same_agent() {
         let h = test_handler();
         let (tx, mut rx) = mpsc::channel(100);
-        h.register_sender("shared-agent".into(), tx);
+        h.register_sender("shared-agent".into(), (tx, 0));
 
         let mut msgs: Vec<()> = vec![];
         for _ in 0..10 {
@@ -428,11 +428,11 @@ mod tests {
     async fn test_register_overwrites_existing_sender() {
         let h = test_handler();
         let (tx1, mut rx1) = mpsc::channel(10);
-        h.register_sender("a1".into(), tx1);
+        h.register_sender("a1".into(), (tx1, 0));
 
         // Overwrite with new sender
         let (tx2, mut rx2) = mpsc::channel(10);
-        h.register_sender("a1".into(), tx2);
+        h.register_sender("a1".into(), (tx2, 0));
 
         // Send should go to new sender
         let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);
@@ -453,7 +453,7 @@ mod tests {
     async fn test_send_various_message_types() {
         let h = test_handler();
         let (tx, mut rx) = mpsc::channel(10);
-        h.register_sender("a1".into(), tx);
+        h.register_sender("a1".into(), (tx, 0));
 
         let types = vec![
             flowlink_core::MessageType::Heartbeat,

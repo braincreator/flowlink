@@ -900,6 +900,18 @@ mod tests {
                 "status": "completed",
                 "amount": 29990
             }"#,
+            )
+            .with(
+                "/subscriptions_with_receipt",
+                r#"{
+                "Data": {
+                    "operationId": "sub_abc123",
+                    "customerCode": "test-terminal",
+                    "amount": 299.90,
+                    "status": "active",
+                    "paymentLink": "https://pay.tochka.com/sbp/abc123"
+                }
+            }"#,
             );
         TochkaClient::with_http(cfg(), Box::new(mock))
     }
@@ -982,6 +994,7 @@ mod tests {
             description: "FlowLink Individual".into(),
             start_date: None,
             trial_days: 0,
+            customer_email: Some("test@example.com".into()),
         };
         let sub = c.create_subscription(&req).await.unwrap();
         assert_eq!(sub.subscription_id, "sub_abc123");

@@ -76,7 +76,7 @@ fn test_registry_agent_limit() {
 
 #[test]
 fn test_auth_manager() {
-    let auth = AuthManager::new();
+    let auth = AuthManager::new(None);
     auth.register_client(Client {
         client_id: "c1".into(),
         api_token: "secret123".into(),

@@ -65,6 +65,8 @@ fn test_exec_done_roundtrip() {
         exit_code: 0,
         duration_ms: 150,
         error: None,
+        stdout: "".into(),
+        stderr: "".into(),
     };
 
     let msg = Message::new(MessageType::ExecDone)

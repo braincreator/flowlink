@@ -40,7 +40,7 @@ fn ensure_ring_provider() {
 fn make_state(tmp: &std::path::Path) -> AppState {
     let pool = Arc::new(AgentPool::new());
     let eventbus = Arc::new(EventBus::new());
-    let auth = Arc::new(AuthManager::new());
+    let auth = Arc::new(AuthManager::new(None));
     let approvals = Arc::new(ApprovalQueue::new());
     let registry = Arc::new(Registry::new(tmp).unwrap());
     let handler = Arc::new(RelayHandler::new(
@@ -61,6 +61,7 @@ fn make_state(tmp: &std::path::Path) -> AppState {
     });
 
     AppState {
+        start_time: std::time::Instant::now(),
         pool,
         approvals,
         eventbus: eventbus.clone(),
@@ -88,8 +89,13 @@ fn make_state(tmp: &std::path::Path) -> AppState {
         auth,
         tochka: None,
         notification_store: None,
-            rbac: std::sync::Arc::new(flowlink_relay::rbac_manager::RbacManager::new()),
-            notification_router: std::sync::OnceLock::new(),
+        rbac: std::sync::Arc::new(flowlink_relay::rbac_manager::RbacManager::new()),
+        notification_router: std::sync::OnceLock::new(),
+        auth_rate_limiter: Arc::new(flowlink_relay::auth_rate_limiter::AuthRateLimiter::new()),
+        tiered_rate_limiter: Arc::new(flowlink_relay::rate_limiter::TieredRateLimiter::new()),
+        key_rate_limiter: Arc::new(flowlink_relay::api_keys::KeyRateLimiter::new(100, 60)),
+        saml_config: None,
+        rusiem_config: None,
     }
 }
 

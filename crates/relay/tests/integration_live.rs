@@ -23,7 +23,7 @@ fn make_state() -> (AppState, tempfile::TempDir) {
     let tmp = tempfile::tempdir().unwrap();
     let pool = Arc::new(AgentPool::new());
     let eventbus = Arc::new(EventBus::new());
-    let auth = Arc::new(AuthManager::new());
+    let auth = Arc::new(AuthManager::new(None));
     let approvals = Arc::new(ApprovalQueue::new());
     let registry = Arc::new(Registry::new(tmp.path()).unwrap());
     let handler = Arc::new(RelayHandler::new(
@@ -45,6 +45,7 @@ fn make_state() -> (AppState, tempfile::TempDir) {
     });
 
     let state = AppState {
+        start_time: std::time::Instant::now(),
         pool,
         approvals,
         eventbus: eventbus.clone(),
@@ -69,11 +70,16 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         tg_bot: std::sync::OnceLock::new(),
         auth_engine: None,
         email_service: None,
-        auth: Arc::new(flowlink_relay::auth::AuthManager::new()),
+        auth: Arc::new(flowlink_relay::auth::AuthManager::new(None)),
         tochka: None,
         notification_store: None,
-            rbac: std::sync::Arc::new(flowlink_relay::rbac_manager::RbacManager::new()),
-            notification_router: std::sync::OnceLock::new(),
+        rbac: std::sync::Arc::new(flowlink_relay::rbac_manager::RbacManager::new()),
+        notification_router: std::sync::OnceLock::new(),
+        auth_rate_limiter: Arc::new(flowlink_relay::auth_rate_limiter::AuthRateLimiter::new()),
+        tiered_rate_limiter: Arc::new(flowlink_relay::rate_limiter::TieredRateLimiter::new()),
+        key_rate_limiter: Arc::new(flowlink_relay::api_keys::KeyRateLimiter::new(100, 60)),
+        saml_config: None,
+        rusiem_config: None,
     };
     (state, tmp)
 }
@@ -108,6 +114,7 @@ fn test_agent(id: &str) -> AgentInfo {
         last_heartbeat: 1000,
         labels: vec![],
         capabilities: vec![],
+        online: true,
     }
 }
 
@@ -127,7 +134,7 @@ async fn health_returns_ok() {
         .await
         .unwrap();
     assert_eq!(resp["status"], "ok");
-    assert_eq!(resp["agents"], 0);
+    assert_eq!(resp["agents_online"], 0);
 }
 
 #[tokio::test]
@@ -191,6 +198,8 @@ async fn exec_done_message_flows_through_eventbus() {
             exit_code: 0,
             duration_ms: 120,
             error: None,
+            stdout: "ok".into(),
+            stderr: "".into(),
         });
     let json = serde_json::to_string(&done).unwrap();
     eventbus.publish("exec_done", &json);

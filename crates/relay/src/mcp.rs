@@ -219,40 +219,49 @@ pub async fn handle_mcp(
     headers: HeaderMap,
     Json(req): Json<McpRequest>,
 ) -> axum::response::Response {
-    // ── API Key Auth ──
-    let identity = match extract_api_key(&headers) {
-        Some(key) => {
-            match &state.db {
-                Some(db) => {
-                    match ApiKeyRepo::validate(db.pool(), &key).await {
-                        Ok(Some(id)) => {
-                            // Per-key rate limiting
-                            if !state.key_rate_limiter.check(&id.key_id.to_string()).await {
-                                log::warn!("MCP rate limited: key_id={}", id.key_id);
-                                return mcp_err(req.id, -32029, "Rate limit exceeded: max 100 requests per minute per key").into_response();
+    // ── Public methods (no auth required) ──
+    let public_methods = ["initialize", "notifications/initialized", "tools/list"];
+    let is_public = public_methods.contains(&req.method.as_str());
+
+    // ── API Key Auth (required for non-public methods) ──
+    let identity = if is_public {
+        // No auth needed, but check if key provided for optional rate limiting
+        None
+    } else {
+        match extract_api_key(&headers) {
+            Some(key) => {
+                match &state.db {
+                    Some(db) => {
+                        match ApiKeyRepo::validate(db.pool(), &key).await {
+                            Ok(Some(id)) => {
+                                // Per-key rate limiting
+                                if !state.key_rate_limiter.check(&id.key_id.to_string()).await {
+                                    log::warn!("MCP rate limited: key_id={}", id.key_id);
+                                    return mcp_err(req.id, -32029, "Rate limit exceeded: max 100 requests per minute per key").into_response();
+                                }
+                                Some(id)
                             }
-                            Some(id)
-                        }
-                        Ok(None) => {
-                            log::warn!("MCP auth failed: invalid API key prefix={}", &key[..12.min(key.len())]);
-                            return mcp_err(req.id, -32001, "Unauthorized: invalid API key").into_response();
-                        }
-                        Err(e) => {
-                            log::error!("MCP auth error: {e}");
-                            // DB error — allow through for now (graceful degradation)
-                            None
+                            Ok(None) => {
+                                log::warn!("MCP auth failed: invalid API key prefix={}", &key[..12.min(key.len())]);
+                                return mcp_err(req.id, -32001, "Unauthorized: invalid API key").into_response();
+                            }
+                            Err(e) => {
+                                log::error!("MCP auth error: {e}");
+                                // DB error — allow through for now (graceful degradation)
+                                None
+                            }
                         }
                     }
-                }
-                None => {
-                    log::warn!("MCP auth skipped: no DB configured");
-                    None
+                    None => {
+                        log::warn!("MCP auth skipped: no DB configured");
+                        None
+                    }
                 }
             }
-        }
-        None => {
-            log::warn!("MCP request without API key — rejected");
-            return mcp_err(req.id, -32001, "Unauthorized: API key required. Use Authorization: Bearer flk_... or x-api-key header").into_response();
+            None => {
+                log::warn!("MCP request without API key — rejected");
+                return mcp_err(req.id, -32001, "Unauthorized: API key required. Use Authorization: Bearer flk_... or x-api-key header").into_response();
+            }
         }
     };
 
