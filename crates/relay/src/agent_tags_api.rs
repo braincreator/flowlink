@@ -77,7 +77,7 @@ pub async fn get_tags(
 
 pub async fn delete_tags(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     sqlx::query("DELETE FROM agent_tags WHERE agent_id = $1")

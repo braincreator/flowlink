@@ -45,7 +45,7 @@ pub struct SessionQuery {
 
 pub async fn create_session(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<Session>), (StatusCode, String)> {
     if !claims.is_admin && claims.org_id.is_none() {
@@ -125,7 +125,7 @@ pub struct UpdateSessionRequest {
 
 pub async fn update_session(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateSessionRequest>,
 ) -> Result<(StatusCode, Json<Session>), (StatusCode, String)> {
@@ -149,7 +149,7 @@ pub async fn update_session(
 
 pub async fn close_session(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     if !claims.is_admin { return Err((StatusCode::FORBIDDEN, "Admin required".into())); }

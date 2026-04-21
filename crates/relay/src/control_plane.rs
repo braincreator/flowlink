@@ -284,7 +284,7 @@ pub async fn list_agents(
 /// GET /api/v1/agents/:id — get agent detail
 pub async fn get_agent(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> impl IntoResponse {
     let registry = state.control_plane.registry.read().await;
@@ -301,7 +301,7 @@ pub async fn get_agent(
 /// Disconnects WS if online, removes from pool, cleans up DB record.
 pub async fn deregister_agent(
     State(state): State<AppState>,
-    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> impl IntoResponse {
     // Verify agent belongs to user's org
