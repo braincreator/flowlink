@@ -345,7 +345,7 @@ pub async fn change_plan(
         }
         Err(e) => {
             (StatusCode::BAD_REQUEST, Json(json!({
-                "error": e.to_string(),
+                "error": "Internal error",
             }))).into_response()
         }
     }
@@ -771,13 +771,13 @@ pub async fn list_subscriptions(
                     let subs: Vec<serde_json::Value> = rows.into_iter().map(|r| r.0).collect();
                     return (StatusCode::OK, Json(json!(subs))).into_response();
                 }
-                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
             }
         }
     }
     match flowlink_db::subscriptions::SubscriptionRepo::list_for_account(db.pool(), &claims.0.account_id).await {
         Ok(subs) => (StatusCode::OK, Json(json!(subs))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -796,7 +796,7 @@ pub async fn cancel_subscription(
             let _ = audit::log_event(db.pool(), None, &claims.0.account_id, "subscription.cancelled", Some("subscription"), Some(&id), json!({}), None).await;
             (StatusCode::OK, Json(json!({"cancelled": true}))).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -819,7 +819,7 @@ pub async fn create_order(
         db.pool(), &id, &claims.0.account_id, body.amount_kopecks, body.description.as_deref(), &body.payment_method,
     ).await {
         Ok(order) => (StatusCode::CREATED, Json(json!(order))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -842,13 +842,13 @@ pub async fn list_orders(
                     let orders: Vec<serde_json::Value> = rows.into_iter().map(|r| r.0).collect();
                     return (StatusCode::OK, Json(json!(orders))).into_response();
                 }
-                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
             }
         }
     }
     match flowlink_db::orders::OrderRepo::list_for_account(db.pool(), &claims.0.account_id).await {
         Ok(orders) => (StatusCode::OK, Json(json!(orders))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 

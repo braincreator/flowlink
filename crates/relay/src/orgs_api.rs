@@ -82,7 +82,7 @@ pub async fn require_org_role(
 ) -> Result<OrgMemberRow, (StatusCode, Json<Value>)> {
     let member = OrgRepo::get_member(pool, org_id, account_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))))?;
 
     match member {
         Some(m) if required_roles.contains(&m.role.as_str()) => Ok(m),
@@ -155,7 +155,7 @@ pub async fn list_my_orgs(State(state): State<AppState>, AccountIdExtractor(acco
 
     match OrgRepo::list_by_account(pool, &account_id).await {
         Ok(orgs) => Json(json!({ "orgs": orgs.iter().map(json_row).collect::<Vec<_>>() })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -194,7 +194,7 @@ pub async fn create_org(State(state): State<AppState>, AccountIdExtractor(accoun
             let _ = audit::log_event(pool, Some(&org.org_id.to_string()), &account_id, "org.created", Some("organization"), Some(&org.org_id.to_string()), json!({"name": &body.name}), None).await;
             (StatusCode::CREATED, Json(json_row(&org))).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -218,7 +218,7 @@ pub async fn get_org(State(state): State<AppState>, AccountIdExtractor(account_i
             Json(data).into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "organization not found"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -248,7 +248,7 @@ pub async fn update_org(State(state): State<AppState>, AccountIdExtractor(accoun
             Json(json_row(&org)).into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "organization not found"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -284,7 +284,7 @@ pub async fn delete_org(State(state): State<AppState>, AccountIdExtractor(accoun
             Json(json!({"ok": true, "message": "organization deleted"})).into_response()
         }
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "organization not found"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -323,7 +323,7 @@ pub async fn switch_org(State(state): State<AppState>, AccountIdExtractor(accoun
             "token_type": "Bearer",
             "org_id": org_id,
         })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -340,7 +340,7 @@ pub async fn list_members(State(state): State<AppState>, AccountIdExtractor(acco
 
     match OrgRepo::list_members(pool, org_id).await {
         Ok(members) => Json(json!({ "members": members.iter().map(json_member).collect::<Vec<_>>() })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -368,7 +368,7 @@ pub async fn invite_member(State(state): State<AppState>, AccountIdExtractor(acc
             let _ = audit::log_event(pool, Some(&org_id.to_string()), &account_id, "member.invited", Some("invitation"), Some(&inv.id.to_string()), json!({"email": body.email, "role": &body.role}), None).await;
             Json(json_invitation(&inv)).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -391,7 +391,7 @@ pub async fn accept_invite(State(state): State<AppState>, AccountIdExtractor(acc
             })).into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND, Json(json!({"error": "invitation not found or expired"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -408,7 +408,7 @@ pub async fn list_invites(State(state): State<AppState>, AccountIdExtractor(acco
 
     match OrgRepo::list_invitations(pool, org_id).await {
         Ok(invites) => Json(json!({ "invitations": invites.iter().map(json_invitation).collect::<Vec<_>>() })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -429,7 +429,7 @@ pub async fn remove_member(State(state): State<AppState>, AccountIdExtractor(acc
             Json(json!({"ok": true, "message": "member removed"})).into_response()
         }
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "member not found or is owner"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -465,7 +465,7 @@ pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_i
 
     let org = match OrgRepo::create(pool, &body.org_name, &slug, &account_id, "trial").await {
         Ok(o) => o,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     };
 
     // Enable trial: 7 days
@@ -491,7 +491,7 @@ pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_i
             "refresh_token": tokens.refresh_token,
             "expires_in": tokens.expires_in,
         })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
 
@@ -571,6 +571,12 @@ pub async fn change_member_role(State(state): State<AppState>, AccountIdExtracto
     if !["owner", "admin", "member", "viewer"].contains(&body.role.as_str()) {
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid role"}))).into_response();
     }
+    // Only owners can assign owner role
+    if body.role == "owner" {
+        if let Err(e) = require_org_role(pool, org_id, &account_id, &["owner"]).await {
+            return e.into_response();
+        }
+    }
 
     match OrgRepo::change_role(pool, org_id, &target_id, &body.role).await {
         Ok(true) => {
@@ -578,6 +584,6 @@ pub async fn change_member_role(State(state): State<AppState>, AccountIdExtracto
             Json(json!({"ok": true, "account_id": target_id, "new_role": body.role})).into_response()
         }
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "member not found or is owner"}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }

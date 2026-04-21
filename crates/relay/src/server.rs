@@ -843,6 +843,26 @@ async fn exec_agent(
             }
         }
     }
+    // Validate shell
+    if let Some(ref shell) = body.shell {
+        let allowed_shells = ["/bin/sh", "/bin/bash", "/usr/bin/bash", "/bin/zsh", "/usr/bin/zsh", "/bin/dash"];
+        if !allowed_shells.contains(&shell.as_str()) {
+            return (StatusCode::BAD_REQUEST, Json(SimpleResponse { ok: false, message: Some("Shell not allowed".into()) })).into_response();
+        }
+    }
+    // Block dangerous env vars
+    if let Some(ref env) = body.env {
+        let blocked_env = ["LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "PYTHONPATH", "NODE_OPTIONS", "BASH_FUNC"];
+        for key in env.keys() {
+            if blocked_env.iter().any(|b| key.starts_with(b)) {
+                return (StatusCode::BAD_REQUEST, Json(SimpleResponse { ok: false, message: Some(format!("Env var not allowed: {key}")) })).into_response();
+            }
+        }
+    }
+    // Validate command length
+    if body.command.len() > 8192 {
+        return (StatusCode::BAD_REQUEST, Json(SimpleResponse { ok: false, message: Some("Command too long (max 8192 chars)".into()) })).into_response();
+    }
     let msg = flowlink_core::Message::new(flowlink_core::MessageType::ExecRequest)
         .with_agent_id(&agent_id)
         .with_payload(flowlink_core::ExecRequestPayload {
@@ -1403,9 +1423,9 @@ async fn llm_chat(
             state.usage_tracker.record_tokens("_api_http", tokens_in, tokens_out).await;
             Json(resp).into_response()
         }
-        Err(e) => (
+        Err(_e) => (
             axum::http::StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": e.to_string() })),
+            Json(serde_json::json!({ "error": "LLM proxy error" })),
         ).into_response(),
     }
 }

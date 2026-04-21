@@ -90,7 +90,7 @@ pub async fn list_org_audit(
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
+            Json(json!({"error": "Internal error"})),
         )
             .into_response(),
     }
@@ -134,7 +134,7 @@ pub async fn list_webhooks(
         }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
+            Json(json!({"error": "Internal error"})),
         )
             .into_response(),
     }
@@ -188,7 +188,7 @@ pub async fn create_webhook(
         Ok(row) => (StatusCode::CREATED, Json(json_webhook(&row))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
+            Json(json!({"error": "Internal error"})),
         )
             .into_response(),
     }
@@ -214,7 +214,7 @@ pub async fn delete_webhook(
         Ok(false) => (StatusCode::NOT_FOUND, Json(json!({"error": "webhook not found"}))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
+            Json(json!({"error": "Internal error"})),
         )
             .into_response(),
     }
@@ -238,7 +238,7 @@ pub async fn test_webhook(
     let _wh = match WebhookRepo::get(pool, id, &org_id.to_string()).await {
         Ok(Some(w)) => w,
         Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "webhook not found"}))).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     };
 
     // Fire a test ping
