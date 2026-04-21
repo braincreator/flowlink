@@ -213,8 +213,9 @@ fn dashboard_redirect(config: &RelayConfig, access_token: &str, refresh_token: &
         Some(url) => url.to_string(),
         None => format!("http://{}", config.http_addr),
     };
+    // Use fragment (#) to prevent token leakage in browser history, referrer, access logs
     Redirect::temporary(&format!(
-        "{}/auth/callback?access_token={}&refresh_token={}",
+        "{}/auth/callback#access_token={}&refresh_token={}",
         base, access_token, refresh_token
     ))
 }
