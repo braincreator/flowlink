@@ -420,7 +420,7 @@ pub async fn logging_middleware(req: Request, next: Next) -> Response {
 mod tests {
     use super::*;
     use axum::body::Body;
-    use axum::http::{Request as HttpRequest, header, StatusCode};
+    use axum::http::{Request as HttpRequest, StatusCode};
     use tower::ServiceExt;
 
     fn test_app() -> axum::Router {

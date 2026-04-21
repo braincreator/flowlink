@@ -283,7 +283,7 @@ async fn wss_tls_rejects_without_agent_id() {
     .await;
 
     match result {
-        Ok((mut ws_stream, _resp)) => {
+        Ok((ws_stream, _resp)) => {
             let (mut _write, mut read) = ws_stream.split();
             let msg = tokio::time::timeout(Duration::from_secs(2), read.next()).await;
             match msg {

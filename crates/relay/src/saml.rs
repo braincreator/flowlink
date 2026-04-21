@@ -10,7 +10,6 @@ use axum::{
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 use crate::server::AppState;
 
@@ -235,6 +234,7 @@ pub async fn saml_login(
 }
 
 #[derive(Deserialize)]
+#[allow(non_snake_case)]
 pub struct SamlAcsParams {
     pub SAMLResponse: String,
     pub RelayState: Option<String>,

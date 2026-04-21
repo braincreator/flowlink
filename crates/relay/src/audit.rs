@@ -651,7 +651,7 @@ mod tests {
             command: "rm -rf /".into(),
             rejected_by: "policy".into(),
         });
-        let (level, action, target, result, metadata) = map_event_to_db_fields(&event);
+        let (level, action, _target, result, metadata) = map_event_to_db_fields(&event);
         assert_eq!(level, "warning");
         assert_eq!(action, "reject");
         assert_eq!(result.as_deref(), Some("denied"));
@@ -665,7 +665,7 @@ mod tests {
             command: "rm -rf /".into(),
             user: "bob".into(),
         });
-        let (level, action, target, result, metadata) = map_event_to_db_fields(&event);
+        let (level, action, _target, result, metadata) = map_event_to_db_fields(&event);
         assert_eq!(level, "high");
         assert_eq!(action, "policy_violation");
         assert_eq!(result.as_deref(), Some("violated"));
@@ -692,7 +692,7 @@ mod tests {
             duration_ms: 60000,
             commands_count: 42,
         });
-        let (level, action, target, result, metadata) = map_event_to_db_fields(&end);
+        let (level, action, _target, _result, metadata) = map_event_to_db_fields(&end);
         assert_eq!(level, "info");
         assert_eq!(action, "session_end");
         assert_eq!(metadata["duration_ms"], 60000);

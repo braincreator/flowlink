@@ -10,7 +10,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::api_keys::{ApiKeyRepo, ApiKeyRole, KeyIdentity};
+use crate::api_keys::{ApiKeyRepo, KeyIdentity};
 use crate::approval::ApprovalDecision;
 use crate::server::AppState;
 

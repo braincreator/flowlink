@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;
 

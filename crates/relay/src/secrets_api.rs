@@ -10,6 +10,7 @@ use uuid::Uuid;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 
 use crate::middleware::AccountIdExtractor;
+use crate::auth::Claims;
 use crate::server::AppState;
 
 fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
@@ -123,7 +124,7 @@ pub async fn list_secrets(
 
 pub async fn create_secret(
     State(state): State<AppState>,
-    AccountIdExtractor(account_id): AccountIdExtractor,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<CreateSecretRequest>,
 ) -> Result<(StatusCode, Json<SecretEntry>), (StatusCode, String)> {
     let pool = gp(&state)?;
@@ -131,12 +132,14 @@ pub async fn create_secret(
         return Err((StatusCode::BAD_REQUEST, "Key is required".into()));
     }
     let (encrypted, nonce) = encrypt(&body.value).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    // Default org for now — in production, take from auth context
-    let org_id = uuid::Uuid::parse_str("5f2f01e4-0904-467a-b929-e1ca94ea7bb2").unwrap();
+    let org_id: uuid::Uuid = match &claims.org_id {
+        Some(id) => uuid::Uuid::parse_str(id).unwrap_or_default(),
+        None => return Err((StatusCode::FORBIDDEN, "No organization selected".into())),
+    };
 
     let row = sqlx::query(
         "INSERT INTO secrets (org_id, key, encrypted_value, nonce, description, tags, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, org_id, key, description, tags, created_by, created_at::text, updated_at::text"
-    ).bind(org_id).bind(body.key.trim()).bind(&encrypted).bind(&nonce).bind(&body.description).bind(&body.tags).bind(&account_id)
+    ).bind(org_id).bind(body.key.trim()).bind(&encrypted).bind(&nonce).bind(&body.description).bind(&body.tags).bind(&claims.account_id)
     .fetch_one(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok((StatusCode::CREATED, Json(SecretEntry {

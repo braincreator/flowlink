@@ -42,11 +42,11 @@ impl RelayHandler {
 
     pub fn register_sender(&self, agent_id: String, sender: WsSender) {
         let id = agent_id.clone();
-        if let Some((_, old)) = self.ws_senders.insert(agent_id, sender) {
+        if let Some((old_tx, old_id)) = self.ws_senders.insert(agent_id, sender) {
             // Drop old sender channel — this causes the old WS handler's
             // write_task to end (receiver closed) → tokio::select! exits → cleanup.
-            // The old read_task will also get an error on next WS read.
-            drop(old);
+            drop(old_tx);
+            let _ = old_id;
             log::info!("Replaced sender for {id}: old session closed");
         }
     }
@@ -399,7 +399,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(100);
         h.register_sender("shared-agent".into(), (tx, 0));
 
-        let mut msgs: Vec<()> = vec![];
+        let msgs: Vec<()> = vec![];
         for _ in 0..10 {
             // We can't clone the handler, so we send from the same task
             let msg = flowlink_core::Message::new(flowlink_core::MessageType::Heartbeat);

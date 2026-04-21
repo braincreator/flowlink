@@ -6,7 +6,7 @@ use axum::{
     extract::{Path, State},
     response::IntoResponse,
     body::Bytes,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -83,6 +83,7 @@ fn get_billing_engine(state: &AppState) -> Result<&Arc<flowlink_billing::Billing
 }
 
 /// Constant-time string comparison для предотвращения timing-атак
+#[allow(dead_code)]
 fn const_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
@@ -440,7 +441,7 @@ pub async fn subscribe(
     // 54-ФЗ: require email or phone for receipt
     let customer_email = body.customer_email.clone().or_else(|| {
         // Try to get email from account DB
-        if let Some(db) = &state.db {
+        if let Some(_db) = &state.db {
             // Synchronous-ish: use try_get via account_id
             None // Will be populated below
         } else { None }
@@ -846,6 +847,7 @@ pub async fn list_orders(
 /// Tochka webhook JWT payload for acquiringInternetPayment event.
 /// See: https://developers.tochka.com/docs/tochka-api/opisanie-metodov/vebhuki
 #[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
 struct TochkaAcquiringPayload {
     #[serde(default)]
     customer_code: Option<String>,
@@ -879,7 +881,8 @@ fn decode_jwt_payload(token: &str) -> Result<serde_json::Value, String> {
     }
 
     // Attempt RS256 verification with Tochka public key
-    #[cfg(feature = "vault")]
+    #[allow(unexpected_cfgs)]
+    #[cfg(feature = "vault")] // vault feature enables blocking reqwest for key fetch
     if let Ok(key_json) = reqwest::blocking::Client::new()
         .get("https://enter.tochka.com/doc/openapi/static/keys/public")
         .timeout(std::time::Duration::from_secs(5))
@@ -904,6 +907,7 @@ fn decode_jwt_payload(token: &str) -> Result<serde_json::Value, String> {
 }
 
 /// Verify RS256 JWT signature using JWK public key
+#[allow(dead_code)]
 fn verify_rs256(token: &str, jwk: &serde_json::Value) -> Option<serde_json::Value> {
     use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 

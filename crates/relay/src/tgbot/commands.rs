@@ -712,7 +712,7 @@ pub async fn cmd_approvals(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
 
     // Send each approval as separate message with inline buttons
     for a in &approvals {
-        let short = if a.id.len() > 8 { &a.id[..8] } else { &a.id };
+        let _short = if a.id.len() > 8 { &a.id[..8] } else { &a.id };
         let cmd = if a.command.len() > 60 { format!("{}...", &a.command[..60]) } else { a.command.clone() };
         let risk_emoji = match a.risk_level.as_str() {
             "critical" => "🔴", "high" => "🟠", "medium" => "🟡", _ => "🟢",

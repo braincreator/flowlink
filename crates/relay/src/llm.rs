@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_proxy_creation() {
-        let proxy = LlmProxy::new(test_backends(), 30);
+        let _proxy = LlmProxy::new(test_backends(), 30);
         // No panic = success
         assert!(true);
     }
