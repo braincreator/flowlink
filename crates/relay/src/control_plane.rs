@@ -179,7 +179,7 @@ pub async fn signup(
         return (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({"error": "Rate limit exceeded"}))).into_response();
     }
     // Validate agent_id format (UUID-like)
-    if req.agent_id.is_empty() || req.agent_id.len() > 128 {
+    if req.agent_id.is_empty() || req.agent_id.len() > 128 || req.agent_id.contains('\0') || req.agent_id.contains('/') || req.agent_id.contains('\\') {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({"error": "Invalid agent_id"})),

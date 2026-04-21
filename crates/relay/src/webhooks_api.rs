@@ -157,12 +157,21 @@ pub async fn create_webhook(
     }
 
     // Validate URL
-    if url::Url::parse(&body.url).is_err() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "invalid url"})),
-        )
-            .into_response();
+    let parsed_url = match url::Url::parse(&body.url) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid url"}))).into_response(),
+    };
+
+    // SSRF protection: reject internal/private IPs
+    let host = parsed_url.host_str().unwrap_or("");
+    let blocked = ["127.0.0.1", "0.0.0.0", "localhost", "::1", "169.254.169.254",
+        "10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.2", "172.3",
+        "192.168.", "fc00:", "fe80:", "fd"];
+    if blocked.iter().any(|b| host.starts_with(*b) || host == *b) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Webhook URL must be publicly accessible"}))).into_response();
+    }
+    if parsed_url.scheme() != "https" {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "Webhook URL must use HTTPS"}))).into_response();
     }
 
     if body.events.is_empty() {
