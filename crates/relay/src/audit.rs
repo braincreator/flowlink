@@ -13,6 +13,7 @@ use chrono::Utc;
 use dashmap::DashMap;
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Sha256, Digest};
 
 use flowlink_core::channels::{AuditEvent, AuditEventType};
 
@@ -24,6 +25,8 @@ pub struct AuditStore {
     events: DashMap<String, AuditEvent>,
     journal_path: PathBuf,
     db: Option<Arc<flowlink_db::DbPool>>,
+    /// Hash of the last written entry — forms a chain
+    last_hash: std::sync::Mutex<String>,
 }
 
 impl AuditStore {
@@ -34,6 +37,7 @@ impl AuditStore {
             events: DashMap::new(),
             journal_path: journal_path.to_path_buf(),
             db,
+            last_hash: std::sync::Mutex::new("genesis".to_string()),
         };
         // Load existing journal
         if let Err(e) = store.load_journal() {
@@ -47,7 +51,17 @@ impl AuditStore {
         let journal_path = self.journal_path.clone();
         let event_clone = event.clone();
 
-        // Persist to journal (fire-and-forget, non-blocking)
+        // Compute integrity hash (chain)
+        let prev_hash = self.last_hash.lock().unwrap().clone();
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(prev_hash.as_bytes());
+        if let Ok(json) = serde_json::to_string(&event) {
+            hasher.update(json.as_bytes());
+        }
+        let current_hash = hex::encode(hasher.finalize());
+        *self.last_hash.lock().unwrap() = current_hash.clone();
+
+        // Persist to journal with hash (fire-and-forget, non-blocking)
         std::thread::spawn(move || {
             if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&journal_path) {
                 if let Ok(line) = serde_json::to_string(&event_clone) {

@@ -946,8 +946,30 @@ fn verify_rs256(token: &str, jwk: &serde_json::Value) -> Option<serde_json::Valu
 /// - Mark order as paid, activate the account's plan
 pub async fn tochka_webhook(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    // Verify webhook secret to prevent CSRF
+    if let Ok(secret) = std::env::var("TOCHKA_WEBHOOK_SECRET") {
+        let sig = headers.get("X-Webhook-Signature")
+            .or_else(|| headers.get("X-Tochka-Signature"))
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if !sig.is_empty() {
+            use hmac::Mac;
+            let mut mac: hmac::Hmac<sha2::Sha256> = Mac::new_from_slice(secret.as_bytes()).unwrap();
+            mac.update(&body);
+            let expected = hex::encode(mac.finalize().into_bytes());
+            if !const_eq(sig, &expected) {
+                log::warn!("Tochka webhook: invalid signature");
+                return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid signature"}))).into_response();
+            }
+        } else {
+            log::warn!("Tochka webhook: no signature header");
+        }
+    }
+    // else: no secret configured, skip verification (dev mode)
+
     let body_str = match String::from_utf8(body.to_vec()) {
         Ok(s) => s.trim().to_string(),
         Err(e) => {
