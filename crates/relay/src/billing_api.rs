@@ -432,6 +432,20 @@ pub async fn subscribe(
         Err(r) => return r,
     };
 
+    // Check for existing active subscription (prevent duplicates)
+    if let Some(db) = &state.db {
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT plan_id FROM subscriptions WHERE account_id = $1 AND status IN ('active', 'trialing') LIMIT 1"
+        ).bind(&claims.0.account_id)
+        .fetch_optional(db.pool()).await.unwrap_or(None);
+        if let Some(current_plan) = existing {
+            return (StatusCode::CONFLICT, Json(json!({
+                "error": "Active subscription exists",
+                "current_plan": current_plan
+            }))).into_response();
+        }
+    }
+
     let plan = match billing_engine.plans().get(&body.plan_id) {
         Some(p) => p,
         None => return (StatusCode::NOT_FOUND, Json(json!({
@@ -505,7 +519,7 @@ pub async fn subscribe(
             log::error!("Tochka subscription creation failed: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
                 "error": "Subscription creation failed",
-                "details": format!("{e}")
+                "details": "Check logs for details"
             }))).into_response()
         }
     }
@@ -527,7 +541,7 @@ pub async fn get_subscription(
         Ok(sub) => (StatusCode::OK, Json(json!({"subscription_id": sub.subscription_id, "customer_id": sub.customer_id, "plan_id": sub.plan_id, "status": sub.status, "amount": sub.amount, "period": sub.period, "current_period_start": sub.current_period_start, "current_period_end": sub.current_period_end}))).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(json!({
             "error": "No active subscription",
-            "details": format!("{e}")
+            "details": "Check logs for details"
         }))).into_response(),
     }
 }
@@ -549,7 +563,7 @@ pub async fn pause_subscription(
         Ok(s) => s,
         Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No active subscription",
-            "details": format!("{e}")
+            "details": "Check logs for details"
         }))).into_response(),
     };
 
@@ -577,7 +591,7 @@ pub async fn resume_subscription(
         Ok(s) => s,
         Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No subscription found",
-            "details": format!("{e}")
+            "details": "Check logs for details"
         }))).into_response(),
     };
 
@@ -605,7 +619,7 @@ pub async fn cancel_tochka_subscription(
         Ok(s) => s,
         Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No subscription found",
-            "details": format!("{e}")
+            "details": "Check logs for details"
         }))).into_response(),
     };
 
@@ -665,7 +679,7 @@ pub async fn change_subscription_plan(
         // UPGRADE: immediate — cancel old, create new
         let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
             Ok(s) => s,
-            Err(e) => return (StatusCode::NOT_FOUND, Json(json!({"error": "No active subscription", "details": format!("{e}")}))).into_response(),
+            Err(e) => return (StatusCode::NOT_FOUND, Json(json!({"error": "No active subscription", "details": "Check logs for details"}))).into_response(),
         };
 
         let period = flowlink_billing::tochka::BillingPeriod::from_str_opt(&account_billing.plan_id)

@@ -415,6 +415,9 @@ async fn mcp_exec(state: &AppState, id: Option<Value>, args: &Value, identity: O
         Some(v) => v,
         None => return mcp_err(id, -32602, "command: required").into_response(),
     };
+    if command.len() > 8192 {
+        return mcp_err(id, -32602, "command too long (max 8192 chars)").into_response();
+    }
 
     let resolved = match resolve_agent(&state.pool, &agent_id) {
         Some(id) => id,
@@ -427,6 +430,7 @@ async fn mcp_exec(state: &AppState, id: Option<Value>, args: &Value, identity: O
     }
 
     let timeout: i32 = args.get("timeout").and_then(|v| v.as_i64()).unwrap_or(120) as i32;
+    let timeout = timeout.clamp(1, 600); // max 10 minutes
     let workdir = args.get("workdir").and_then(|v| v.as_str()).map(String::from);
 
     let msg = flowlink_core::Message::new(flowlink_core::MessageType::ExecRequest)
@@ -477,6 +481,9 @@ async fn mcp_write(state: &AppState, id: Option<Value>, args: &Value) -> axum::r
         _ => return mcp_err(id, -32602, "agent, path, content: required").into_response(),
     };
     let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    if content.len() > 1024 * 1024 {
+        return mcp_err(id, -32602, "content too large (max 1MB)").into_response();
+    }
 
     let resolved = match resolve_agent(&state.pool, &agent_id) {
         Some(id) => id,

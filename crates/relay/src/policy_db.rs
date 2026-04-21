@@ -172,7 +172,7 @@ pub async fn list_policies(
 
     match load_all_policies(db).await {
         Ok(policies) => (StatusCode::OK, Json(serde_json::json!({"policies": policies}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => { log::error!("Internal error: {e}"); (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Internal error"}))).into_response() },
     }
 }
 
@@ -261,7 +261,8 @@ pub async fn create_policy(
     .await;
 
     if let Err(e) = result {
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response();
+        log::error!("Internal error: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Internal error"}))).into_response();
     }
 
     // Delete old rules
@@ -305,7 +306,7 @@ pub async fn delete_policy(
 
     match delete_policy_db(db, &policy_id).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true, "deleted": policy_id}))).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => { log::error!("Internal error: {e}"); (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Internal error"}))).into_response() },
     }
 }
 
@@ -337,7 +338,7 @@ pub async fn bind_policy_to_agent(
             }
             (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => { log::error!("Internal error: {e}"); (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Internal error"}))).into_response() },
     }
 }
 
@@ -363,6 +364,6 @@ pub async fn unbind_policy_from_agent(
             }
             (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
+        Err(e) => { log::error!("Internal error: {e}"); (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Internal error"}))).into_response() },
     }
 }

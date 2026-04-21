@@ -353,6 +353,18 @@ pub async fn verify_code(
     let pool = db.pool();
 
     // Verify and consume code
+    // Rate limit: max 10 attempts per email
+    let attempt_key = format!("verify_attempts:{email}");
+    let attempts: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(attempt_count, 0) FROM email_verification WHERE email = $1 AND purpose = 'auth' ORDER BY created_at DESC LIMIT 1"
+    ).bind(&email)
+    .fetch_optional(pool).await.unwrap_or(None).unwrap_or(0);
+    if attempts >= 10 {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({
+            "ok": false, "error": "Too many attempts. Request a new code."
+        }))).into_response();
+    }
+
     let account_id = match flowlink_db::email_verification::EmailVerificationRepo::verify_and_consume_code(
         pool, &email, code, "auth"
     ).await {
