@@ -123,9 +123,17 @@ pub fn check_trial_status(org: &OrgRow) -> TrialStatus {
 // ═══════════════════════════════════════════════
 
 /// GET /api/billing — get billing info for the authenticated account
+
+/// Extract org_id from Claims, return 403 if missing
+fn require_org(claims: &crate::auth::Claims) -> Result<uuid::Uuid, (StatusCode, axum::Json<serde_json::Value>)> {
+    match &claims.org_id {
+        Some(id) => uuid::Uuid::parse_str(id).map_err(|_| (StatusCode::BAD_REQUEST, axum::Json(json!({"error": "Invalid org_id"})))),
+        None => Err((StatusCode::FORBIDDEN, axum::Json(json!({"error": "Organization required"})))),
+    }
+}
+
 pub async fn get_billing_info(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
     claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let billing_engine = match get_billing_engine(&state) {
@@ -148,7 +156,7 @@ pub async fn get_billing_info(
     // Ensure account exists in DB
     if let Some(db) = &state.db {
         if let Err(e) = flowlink_db::accounts::AccountRepo::get_or_create(
-            db.pool(), &account.0, flowlink_billing::plans::PlanId::Trial.as_str(),
+            db.pool(), &claims.0.account_id, flowlink_billing::plans::PlanId::Trial.as_str(),
         ).await {
             log::warn!("DB account lookup failed: {e}");
         }
@@ -156,12 +164,12 @@ pub async fn get_billing_info(
 
     // Use org's plan_id if org-scoped
     let effective_plan_id = org.as_ref().map(|o| o.plan_id.clone()).unwrap_or_else(|| {
-        billing_engine.get_or_create_account(&account.0).plan_id.clone()
+        billing_engine.get_or_create_account(&claims.0.account_id).plan_id.clone()
     });
 
-    let account_billing = billing_engine.get_or_create_account(&account.0);
+    let account_billing = billing_engine.get_or_create_account(&claims.0.account_id);
     let plan = billing_engine.plans().get(&effective_plan_id);
-    let usage = billing_engine.usage().get_snapshot(&account.0);
+    let usage = billing_engine.usage().get_snapshot(&claims.0.account_id);
 
     let plan_name = plan.as_ref().map(|p| p.name.clone()).unwrap_or_default();
     let available_plans: Vec<Value> = billing_engine.plans()
@@ -208,7 +216,7 @@ pub async fn get_billing_info(
 /// GET /api/billing/usage — get current usage snapshot
 pub async fn get_usage(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let all_tracker_usage = state.usage_tracker.get_all_usage().await;
     let (daily_requests, daily_tokens) = state.usage_tracker.today_stats().await;
@@ -223,7 +231,7 @@ pub async fn get_usage(
     });
 
     if let Some(billing_engine) = &state.billing {
-        let snapshot = billing_engine.usage().get_snapshot(&account.0);
+        let snapshot = billing_engine.usage().get_snapshot(&claims.0.account_id);
         response["billing"] = serde_json::to_value(&snapshot).unwrap_or(json!(null));
     }
 
@@ -257,7 +265,6 @@ pub async fn list_plans(State(state): State<AppState>) -> impl IntoResponse {
 /// POST /api/billing/change-plan — change plan
 pub async fn change_plan(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
     claims: ClaimsExtractor,
     Json(body): Json<ChangePlanRequest>,
 ) -> impl IntoResponse {
@@ -266,48 +273,43 @@ pub async fn change_plan(
         Err(r) => return r,
     };
 
-    let mut account_billing = billing_engine.get_or_create_account(&account.0);
+    let mut account_billing = billing_engine.get_or_create_account(&claims.0.account_id);
 
     let current_plan_id = account_billing.plan_id.clone();
     match billing_engine.change_plan(&mut account_billing, &body.plan_id) {
         Ok(created_invoice) => {
             if let Some(db) = &state.db {
-                if let Err(e) = flowlink_db::accounts::AccountRepo::update_plan(
-                    db.pool(), &account.0, &body.plan_id,
-                ).await {
-                    log::warn!("Failed to persist plan change to DB: {e}");
-                }
-                // Update org plan if org-scoped
-                if let Some(ref org_id_str) = claims.0.org_id {
-                    if let Ok(uuid) = uuid::Uuid::parse_str(org_id_str) {
-                        if let Err(e) = sqlx::query("UPDATE organizations SET plan_id = $2, updated_at = NOW() WHERE org_id = $1")
-                            .bind(uuid).bind(&body.plan_id).execute(db.pool()).await
-                        {
-                            log::warn!("Failed to update org plan: {e}");
+                // Wrap in transaction to avoid partial update
+                match db.pool().begin().await {
+                    Ok(mut tx) => {
+                        let res: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
+                            sqlx::query("UPDATE accounts SET plan_id = $1, updated_at = NOW() WHERE account_id = $2")
+                                .bind(&body.plan_id).bind(&claims.0.account_id)
+                                .execute(&mut *tx).await?;
+                            if let Some(ref org_id_str) = claims.0.org_id {
+                                if let Ok(uuid) = uuid::Uuid::parse_str(org_id_str) {
+                                    sqlx::query("UPDATE organizations SET plan_id = $2, updated_at = NOW() WHERE org_id = $1")
+                                        .bind(uuid).bind(&body.plan_id).execute(&mut *tx).await?;
+                                }
+                            }
+                            if let Some(ref inv) = created_invoice {
+                                sqlx::query("INSERT INTO invoices (id, account_id, number, status, subtotal_kopecks, tax_kopecks, total_kopecks, currency, payment_method, created_at, paid_at, due_at, notes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+                                    .bind(&inv.id).bind(&inv.account_id).bind(&inv.number)
+                                    .bind(format!("{:?}", inv.status).to_lowercase())
+                                    .bind(inv.subtotal_kopecks as i64).bind(inv.tax_kopecks as i64).bind(inv.total_kopecks as i64)
+                                    .bind(&inv.currency)
+                                    .bind(inv.payment_method.as_ref().map(|m| format!("{:?}", m).to_lowercase()))
+                                    .bind(inv.created_at).bind(inv.paid_at).bind(inv.due_at).bind(&inv.notes)
+                                    .execute(&mut *tx).await?;
+                            }
+                            Ok(())
+                        }.await;
+                        match res {
+                            Ok(()) => { let _ = tx.commit().await; }
+                            Err(e) => { log::warn!("Transaction failed, rolling back: {e}"); }
                         }
                     }
-                }
-                if let Some(ref inv) = created_invoice {
-                    let row = flowlink_db::invoices::InvoiceRow {
-                        id: inv.id.clone(),
-                        account_id: inv.account_id.clone(),
-                        number: inv.number.clone(),
-                        status: format!("{:?}", inv.status).to_lowercase(),
-                        subtotal_kopecks: inv.subtotal_kopecks as i64,
-                        tax_kopecks: inv.tax_kopecks as i64,
-                        total_kopecks: inv.total_kopecks as i64,
-                        currency: inv.currency.clone(),
-                        payment_method: inv.payment_method.as_ref().map(|m| format!("{:?}", m).to_lowercase()),
-                        created_at: inv.created_at,
-                        paid_at: inv.paid_at,
-                        due_at: inv.due_at,
-                        notes: inv.notes.clone(),
-                    };
-                    if let Err(e) = flowlink_db::invoices::InvoiceRepo::create(
-                        db.pool(), &row, &[],
-                    ).await {
-                        log::warn!("Failed to persist invoice to DB: {e}");
-                    }
+                    Err(e) => log::warn!("Failed to begin transaction: {e}"),
                 }
             }
             let mut resp = json!({
@@ -319,12 +321,12 @@ pub async fn change_plan(
             }
             // Audit log
             if let Some(db) = &state.db {
-                let _ = audit::log_event(db.pool(), claims.0.org_id.as_deref(), &account.0, "plan.changed", Some("subscription"), None, json!({"old_plan": &current_plan_id, "new_plan": &body.plan_id}), None).await;
+                let _ = audit::log_event(db.pool(), claims.0.org_id.as_deref(), &claims.0.account_id, "plan.changed", Some("subscription"), None, json!({"old_plan": &current_plan_id, "new_plan": &body.plan_id}), None).await;
             }
             // Send plan changed email
             if let Some(email_svc) = &state.email_service {
                 if let Some(db) = &state.db {
-                    if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &account.0).await {
+                    if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &claims.0.account_id).await {
                         if let Some(ref email) = account.email {
                             let old_plan = account.plan_id.clone();
                             let new_plan = body.plan_id.clone();
@@ -352,14 +354,13 @@ pub async fn change_plan(
 /// GET /api/billing/invoices — list invoices
 pub async fn list_invoices(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
     claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let billing_engine = match get_billing_engine(&state) {
         Ok(e) => e,
         Err(r) => return r,
     };
-    let invoices = billing_engine.invoices().list_for_account(&account.0);
+    let invoices = billing_engine.invoices().list_for_account(&claims.0.account_id);
     let _ = claims; // may be used for org filtering later
     (StatusCode::OK, Json(invoices)).into_response()
 }
@@ -409,11 +410,11 @@ pub async fn list_payment_methods(State(state): State<AppState>) -> impl IntoRes
 /// POST /api/billing/subscribe — create Tochka subscription
 pub async fn subscribe(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
     Json(body): Json<SubscribeRequest>,
 ) -> impl IntoResponse {
     // Require authenticated account (not "default")
-    if account.0 == "default" {
+    if claims.0.account_id == "default" {
         return (StatusCode::UNAUTHORIZED, Json(json!({
             "error": "Authentication required"
         }))).into_response();
@@ -449,7 +450,7 @@ pub async fn subscribe(
     // Fetch email from account profile if not provided
     let customer_email = if customer_email.is_none() {
         if let Some(db) = &state.db {
-            match flowlink_db::accounts::AccountRepo::get(db.pool(), &account.0).await {
+            match flowlink_db::accounts::AccountRepo::get(db.pool(), &claims.0.account_id).await {
                 Ok(Some(acc)) => acc.email.filter(|e| !e.is_empty()),
                 _ => None,
             }
@@ -469,7 +470,7 @@ pub async fn subscribe(
     let description = format!("FlowLink {} — подписка", plan.name);
 
     let req = flowlink_billing::tochka::CreateSubscriptionRequest {
-        customer_id: account.0.clone(),
+        customer_id: claims.0.account_id.clone(),
         plan_id: body.plan_id.clone(),
         period,
         amount,
@@ -484,10 +485,10 @@ pub async fn subscribe(
         Ok(sub) => {
             // Persist to DB
             if let Some(db) = &state.db {
-                let _ = audit::log_event(db.pool(), None, &account.0, "plan.changed", Some("subscription"), Some(&sub.subscription_id), json!({"plan_id": &body.plan_id, "amount": amount}), None).await;
+                let _ = audit::log_event(db.pool(), None, &claims.0.account_id, "plan.changed", Some("subscription"), Some(&sub.subscription_id), json!({"plan_id": &body.plan_id, "amount": amount}), None).await;
                 let period_str = period.as_str().to_string();
                 if let Err(e) = flowlink_db::subscriptions::SubscriptionRepo::create(
-                    db.pool(), &sub.subscription_id, &account.0, &body.plan_id,
+                    db.pool(), &sub.subscription_id, &claims.0.account_id, &body.plan_id,
                     &period_str, amount as i64, Some(&sub.subscription_id),
                 ).await {
                     log::warn!("Failed to persist subscription to DB: {e}");
@@ -513,7 +514,7 @@ pub async fn subscribe(
 /// GET /api/billing/subscription — get current subscription status
 pub async fn get_subscription(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let tochka = match &state.tochka {
         Some(t) => t,
@@ -522,7 +523,7 @@ pub async fn get_subscription(
         }))).into_response(),
     };
 
-    match tochka.get_subscription_by_customer(&account.0).await {
+    match tochka.get_subscription_by_customer(&claims.0.account_id).await {
         Ok(sub) => (StatusCode::OK, Json(json!({"subscription_id": sub.subscription_id, "customer_id": sub.customer_id, "plan_id": sub.plan_id, "status": sub.status, "amount": sub.amount, "period": sub.period, "current_period_start": sub.current_period_start, "current_period_end": sub.current_period_end}))).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(json!({
             "error": "No active subscription",
@@ -534,7 +535,7 @@ pub async fn get_subscription(
 /// POST /api/billing/subscription/pause — pause subscription
 pub async fn pause_subscription(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let tochka = match &state.tochka {
         Some(t) => t,
@@ -544,7 +545,7 @@ pub async fn pause_subscription(
     };
 
     // First find subscription by customer
-    let sub = match tochka.get_subscription_by_customer(&account.0).await {
+    let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
         Ok(s) => s,
         Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No active subscription",
@@ -563,7 +564,7 @@ pub async fn pause_subscription(
 /// POST /api/billing/subscription/resume — resume subscription
 pub async fn resume_subscription(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let tochka = match &state.tochka {
         Some(t) => t,
@@ -572,7 +573,7 @@ pub async fn resume_subscription(
         }))).into_response(),
     };
 
-    let sub = match tochka.get_subscription_by_customer(&account.0).await {
+    let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
         Ok(s) => s,
         Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No subscription found",
@@ -591,7 +592,7 @@ pub async fn resume_subscription(
 /// DELETE /api/billing/subscription — cancel subscription
 pub async fn cancel_tochka_subscription(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let tochka = match &state.tochka {
         Some(t) => t,
@@ -600,7 +601,7 @@ pub async fn cancel_tochka_subscription(
         }))).into_response(),
     };
 
-    let sub = match tochka.get_subscription_by_customer(&account.0).await {
+    let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
         Ok(s) => s,
         Err(e) => return (StatusCode::NOT_FOUND, Json(json!({
             "error": "No subscription found",
@@ -611,7 +612,7 @@ pub async fn cancel_tochka_subscription(
     match tochka.cancel_subscription(&sub.subscription_id).await {
         Ok(cancelled) => {
             if let Some(db) = &state.db {
-                let _ = audit::log_event(db.pool(), None, &account.0, "subscription.cancelled", Some("subscription"), Some(&sub.subscription_id), json!({}), None).await;
+                let _ = audit::log_event(db.pool(), None, &claims.0.account_id, "subscription.cancelled", Some("subscription"), Some(&sub.subscription_id), json!({}), None).await;
                 let _ = flowlink_db::subscriptions::SubscriptionRepo::cancel(
                     db.pool(), &sub.subscription_id,
                 ).await;
@@ -629,7 +630,7 @@ pub async fn cancel_tochka_subscription(
 /// Downgrade: scheduled at end of current period
 pub async fn change_subscription_plan(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
     Json(body): Json<ChangeSubscriptionPlanRequest>,
 ) -> impl IntoResponse {
     let tochka = match &state.tochka {
@@ -642,7 +643,7 @@ pub async fn change_subscription_plan(
     };
 
     // Get current account billing
-    let account_billing = billing_engine.get_or_create_account(&account.0);
+    let account_billing = billing_engine.get_or_create_account(&claims.0.account_id);
     let current_plan_id = account_billing.plan_id.clone();
 
     let current_plan = match billing_engine.plans().get(&current_plan_id) {
@@ -662,7 +663,7 @@ pub async fn change_subscription_plan(
 
     if is_upgrade {
         // UPGRADE: immediate — cancel old, create new
-        let sub = match tochka.get_subscription_by_customer(&account.0).await {
+        let sub = match tochka.get_subscription_by_customer(&claims.0.account_id).await {
             Ok(s) => s,
             Err(e) => return (StatusCode::NOT_FOUND, Json(json!({"error": "No active subscription", "details": format!("{e}")}))).into_response(),
         };
@@ -677,7 +678,7 @@ pub async fn change_subscription_plan(
 
         // Create new
         let req = flowlink_billing::tochka::CreateSubscriptionRequest {
-            customer_id: account.0.clone(),
+            customer_id: claims.0.account_id.clone(),
             plan_id: body.new_plan_id.clone(),
             period,
             amount: new_plan.price_kopecks,
@@ -691,13 +692,13 @@ pub async fn change_subscription_plan(
         match tochka.create_subscription(&req).await {
             Ok(new_sub) => {
                 // Update billing engine
-                let mut billing = billing_engine.get_or_create_account(&account.0);
+                let mut billing = billing_engine.get_or_create_account(&claims.0.account_id);
                 let _ = billing_engine.change_plan(&mut billing, &body.new_plan_id);
 
                 if let Some(db) = &state.db {
-                    let _ = flowlink_db::accounts::AccountRepo::update_plan(db.pool(), &account.0, &body.new_plan_id).await;
+                    let _ = flowlink_db::accounts::AccountRepo::update_plan(db.pool(), &claims.0.account_id, &body.new_plan_id).await;
                     if let Err(e) = flowlink_db::subscriptions::SubscriptionRepo::create(
-                        db.pool(), &new_sub.subscription_id, &account.0, &body.new_plan_id,
+                        db.pool(), &new_sub.subscription_id, &claims.0.account_id, &body.new_plan_id,
                         period.as_str(), new_plan.price_kopecks as i64, Some(&new_sub.subscription_id),
                     ).await {
                         log::warn!("Failed to persist new subscription: {e}");
@@ -722,7 +723,7 @@ pub async fn change_subscription_plan(
             let _ = sqlx::query("UPDATE accounts SET pending_plan_id = $1, pending_plan_effective = $2 WHERE account_id = $3")
                 .bind(&body.new_plan_id)
                 .bind(effective_date)
-                .bind(&account.0)
+                .bind(&claims.0.account_id)
                 .execute(db.pool())
                 .await;
         }
@@ -740,7 +741,6 @@ pub async fn change_subscription_plan(
 // GET /api/billing/subscriptions — список подписок из БД
 pub async fn list_subscriptions(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
     claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let db = match &state.db {
@@ -761,7 +761,7 @@ pub async fn list_subscriptions(
             }
         }
     }
-    match flowlink_db::subscriptions::SubscriptionRepo::list_for_account(db.pool(), &account.0).await {
+    match flowlink_db::subscriptions::SubscriptionRepo::list_for_account(db.pool(), &claims.0.account_id).await {
         Ok(subs) => (StatusCode::OK, Json(json!(subs))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
@@ -771,7 +771,7 @@ pub async fn list_subscriptions(
 pub async fn cancel_subscription(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    _account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let db = match &state.db {
         Some(db) => db,
@@ -779,7 +779,7 @@ pub async fn cancel_subscription(
     };
     match flowlink_db::subscriptions::SubscriptionRepo::cancel(db.pool(), &id).await {
         Ok(()) => {
-            let _ = audit::log_event(db.pool(), None, &_account.0, "subscription.cancelled", Some("subscription"), Some(&id), json!({}), None).await;
+            let _ = audit::log_event(db.pool(), None, &claims.0.account_id, "subscription.cancelled", Some("subscription"), Some(&id), json!({}), None).await;
             (StatusCode::OK, Json(json!({"cancelled": true}))).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
@@ -793,7 +793,7 @@ pub async fn cancel_subscription(
 /// POST /api/billing/orders — создать платёжный заказ
 pub async fn create_order(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
     Json(body): Json<CreateOrderRequest>,
 ) -> impl IntoResponse {
     let db = match &state.db {
@@ -802,7 +802,7 @@ pub async fn create_order(
     };
     let id = uuid::Uuid::new_v4().to_string();
     match flowlink_db::orders::OrderRepo::create(
-        db.pool(), &id, &account.0, body.amount_kopecks, body.description.as_deref(), &body.payment_method,
+        db.pool(), &id, &claims.0.account_id, body.amount_kopecks, body.description.as_deref(), &body.payment_method,
     ).await {
         Ok(order) => (StatusCode::CREATED, Json(json!(order))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
@@ -812,7 +812,6 @@ pub async fn create_order(
 /// GET /api/billing/orders — список заказов аккаунта
 pub async fn list_orders(
     State(state): State<AppState>,
-    account: AccountIdExtractor,
     claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let db = match &state.db {
@@ -833,7 +832,7 @@ pub async fn list_orders(
             }
         }
     }
-    match flowlink_db::orders::OrderRepo::list_for_account(db.pool(), &account.0).await {
+    match flowlink_db::orders::OrderRepo::list_for_account(db.pool(), &claims.0.account_id).await {
         Ok(orders) => (StatusCode::OK, Json(json!(orders))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))).into_response(),
     }
@@ -1184,12 +1183,12 @@ pub async fn check_expiry(
 /// Returns the account_id as the code (user sends /start <code> in TG bot)
 pub async fn tg_link_code(
     State(_state): State<AppState>,
-    account: AccountIdExtractor,
+    claims: ClaimsExtractor,
 ) -> impl IntoResponse {
     let bot_username = std::env::var("TG_BOT_USERNAME").unwrap_or_else(|_| "flowlink_bot".to_string());
-    let link = format!("https://t.me/{}/start/{}", bot_username, account.0);
+    let link = format!("https://t.me/{}/start/{}", bot_username, claims.0.account_id);
     (StatusCode::OK, Json(json!({
-        "code": account.0,
+        "code": claims.0.account_id,
         "link": link,
         "instructions": "Send this link to your Telegram or open it directly to link your account."
     }))).into_response()

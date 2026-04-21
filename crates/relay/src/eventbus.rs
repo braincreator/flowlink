@@ -7,6 +7,7 @@ use tokio::sync::broadcast;
 
 pub struct EventBus {
     channels: Arc<DashMap<String, broadcast::Sender<String>>>,
+    max_subscribers: usize,
 }
 
 impl Default for EventBus {
@@ -19,6 +20,7 @@ impl EventBus {
     pub fn new() -> Self {
         Self {
             channels: Arc::new(DashMap::new()),
+            max_subscribers: 100,
         }
     }
 
@@ -35,6 +37,11 @@ impl EventBus {
             .entry(channel.to_string())
             .or_insert_with(|| broadcast::channel(256).0)
             .subscribe()
+    }
+
+    /// Number of active channels (monitoring).
+    pub fn channel_count(&self) -> usize {
+        self.channels.len()
     }
 }
 

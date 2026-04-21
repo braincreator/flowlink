@@ -1220,7 +1220,11 @@ struct IngestAlertBody {
 async fn shield_ingest_alert(
     State(state): State<AppState>,
     Json(body): Json<IngestAlertBody>,
-) -> Json<SimpleResponse> {
+) -> impl IntoResponse {
+    // Rate limit: 30 alerts per minute per instance
+    if !state.rate_limiter.allow("shield_ingest") {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(SimpleResponse { ok: false, message: Some("Rate limit exceeded".into()) })).into_response();
+    }
     let entry = ShieldAlertEntry {
         alert_id: body.alert_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         pid: body.pid,
@@ -1237,7 +1241,7 @@ async fn shield_ingest_alert(
     };
     state.shield_alerts.add(entry);
     state.eventbus.publish("shield_alert", &serde_json::to_string(&body).unwrap_or_default());
-    Json(SimpleResponse { ok: true, message: Some("Alert recorded".into()) })
+    (StatusCode::OK, Json(SimpleResponse { ok: true, message: Some("Alert recorded".into()) })).into_response()
 }
 
 /// Receive resolution notification from Shield Guard.

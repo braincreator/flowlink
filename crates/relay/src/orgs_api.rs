@@ -263,6 +263,21 @@ pub async fn delete_org(State(state): State<AppState>, AccountIdExtractor(accoun
         return e.into_response();
     }
 
+    // Cascade delete related data not covered by DB FK CASCADE
+    let cleanup_queries = [
+        "DELETE FROM compliance_reports WHERE org_id = $1",
+        "DELETE FROM interactive_sessions WHERE org_id = $1",
+        "DELETE FROM secrets WHERE org_id = $1",
+        "DELETE FROM policies WHERE org_id = $1",
+        "DELETE FROM command_history WHERE org_id = $1",
+        "DELETE FROM approval_log WHERE org_id = $1",
+        "DELETE FROM webhooks WHERE org_id = $1",
+        "DELETE FROM audit_log WHERE org_id = $1",
+    ];
+    for q in &cleanup_queries {
+        let _ = sqlx::query(q).bind(org_id).execute(pool).await;
+    }
+
     match OrgRepo::delete(pool, org_id).await {
         Ok(true) => {
             let _ = audit::log_event(pool, Some(&org_id.to_string()), &account_id, "org.deleted", Some("organization"), Some(&org_id.to_string()), json!({}), None).await;

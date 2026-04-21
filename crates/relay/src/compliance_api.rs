@@ -73,12 +73,14 @@ pub async fn list_reports(
 
 pub async fn get_report(
     State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<ComplianceReport>), (StatusCode, String)> {
     let pool = gp(&state)?;
+    let org_id: Option<uuid::Uuid> = claims.org_id.as_ref().and_then(|s| uuid::Uuid::parse_str(s).ok());
     let row = sqlx::query(
-        "SELECT id, org_id, report_type, period_start::text, period_end::text, status, generated_by, data, pdf_path, created_at::text FROM compliance_reports WHERE id = $1"
-    ).bind(id).fetch_optional(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        "SELECT id, org_id, report_type, period_start::text, period_end::text, status, generated_by, data, pdf_path, created_at::text FROM compliance_reports WHERE id = $1 AND ($2::uuid IS NULL OR org_id = $2)"
+    ).bind(id).bind(org_id).fetch_optional(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     match row {
         Some(r) => Ok((StatusCode::OK, Json(row_to_report(&r)))),
@@ -159,11 +161,13 @@ async fn gather_report_data(pool: &sqlx::PgPool, req: &GenerateReportRequest) ->
 
 pub async fn delete_report(
     State(state): State<AppState>,
-    _account: AccountIdExtractor,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    if !claims.is_admin { return Err((StatusCode::FORBIDDEN, "Admin required".into())); }
     let pool = gp(&state)?;
-    let result = sqlx::query("DELETE FROM compliance_reports WHERE id = $1").bind(id)
+    let org_id: uuid::Uuid = claims.org_id.as_ref().and_then(|s| uuid::Uuid::parse_str(s).ok()).ok_or((StatusCode::FORBIDDEN, "Organization required".to_string()))?;
+    let result = sqlx::query("DELETE FROM compliance_reports WHERE id = $1 AND org_id = $2").bind(id).bind(org_id)
         .execute(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     if result.rows_affected() == 0 { return Err((StatusCode::NOT_FOUND, "Report not found".into())); }
     Ok(StatusCode::NO_CONTENT)
