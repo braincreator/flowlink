@@ -1012,6 +1012,18 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
                                             .await;
                                         }
                                         log::info!("Approval request stored: {} agent={} cmd={:?} risk={}", req_id, aid, command, risk);
+
+                                        // Send TG notification with inline approve/deny buttons
+                                        if let Some(tg_bot) = state.tg_bot.get() {
+                                            let bot = tg_bot.clone();
+                                            let state_arc = Arc::new(state.clone());
+                                            let (req_id_t, aid_t, cmd_t, risk_t) = (req_id.clone(), aid.clone(), command.clone(), risk.clone());
+                                            tokio::spawn(async move {
+                                                crate::tgbot::notifications::approval_request(
+                                                    &bot, &state_arc, &req_id_t, &aid_t, &cmd_t, &risk_t
+                                                ).await;
+                                            });
+                                        }
                                     }
                                 }
                                 eventbus.publish("approval_request", &text_str);

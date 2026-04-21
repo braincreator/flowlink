@@ -246,6 +246,30 @@ async fn handle_callback(
 
     match data.as_str() {
         // ── Notification channel callbacks ──
+        d if d.starts_with("approve:") => {
+            let approval_id = &d[8..];
+            if ctx.state.approvals.resolve(approval_id, crate::approval::ApprovalDecision::Approved) {
+                bot.edit_message_text(chat_id, msg_id,
+                    format!("✅ <b>Разрешено</b>\n\nID: <code>{}</code>", approval_id)
+                ).parse_mode(ParseMode::Html).await?;
+            } else {
+                bot.edit_message_text(chat_id, msg_id,
+                    "❌ Запрос не найден (возможно уже обработан или истёк таймаут)"
+                ).await?;
+            }
+        }
+        d if d.starts_with("deny:") => {
+            let approval_id = &d[4..];
+            if ctx.state.approvals.resolve(approval_id, crate::approval::ApprovalDecision::Rejected) {
+                bot.edit_message_text(chat_id, msg_id,
+                    format!("❌ <b>Отклонено</b>\n\nID: <code>{}</code>", approval_id)
+                ).parse_mode(ParseMode::Html).await?;
+            } else {
+                bot.edit_message_text(chat_id, msg_id,
+                    "❌ Запрос не найден (возможно уже обработан или истёк таймаут)"
+                ).await?;
+            }
+        }
         d if d.starts_with("notif:level:") => {
             // Format: notif:level:<channel_type>:<severity>
             let parts: Vec<&str> = d.split(':').collect();

@@ -710,15 +710,36 @@ pub async fn cmd_approvals(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
         return Ok(());
     }
 
-    let mut sb = format!("⏳ <b>Ожидают подтверждения ({})</b>\n\n", approvals.len());
+    // Send each approval as separate message with inline buttons
     for a in &approvals {
         let short = if a.id.len() > 8 { &a.id[..8] } else { &a.id };
-        let cmd = if a.command.len() > 40 { format!("{}...", &a.command[..40]) } else { a.command.clone() };
-        sb.push_str(&format!("  <code>{}</code> — {} (риск: {})\n", short, cmd, a.risk_level));
-    }
-    sb.push_str("\n💡 Используйте API: POST /api/approvals/<id>/approve");
+        let cmd = if a.command.len() > 60 { format!("{}...", &a.command[..60]) } else { a.command.clone() };
+        let risk_emoji = match a.risk_level.as_str() {
+            "critical" => "🔴", "high" => "🟠", "medium" => "🟡", _ => "🟢",
+        };
 
-    bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Html).await?;
+        let text = format!(
+            "⏳ <b>Запрос на выполнение</b>\n\n\
+             🖥 Агент: <code>{}</code>\n\
+             💻 Команда: <code>{}</code>\n\
+             {} Риск: <b>{}</b>\n\
+             🆔 ID: <code>{}</code>",
+            a.agent_id, cmd, risk_emoji, a.risk_level, a.id
+        );
+
+        let kb = InlineKeyboardMarkup::new(vec![
+            vec![
+                InlineKeyboardButton::callback("✅ Разрешить", format!("approve:{}", a.id)),
+                InlineKeyboardButton::callback("❌ Отклонить", format!("deny:{}", a.id)),
+            ],
+        ]);
+
+        bot.send_message(msg.chat.id, &text)
+            .parse_mode(ParseMode::Html)
+            .reply_markup(kb)
+            .await?;
+    }
+
     Ok(())
 }
 
