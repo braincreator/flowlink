@@ -36,6 +36,10 @@ pub enum Permission {
     AuditLogView,
     UserManage,
     PolicyManage,
+    // Secrets
+    SecretsRead,
+    SecretsWrite,
+    SecretsDelete,
     // Backup
     BackupCreate,
     BackupRestore,
@@ -87,10 +91,12 @@ impl Role {
                 AgentList,
                 BackupCreate,
                 BackupRestore,
+                SecretsRead,
+                SecretsWrite,
             ]
             .into_iter()
             .collect(),
-            Role::Viewer => [AgentList, ShieldView, MetricsView, AuditLogView]
+            Role::Viewer => [AgentList, ShieldView, MetricsView, AuditLogView, SecretsRead]
                 .into_iter()
                 .collect(),
             Role::Agent => [
@@ -374,6 +380,6 @@ users:
     #[test]
     fn test_viewer_has_minimal_permissions() {
         let perms = Role::Viewer.permissions();
-        assert_eq!(perms.len(), 4);
+        assert_eq!(perms.len(), 5);
     }
 }

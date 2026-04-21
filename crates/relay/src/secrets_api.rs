@@ -12,6 +12,7 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use crate::middleware::AccountIdExtractor;
 use crate::auth::Claims;
 use crate::server::AppState;
+use flowlink_core::rbac::Permission;
 
 fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
     state.db.as_ref().map(|db| db.pool()).ok_or((StatusCode::SERVICE_UNAVAILABLE, "Database not configured".to_string()))
@@ -105,13 +106,25 @@ fn decrypt(encrypted: &[u8], nonce: &[u8]) -> Result<String, String> {
 
 pub async fn list_secrets(
     State(state): State<AppState>,
-    _account: AccountIdExtractor,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Query(q): Query<SecretQuery>,
 ) -> Result<(StatusCode, Json<Vec<SecretEntry>>), (StatusCode, String)> {
+    // RBAC check
+    if let Err(e) = state.rbac.check_permission(&claims.sub, &Permission::SecretsRead) {
+        // Fallback: admins always allowed in dev mode
+        if !claims.is_admin {
+            return Err((StatusCode::FORBIDDEN, format!("Permission denied: {e}")));
+        }
+    }
     let pool = gp(&state)?;
+    // Org-scope: filter by user's org from claims
+    let org_filter: Option<Uuid> = match &claims.org_id {
+        Some(id) => Uuid::parse_str(id).ok(),
+        None => q.org_id, // fallback to query param if no org in claims
+    };
     let rows = sqlx::query(
         "SELECT id, org_id, key, description, tags, created_by, created_at::text, updated_at::text FROM secrets WHERE ($1::uuid IS NULL OR org_id = $1) ORDER BY key"
-    ).bind(q.org_id).fetch_all(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    ).bind(org_filter).fetch_all(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let entries: Vec<SecretEntry> = rows.iter().map(|r| SecretEntry {
         id: r.get("id"), org_id: r.get("org_id"), key: r.get("key"),
@@ -127,6 +140,10 @@ pub async fn create_secret(
     axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<CreateSecretRequest>,
 ) -> Result<(StatusCode, Json<SecretEntry>), (StatusCode, String)> {
+    // RBAC check
+    if let Err(e) = state.rbac.check_permission(&claims.sub, &Permission::SecretsWrite) {
+        if !claims.is_admin { return Err((StatusCode::FORBIDDEN, format!("Permission denied: {e}"))); }
+    }
     let pool = gp(&state)?;
     if body.key.trim().is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Key is required".into()));
@@ -168,13 +185,27 @@ pub struct SecretWithValue {
 
 pub async fn get_secret_value(
     State(state): State<AppState>,
-    _account: AccountIdExtractor,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<SecretWithValue>), (StatusCode, String)> {
+    // RBAC check
+    if let Err(e) = state.rbac.check_permission(&claims.sub, &Permission::SecretsRead) {
+        if !claims.is_admin { return Err((StatusCode::FORBIDDEN, format!("Permission denied: {e}"))); }
+    }
     let pool = gp(&state)?;
-    let row = sqlx::query(
+    // Org-scope: only allow access to secrets in user's org
+    let org_id = match &claims.org_id {
+        Some(id) => Uuid::parse_str(id).ok(),
+        None => None,
+    };
+    let query = if org_id.is_some() {
+        "SELECT id, key, encrypted_value, nonce FROM secrets WHERE id = $1 AND org_id = $2"
+    } else {
         "SELECT id, key, encrypted_value, nonce FROM secrets WHERE id = $1"
-    ).bind(id).fetch_optional(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    };
+    let q = sqlx::query(query).bind(id);
+    let q = if let Some(oid) = org_id { q.bind(oid) } else { q };
+    let row = q.fetch_optional(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     match row {
         Some(r) => {
@@ -191,10 +222,14 @@ pub async fn get_secret_value(
 
 pub async fn update_secret(
     State(state): State<AppState>,
-    AccountIdExtractor(account_id): AccountIdExtractor,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateSecretRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    // RBAC check
+    if let Err(e) = state.rbac.check_permission(&claims.sub, &Permission::SecretsWrite) {
+        if !claims.is_admin { return Err((StatusCode::FORBIDDEN, format!("Permission denied: {e}"))); }
+    }
     let pool = gp(&state)?;
 
     if let Some(ref value) = body.value {
@@ -211,15 +246,18 @@ pub async fn update_secret(
         sqlx::query("UPDATE secrets SET tags = $2, updated_at = NOW() WHERE id = $1")
             .bind(id).bind(tags).execute(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
-    let _ = account_id;
     Ok(StatusCode::OK)
 }
 
 pub async fn delete_secret(
     State(state): State<AppState>,
-    _account: AccountIdExtractor,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    // RBAC check
+    if let Err(e) = state.rbac.check_permission(&claims.sub, &Permission::SecretsDelete) {
+        if !claims.is_admin { return Err((StatusCode::FORBIDDEN, format!("Permission denied: {e}"))); }
+    }
     let pool = gp(&state)?;
     let result = sqlx::query("DELETE FROM secrets WHERE id = $1").bind(id)
         .execute(pool).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
