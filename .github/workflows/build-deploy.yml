@@ -1,0 +1,98 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-gnu
+
+jobs:
+  check:
+    name: Check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+      
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      
+      - name: Install zig
+        uses: korandoru/setup-zig@v1
+        with:
+          zig-version: 0.13.0
+      
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild
+      
+      - name: Check
+        run: cargo check --target ${{ env.TARGET }}
+      
+      - name: Run tests
+        run: cargo test --workspace --exclude flowlink-k8s --exclude flowlink-gitops
+        env:
+          RUST_TEST_THREADS: 1
+
+  build-deploy:
+    name: Build & Deploy to VPS
+    needs: check
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+      
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-release-
+      
+      - name: Install zig
+        uses: korandoru/setup-zig@v1
+        with:
+          zig-version: 0.13.0
+      
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild
+      
+      - name: Build release
+        run: cargo zigbuild --release --target ${{ env.TARGET }}
+      
+      - name: Deploy to VPS
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: 93.93.207.44
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H $VPS_HOST >> ~/.ssh/known_hosts
+          
+          scp target/${{ env.TARGET }}/release/flowlink root@$VPS_HOST:/opt/flowlink/bin/flowlink-new
+          ssh root@$VPS_HOST 'cd /opt/flowlink/bin && chmod +x flowlink-new && mv flowlink flowlink-backup-$(date +%Y%m%d%H%M) && mv flowlink-new flowlink && chmod +x flowlink && systemctl restart flowlink.service && sleep 3 && systemctl is-active flowlink.service'
