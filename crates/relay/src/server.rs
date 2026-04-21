@@ -2071,6 +2071,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agents/{agent_id}/health", axum::routing::get(crate::agent_health_api::get_latest))
         .route("/api/v1/agents/{agent_id}/health/timeseries", axum::routing::get(crate::agent_health_api::get_timeseries))
         .route("/api/v1/agents/health/overview", axum::routing::get(crate::agent_health_api::overview))
+        // Interactive Sessions
+        .route("/api/v1/sessions", axum::routing::post(crate::sessions_api::create_session).get(crate::sessions_api::list_sessions))
+        .route("/api/v1/sessions/{id}", axum::routing::get(crate::sessions_api::get_session).patch(crate::sessions_api::update_session).delete(crate::sessions_api::close_session))
+        // Secrets Vault
+        .route("/api/v1/secrets", axum::routing::get(crate::secrets_api::list_secrets).post(crate::secrets_api::create_secret))
+        .route("/api/v1/secrets/{id}", axum::routing::get(crate::secrets_api::get_secret_value).delete(crate::secrets_api::delete_secret).patch(crate::secrets_api::update_secret))
+        // Compliance Reports
+        .route("/api/v1/compliance/reports", axum::routing::get(crate::compliance_api::list_reports).post(crate::compliance_api::generate_report))
+        .route("/api/v1/compliance/reports/{id}", axum::routing::get(crate::compliance_api::get_report).delete(crate::compliance_api::delete_report))
         // Audit log + Webhooks
         .route("/api/orgs/{org_id}/audit", axum::routing::get(crate::webhooks_api::list_org_audit))
         .route("/api/orgs/{org_id}/webhooks", axum::routing::get(crate::webhooks_api::list_webhooks).post(crate::webhooks_api::create_webhook))

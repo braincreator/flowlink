@@ -697,6 +697,63 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_pending ON webhook_deliveries(status, next_retry_at) WHERE status IN ('pending', 'retrying');
             "#,
         ),
+        (
+            "040_interactive_sessions",
+            r#"
+            CREATE TABLE IF NOT EXISTS interactive_sessions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID,
+                agent_id TEXT NOT NULL,
+                account_id TEXT,
+                cwd TEXT NOT NULL DEFAULT '/',
+                env JSONB NOT NULL DEFAULT '{}',
+                shell TEXT NOT NULL DEFAULT '/bin/sh',
+                status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','closed','killed')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                closed_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_agent ON interactive_sessions(agent_id, status);
+            CREATE INDEX IF NOT EXISTS idx_sessions_org ON interactive_sessions(org_id);
+            "#,
+        ),
+        (
+            "041_secrets_vault",
+            r#"
+            CREATE TABLE IF NOT EXISTS secrets (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL,
+                key TEXT NOT NULL,
+                encrypted_value BYTEA NOT NULL,
+                nonce BYTEA NOT NULL,
+                description TEXT DEFAULT '',
+                tags TEXT[] DEFAULT '{}',
+                created_by TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(org_id, key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_secrets_org ON secrets(org_id);
+            "#,
+        ),
+        (
+            "042_compliance_reports",
+            r#"
+            CREATE TABLE IF NOT EXISTS compliance_reports (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL,
+                report_type TEXT NOT NULL CHECK (report_type IN ('security_audit','policy_compliance','exec_summary','fstek')),
+                period_start TIMESTAMPTZ NOT NULL,
+                period_end TIMESTAMPTZ NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','generating','ready','failed')),
+                generated_by TEXT,
+                data JSONB NOT NULL DEFAULT '{}',
+                pdf_path TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_reports_org ON compliance_reports(org_id, created_at DESC);
+            "#,
+        ),
     ]
 }
 
@@ -707,7 +764,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 39);
+        assert_eq!(migrations.len(), 42);
     }
 
     #[test]
@@ -753,6 +810,9 @@ mod tests {
             "037_command_history",
             "038_agent_health_metrics",
             "039_webhook_deliveries",
+            "040_interactive_sessions",
+            "041_secrets_vault",
+            "042_compliance_reports",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(
