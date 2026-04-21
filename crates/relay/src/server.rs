@@ -2539,7 +2539,7 @@ mod tests {
         let device_id = json["device"]["id"].as_str().unwrap().to_string();
 
         // 3. List devices
-        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().uri("/api/devices?user_id=u1")
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().uri("/api/devices")
             .body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
@@ -2553,7 +2553,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
         // 5. Device list should be empty now
-        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().uri("/api/devices?user_id=u1")
+        let resp = build_router(state.clone()).oneshot(HttpRequest::builder().uri("/api/devices")
             .body(Body::empty()).unwrap()).await.unwrap();
         let resp_body = resp.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&resp_body).unwrap();

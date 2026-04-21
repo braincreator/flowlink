@@ -45,7 +45,7 @@ pub struct SessionQuery {
 
 pub async fn create_session(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<Session>), (StatusCode, String)> {
     if !claims.is_admin && claims.org_id.is_none() {
@@ -125,10 +125,20 @@ pub struct UpdateSessionRequest {
 
 pub async fn update_session(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateSessionRequest>,
 ) -> Result<(StatusCode, Json<Session>), (StatusCode, String)> {
+    // Verify session belongs to user's org
+    if let Some(ref org_id) = claims.org_id {
+        if !claims.is_admin {
+            let owned: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM interactive_sessions WHERE id = $1 AND org_id = $2)"
+            ).bind(id).bind(org_id)
+            .fetch_optional(gp(&state)?).await.unwrap_or(Some(false)).unwrap_or(false);
+            if !owned { return Err((StatusCode::FORBIDDEN, "Not your session".into())); }
+        }
+    }
     let pool = gp(&state)?;
     let row = sqlx::query(
         "UPDATE interactive_sessions SET cwd = COALESCE($2, cwd), env = COALESCE($3, env), last_activity = NOW() WHERE id = $1 AND status = 'active' RETURNING id, org_id, agent_id, account_id, cwd, env, shell, status, created_at::text, last_activity::text, closed_at"
@@ -149,7 +159,7 @@ pub async fn update_session(
 
 pub async fn close_session(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     if !claims.is_admin { return Err((StatusCode::FORBIDDEN, "Admin required".into())); }

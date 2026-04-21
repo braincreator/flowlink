@@ -41,9 +41,19 @@ pub struct MetricsQuery {
 
 pub async fn get_latest(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> Result<(StatusCode, Json<HealthMetric>), (StatusCode, String)> {
+    // Org ownership check
+    if let Some(ref org_id) = claims.org_id {
+        if !claims.is_admin {
+            let owned: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM agents WHERE agent_id = $1 AND org_id = $2)"
+            ).bind(&agent_id).bind(org_id)
+            .fetch_optional(gp(&state)?).await.unwrap_or(Some(false)).unwrap_or(false);
+            if !owned { return Err((StatusCode::FORBIDDEN, "Agent not in your org".into())); }
+        }
+    }
     let row = sqlx::query(
         "SELECT agent_id, cpu_percent, ram_percent, disk_percent, load_avg_1m, uptime_seconds, reported_at::text FROM agent_health_metrics WHERE agent_id = $1 ORDER BY reported_at DESC LIMIT 1"
     ).bind(&agent_id).fetch_optional(gp(&state)?).await

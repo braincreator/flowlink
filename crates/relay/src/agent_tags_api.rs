@@ -77,9 +77,18 @@ pub async fn get_tags(
 
 pub async fn delete_tags(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    if let Some(ref org_id) = claims.org_id {
+        if !claims.is_admin {
+            let owned: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM agents WHERE agent_id = $1 AND org_id = $2)"
+            ).bind(&agent_id).bind(org_id)
+            .fetch_optional(gp(&state)?).await.unwrap_or(Some(false)).unwrap_or(false);
+            if !owned { return Err((StatusCode::FORBIDDEN, "Agent not in your org".into())); }
+        }
+    }
     sqlx::query("DELETE FROM agent_tags WHERE agent_id = $1")
         .bind(&agent_id).execute(gp(&state)?).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

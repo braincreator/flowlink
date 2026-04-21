@@ -284,9 +284,21 @@ pub async fn list_agents(
 /// GET /api/v1/agents/:id — get agent detail
 pub async fn get_agent(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> impl IntoResponse {
+    // Verify agent belongs to user's org
+    if let Some(ref org_id) = claims.org_id {
+        if let Some(ref db) = state.db {
+            let owned: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM agents WHERE agent_id = $1 AND org_id = $2)"
+            ).bind(&agent_id).bind(org_id)
+            .fetch_one(db.pool()).await.unwrap_or(false);
+            if !owned && !claims.is_admin {
+                return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Agent not in your org"}))).into_response();
+            }
+        }
+    }
     let registry = state.control_plane.registry.read().await;
     match registry.get(&agent_id).await {
         Some(agent) => (StatusCode::OK, Json(agent.clone())).into_response(),
@@ -301,7 +313,7 @@ pub async fn get_agent(
 /// Disconnects WS if online, removes from pool, cleans up DB record.
 pub async fn deregister_agent(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(agent_id): Path<String>,
 ) -> impl IntoResponse {
     // Verify agent belongs to user's org

@@ -426,6 +426,7 @@ impl DeviceManager {
 // Request/Response types
 // ═══════════════════════════════════════════════
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 pub struct PairRequest {
     user_id: String,
@@ -448,7 +449,7 @@ pub struct ConfirmRequest {
 
 #[derive(Deserialize)]
 pub struct DevicesQuery {
-    user_id: String,
+    user_id: Option<String>,
 }
 
 // ═══════════════════════════════════════════════
@@ -457,10 +458,11 @@ pub struct DevicesQuery {
 
 pub async fn pair_device(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Json(body): Json<PairRequest>,
 ) -> impl IntoResponse {
-    let code = state.device_manager.generate_pairing_code(&body.user_id);
+    let _ = body; // use claims.account_id instead of body.user_id
+    let code = state.device_manager.generate_pairing_code(&claims.account_id);
     Json(PairResponse { code, expires_in: 300 })
 }
 
@@ -493,17 +495,23 @@ pub async fn confirm_pairing(
 
 pub async fn list_devices(
     State(state): State<AppState>,
-    _claims: axum::extract::Extension<crate::auth::Claims>,
-    Query(query): Query<DevicesQuery>,
+    claims: axum::extract::Extension<crate::auth::Claims>,
+    Query(_query): Query<DevicesQuery>,
 ) -> Json<Vec<Device>> {
-    Json(state.device_manager.list_devices(&query.user_id))
+    Json(state.device_manager.list_devices(&claims.account_id))
 }
 
 pub async fn remove_device(
     State(state): State<AppState>,
-    axum::extract::Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
+    // Verify device belongs to user
+    let user_devices = state.device_manager.list_devices(&claims.account_id);
+    let owns = user_devices.iter().any(|d| d.id == id);
+    if !owns && !claims.is_admin {
+        return (axum::http::StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "Not your device"}))).into_response();
+    }
     match state.device_manager.remove_device(&id) {
         Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),
         Err(e) => (
