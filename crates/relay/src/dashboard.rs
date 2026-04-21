@@ -10,6 +10,13 @@ pub async fn serve_dashboard_root() -> Response {
 pub async fn serve_dashboard(
     axum::extract::Path(path): axum::extract::Path<String>,
 ) -> Response {
+    // Path traversal protection
+    if path.contains("..") || path.starts_with('/') || path.contains('\\') {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(axum::body::Body::from("Invalid path"))
+            .unwrap_or_else(|_| Response::new(axum::body::Body::from("Bad request")));
+    }
     if path == "index.html" {
         serve_file_with_banner("index.html")
     } else {

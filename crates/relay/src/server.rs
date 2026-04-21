@@ -1194,14 +1194,16 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
     state.handler.remove_sender_if_stale(&aid, conn_id);
     pool.set_offline(&aid);
     state.e2ee.remove_agent_key(&aid).await;
-    // Notify via Telegram
+    // Notify via Telegram (only if still offline — agent may have reconnected)
     if let Some(tg_bot) = state.tg_bot.get() {
-        let state_arc = Arc::new(state.clone());
-        let agent_id_clone = aid.clone();
-        let bot = tg_bot.clone();
-        tokio::spawn(async move {
-            crate::tgbot::notifications::agent_disconnected(&bot, &state_arc, &agent_id_clone, "unknown").await;
-        });
+        if pool.get(&aid).map(|a| !a.online).unwrap_or(true) {
+            let state_arc = Arc::new(state.clone());
+            let agent_id_clone = aid.clone();
+            let bot = tg_bot.clone();
+            tokio::spawn(async move {
+                crate::tgbot::notifications::agent_disconnected(&bot, &state_arc, &agent_id_clone, "unknown").await;
+            });
+        }
     }
     // Release billing usage counter for this host
     if let Some(billing_engine) = &state.billing {
