@@ -4,29 +4,33 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
-/// Account row from database
+/// Account row from database — field order MUST match DB column order for sqlx::query_as
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AccountRow {
     pub account_id: String,
-    pub deleted_at: Option<DateTime<Utc>>,
-    pub deletion_requested_at: Option<DateTime<Utc>>,
     pub plan_id: String,
     pub active: bool,
     pub balance_kopecks: i64,
     pub payment_method: Option<String>,
-    pub tg_id: Option<i64>,
-    pub email: Option<String>,
-    #[allow(dead_code)]
-    pub totp_secret: Option<String>,
-    #[allow(dead_code)]
-    pub totp_enabled: bool,
-    pub is_admin: bool,
-    pub last_login: Option<DateTime<Utc>>,
     pub activated_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub cycle_start: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub email: Option<String>,
+    #[sqlx(default)]
+    pub phone: Option<String>,
+    pub tg_id: Option<i64>,
+    pub last_login: Option<DateTime<Utc>>,
+    #[allow(dead_code)]
+    pub totp_secret: Option<String>,
+    #[allow(dead_code)]
+    pub totp_enabled: bool,
+    pub is_admin: bool,
+    #[sqlx(default)]
+    pub pending_email: Option<String>,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub deletion_requested_at: Option<DateTime<Utc>>,
 }
 
 pub struct AccountRepo;
@@ -35,9 +39,7 @@ impl AccountRepo {
     /// Get account by ID
     pub async fn get(pool: &PgPool, account_id: &str) -> Result<Option<AccountRow>> {
         let row = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method,
-                    activated_at, expires_at, cycle_start, created_at, updated_at
-             FROM accounts WHERE account_id = $1",
+            "SELECT * FROM accounts WHERE account_id = $1",
         )
         .bind(account_id)
         .fetch_optional(pool)
@@ -123,9 +125,7 @@ impl AccountRepo {
     /// List all accounts
     pub async fn list(pool: &PgPool) -> Result<Vec<AccountRow>> {
         let rows = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method,
-                    activated_at, expires_at, cycle_start, created_at, updated_at
-             FROM accounts ORDER BY created_at",
+            "SELECT * FROM accounts ORDER BY created_at",
         )
         .fetch_all(pool)
         .await?;
@@ -135,9 +135,7 @@ impl AccountRepo {
     /// List all accounts with full details (admin)
     pub async fn list_admin(pool: &PgPool) -> Result<Vec<AccountRow>> {
         let rows = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method, tg_id, email,
-                    totp_secret, totp_enabled, last_login, activated_at, expires_at, cycle_start, created_at, updated_at
-             FROM accounts ORDER BY created_at DESC",
+            "SELECT * FROM accounts ORDER BY created_at DESC",
         )
         .fetch_all(pool)
         .await?;
@@ -167,9 +165,7 @@ impl AccountRepo {
     /// Get account by email
     pub async fn get_by_email(pool: &PgPool, email: &str) -> Result<Option<AccountRow>> {
         let row = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method, tg_id,
-                    activated_at, expires_at, cycle_start, created_at, updated_at
-             FROM accounts WHERE email = $1",
+            "SELECT * FROM accounts WHERE email = $1",
         )
         .bind(email)
         .fetch_optional(pool)
@@ -219,9 +215,7 @@ impl AccountRepo {
     /// Get account by Telegram ID
     pub async fn get_by_tg_id(pool: &PgPool, tg_id: i64) -> Result<Option<AccountRow>> {
         let row = sqlx::query_as::<_, AccountRow>(
-            "SELECT account_id, deleted_at, deletion_requested_at, plan_id, active, balance_kopecks, payment_method, tg_id,
-                    activated_at, expires_at, cycle_start, created_at, updated_at
-             FROM accounts WHERE tg_id = $1",
+            "SELECT * FROM accounts WHERE tg_id = $1",
         )
         .bind(tg_id)
         .fetch_optional(pool)
@@ -338,7 +332,7 @@ impl AccountRepo {
     /// Find accounts past their deletion date
     pub async fn find_expired_deletions(pool: &PgPool) -> Result<Vec<String>> {
         sqlx::query_scalar(
-            "SELECT account_id FROM accounts WHERE deleted_at IS NOT NULL AND deleted_at < NOW()",
+            "SELECT * FROM accounts WHERE deleted_at IS NOT NULL AND deleted_at < NOW()",
         )
         .fetch_all(pool)
         .await
@@ -435,9 +429,7 @@ mod tests {
     fn sql_queries_reference_accounts_table() {
         // Verify that the SQL queries in AccountRepo reference the correct table
         let queries = [
-            "SELECT account_id, plan_id, active, balance_kopecks, payment_method,
-                    activated_at, expires_at, cycle_start, created_at, updated_at
-             FROM accounts WHERE account_id = $1",
+            "SELECT * FROM accounts WHERE account_id = $1",
             "INSERT INTO accounts (account_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
             "UPDATE accounts SET plan_id = $1",
             "UPDATE accounts SET balance_kopecks = balance_kopecks + $1",

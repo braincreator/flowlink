@@ -69,14 +69,52 @@ fn pct_encode(s: &str) -> String {
     out
 }
 
-async fn exchange_vk_token(code: &str, config: &RelayConfig) -> Result<String, AuthError> {
+/// PKCE storage: state → code_verifier (in-memory, cleared on use)
+static PKCE_STORE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Generate PKCE code_verifier and code_challenge (S256)
+fn generate_pkce() -> (String, String) {
+    use sha2::{Sha256, Digest};
+    let code_verifier: String = std::iter::repeat_with(|| {
+        let b = rand::random::<u8>();
+        match b % 3 {
+            0 => char::from(b'A' + (b % 26)),
+            1 => char::from(b'a' + (b % 26)),
+            _ => char::from(b'0' + (b % 10)),
+        }
+    }).take(64).collect();
+    let mut hasher = Sha256::new();
+    hasher.update(code_verifier.as_bytes());
+    let hash = hasher.finalize();
+    let code_challenge = base64_encode_url_safe(&hash);
+    (code_verifier, code_challenge)
+}
+
+/// Base64url encode without padding
+fn base64_encode_url_safe(data: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(data)
+}
+
+/// Exchange VK ID code for access_token using PKCE (no client_secret needed)
+async fn exchange_vk_token(code: &str, config: &RelayConfig, state: &str) -> Result<String, AuthError> {
+    // Retrieve stored PKCE code_verifier
+    let code_verifier = {
+        let mut store = PKCE_STORE.lock().unwrap();
+        store.remove(state).ok_or_else(|| AuthError::Provider("VK: expired or invalid state (PKCE code_verifier not found)".into()))?
+    };
+
     let resp = reqwest::Client::new()
-        .post(format!("{}/oauth/token", config.oauth.vk.oauth_endpoint))
+        .post("https://id.vk.ru/oauth2/auth")
         .form(&[
+            ("grant_type", "authorization_code"),
             ("code", code),
             ("client_id", &config.oauth.vk.app_id),
-            ("client_secret", &config.oauth.vk.app_secret),
-            ("grant_type", "authorization_code"),
+            ("redirect_uri", &format!("{}/api/auth/vk/callback",
+                config.dashboard_url.as_deref().unwrap_or("https://flowlink.flow-masters.ru")
+            )),
+            ("code_verifier", &code_verifier),
         ])
         .timeout(std::time::Duration::from_secs(10))
         .send()
@@ -88,7 +126,7 @@ async fn exchange_vk_token(code: &str, config: &RelayConfig) -> Result<String, A
     json["access_token"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| AuthError::Provider("No access_token in VK response".into()))
+        .ok_or_else(|| AuthError::Provider(format!("No access_token in VK response: {:?}", json)))
 }
 
 async fn exchange_yandex_token(code: &str, config: &RelayConfig) -> Result<String, AuthError> {
@@ -135,29 +173,31 @@ async fn exchange_github_token(code: &str, config: &RelayConfig) -> Result<Strin
         .ok_or_else(|| AuthError::Provider("No access_token in GitHub response".into()))
 }
 
-/// Fetch user info from VK using access_token
+/// Fetch user info from VK ID using access_token (VK ID OAuth 2.1)
 async fn fetch_vk_user(access_token: &str) -> Result<(String, String, Option<String>), AuthError> {
     let resp = reqwest::Client::new()
-        .get("https://api.vk.com/method/users.get")
-        .query(&[
-            ("access_token", access_token),
-            ("fields", "photo_200,email"),
-            ("v", "5.131"),
-        ])
+        .get("https://id.vk.ru/oauth2/user_info")
+        .header("Authorization", format!("Bearer {}", access_token))
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
         .map_err(|e| AuthError::Provider(e.to_string()))?;
 
     let json: serde_json::Value = resp.json().await.map_err(|e| AuthError::Provider(e.to_string()))?;
-    let user = json["response"][0].as_object().ok_or_else(|| AuthError::Provider("No user in VK response".into()))?;
+    let _user = json["user"]["first_name"].as_str()
+        .or_else(|| json["user"]["email"].as_str())
+        .ok_or_else(|| AuthError::Provider(format!("No user info in VK ID response: {:?}", json)))?;
 
-    let vk_id = user.get("id").and_then(|v| v.as_i64()).map(|i| i.to_string()).unwrap_or_default();
-    let name = format!("{} {}",
-        user.get("first_name").and_then(|v| v.as_str()).unwrap_or(""),
-        user.get("last_name").and_then(|v| v.as_str()).unwrap_or("")
-    );
-    let avatar = user.get("photo_200").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let user_obj = json["user"].as_object().unwrap();
+    let vk_id = json["user_id"].as_str()
+        .or_else(|| json["client_id"].as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let first = user_obj.get("first_name").and_then(|v| v.as_str()).unwrap_or("");
+    let last = user_obj.get("last_name").and_then(|v| v.as_str()).unwrap_or("");
+    let name = format!("{} {}", first, last).trim().to_string();
+    let avatar = user_obj.get("avatar").and_then(|v| v.as_str()).map(|s| s.to_string())
+        .or_else(|| user_obj.get("photo_200").and_then(|v| v.as_str()).map(|s| s.to_string()));
 
     Ok((vk_id, name, avatar))
 }
@@ -255,10 +295,24 @@ pub async fn oauth_url(
     let url = match provider {
         "vk" => {
             let client_id = &config.oauth.vk.app_id;
+            let (code_verifier, code_challenge) = generate_pkce();
+            // Store code_verifier for later use in callback
+            {
+                let mut store = PKCE_STORE.lock().unwrap();
+                store.insert(state_param.clone(), code_verifier);
+                // Cleanup old entries (keep last 1000)
+                if store.len() > 1000 {
+                    let keys: Vec<String> = store.keys().take(store.len() - 500).cloned().collect();
+                    for k in keys { store.remove(&k); }
+                }
+            }
+            let callback_url = format!("{}/api/auth/vk/callback", callback_base);
             format!(
-                "{}/authorize?client_id={}&redirect_uri={}/api/auth/vk/callback&response_type=code&state={}&scope=email",
-                config.oauth.vk.oauth_endpoint, pct_encode(client_id),
-                callback_base, pct_encode(&state_param)
+                "https://id.vk.ru/authorize?client_id={}&redirect_uri={}&response_type=code&state={}&code_challenge={}&code_challenge_method=S256&scope=email",
+                pct_encode(client_id),
+                pct_encode(&callback_url),
+                pct_encode(&state_param),
+                pct_encode(&code_challenge),
             )
         }
         "yandex" => {
@@ -384,7 +438,7 @@ pub async fn vk_callback(
     }
     let config = state.config_reloader.as_ref().expect("config_reloader").get_config().await;
 
-    let access_token = match exchange_vk_token(&query.code, &config).await {
+    let access_token = match exchange_vk_token(&query.code, &config, query.state.as_deref().unwrap_or("")).await {
         Ok(t) => t,
         Err(e) => {
             error!("VK OAuth exchange failed: {}", e);
@@ -555,12 +609,15 @@ pub async fn auth_me(
 
     match engine.validate_access_token(token) {
         Ok(claims) => (StatusCode::OK, Json(json!({
-            "account_id": claims.account_id,
-            "email": claims.email,
-            "name": claims.name,
-            "sub": claims.sub,
-            "exp": claims.exp,
-            "active": true
+            "user": {
+                "id": claims.account_id,
+                "account_id": claims.account_id,
+                "email": claims.email,
+                "name": claims.name,
+                "sub": claims.sub,
+                "exp": claims.exp,
+                "active": true
+            }
         }))).into_response(),
         Err(e) => {
             warn!("Invalid access token: {}", e);

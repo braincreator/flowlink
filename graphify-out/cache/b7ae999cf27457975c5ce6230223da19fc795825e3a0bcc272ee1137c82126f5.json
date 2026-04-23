@@ -1,0 +1,1 @@
+{"nodes": [{"id": "internal_agent_sandbox_windows_go", "label": "sandbox_windows.go", "file_type": "code", "source_file": "internal/agent/sandbox_windows.go", "source_location": "L1"}], "edges": [], "raw_calls": []}
