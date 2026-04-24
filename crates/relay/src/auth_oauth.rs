@@ -249,10 +249,7 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
 }
 
 fn dashboard_redirect(config: &RelayConfig, access_token: &str, refresh_token: &str) -> Redirect {
-    let base = match config.dashboard_url.as_deref() {
-        Some(url) => url.to_string(),
-        None => format!("http://{}", config.http_addr),
-    };
+    let base = config.dashboard_url_or_public().to_string();
     // Use fragment (#) to prevent token leakage in browser history, referrer, access logs
     Redirect::temporary(&format!(
         "{}/auth/callback#access_token={}&refresh_token={}",
@@ -274,10 +271,7 @@ pub async fn oauth_url(
     let _redirect = params.get("redirect").map(|s| s.as_str()).unwrap_or("");
 
     let config = state.config_reloader.as_ref().expect("config_reloader").get_config().await;
-    let callback_base = match config.dashboard_url.as_deref() {
-        Some(url) => url.to_string(),
-        None => format!("http://{}", config.http_addr),
-    };
+    let callback_base = config.dashboard_url_or_public().to_string();
 
     // Generate CSRF state: random 32 hex chars, sign with JWT secret
     let raw_state = format!("{:x}", rand::random::<u64>()) + &format!("{:x}", rand::random::<u64>());
@@ -382,10 +376,7 @@ async fn issue_tokens_or_2fa(
                 if let Some(response) = crate::auth_2fa::check_2fa(account_id, email, name, admin) {
                     log::info!("🔐 2FA required for account {account_id}");
                     let config = state.config_reloader.as_ref()?.get_config().await;
-                    let base = match config.dashboard_url.as_deref() {
-                        Some(url) => url.to_string(),
-                        None => format!("http://{}", config.http_addr),
-                    };
+                    let base = config.dashboard_url_or_public().to_string();
                     let temp_token = response["temp_token"].as_str().unwrap_or("");
                     let redirect_url = format!(
                         "{}/dashboard?requires_2fa=1&temp_token={}",
