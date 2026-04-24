@@ -1,4 +1,4 @@
-//! Auth API endpoints — OAuth callbacks, JWT tokens, user info
+//! Auth API endpoints - OAuth callbacks, JWT tokens, user info
 //!
 //! Flow:
 //! 1. User clicks "Login via VK/Yandex/GitHub" → redirects to OAuth provider
@@ -265,7 +265,7 @@ fn dashboard_redirect(config: &RelayConfig, access_token: &str, refresh_token: &
 // --------------------------------------------------------------------------- //
 
 /// GET /api/auth/oauth-url?provider=...&redirect=...
-/// Generates OAuth URL with CSRF state — client never sees client_secret
+/// Generates OAuth URL with CSRF state - client never sees client_secret
 pub async fn oauth_url(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
@@ -281,10 +281,12 @@ pub async fn oauth_url(
 
     // Generate CSRF state: random 32 hex chars, sign with JWT secret
     let raw_state = format!("{:x}", rand::random::<u64>()) + &format!("{:x}", rand::random::<u64>());
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
-        log::error!("JWT_SECRET not set — OAuth CSRF protection is insecure!");
+    let jwt_secret = if config.auth.jwt_secret.is_empty() {
+        log::error!("jwt_secret not set in config - OAuth CSRF protection is insecure!");
         format!("insecure-{}", rand::random::<u64>())
-    });
+    } else {
+        config.auth.jwt_secret.clone()
+    };
     use hmac::{Hmac, Mac};
     type HmacSha256 = Hmac<sha2::Sha256>;
     let mut mac = HmacSha256::new_from_slice(jwt_secret.as_bytes()).expect("HMAC key");
@@ -339,7 +341,7 @@ pub async fn oauth_url(
 }
 
 /// Verify CSRF state returned by OAuth provider
-fn verify_state(state_param: &Option<String>) -> bool {
+fn verify_state(state_param: &Option<String>, jwt_secret: &str) -> bool {
     let state = match state_param {
         Some(s) => s,
         None => return false,
@@ -350,13 +352,12 @@ fn verify_state(state_param: &Option<String>) -> bool {
     let sig_part = parts[0];
     let raw = parts[1];
 
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| { log::error!("JWT_SECRET not set — using random fallback. SET JWT_SECRET IN PRODUCTION!"); format!("insecure-{}", rand::random::<u64>()) });
     use hmac::{Hmac, Mac};
     type HmacSha256 = Hmac<sha2::Sha256>;
     let mut mac = HmacSha256::new_from_slice(jwt_secret.as_bytes()).expect("HMAC key");
     mac.update(raw.as_bytes());
     let signature = hex::encode(mac.finalize().into_bytes());
-    
+
     &signature[..16] == sig_part
 }
 
@@ -432,7 +433,9 @@ pub async fn vk_callback(
     State(state): State<AppState>,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> impl IntoResponse {
-    if !verify_state(&query.state) {
+    let config = state.config_reloader.as_ref().expect("config_reloader").get_config().await;
+    let jwt_secret = &config.auth.jwt_secret;
+    if !verify_state(&query.state, jwt_secret) {
         warn!("VK OAuth: invalid CSRF state");
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid state parameter"}))).into_response();
     }
@@ -478,12 +481,12 @@ pub async fn yandex_callback(
     State(state): State<AppState>,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> impl IntoResponse {
-    if !verify_state(&query.state) {
+    let config = state.config_reloader.as_ref().expect("config_reloader").get_config().await;
+    let jwt_secret = &config.auth.jwt_secret;
+    if !verify_state(&query.state, jwt_secret) {
         warn!("Yandex OAuth: invalid CSRF state");
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid state parameter"}))).into_response();
     }
-    let config = state.config_reloader.as_ref().expect("config_reloader").get_config().await;
-
     let access_token = match exchange_yandex_token(&query.code, &config).await {
         Ok(t) => t,
         Err(e) => {
@@ -521,11 +524,12 @@ pub async fn github_callback(
     State(state): State<AppState>,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> impl IntoResponse {
-    if !verify_state(&query.state) {
+    let config = state.config_reloader.as_ref().expect("config_reloader").get_config().await;
+    let jwt_secret = &config.auth.jwt_secret;
+    if !verify_state(&query.state, jwt_secret) {
         warn!("GitHub OAuth: invalid CSRF state");
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid state parameter"}))).into_response();
     }
-    let config = state.config_reloader.as_ref().expect("config_reloader").get_config().await;
 
     let access_token = match exchange_github_token(&query.code, &config).await {
         Ok(t) => t,
@@ -650,7 +654,7 @@ pub async fn logout(
     (StatusCode::OK, Json(json!({"message": "Logged out successfully"}))).into_response()
 }
 
-/// DELETE /api/account — soft-delete (deactivate) account
+/// DELETE /api/account - soft-delete (deactivate) account
 pub async fn delete_account(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -690,7 +694,7 @@ pub async fn delete_account(
     }
 }
 
-/// POST /api/auth/link-email — link or update email for authenticated user
+/// POST /api/auth/link-email - link or update email for authenticated user
 pub async fn link_email(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -736,7 +740,7 @@ pub async fn link_email(
     }
 }
 
-/// GET /api/auth/sessions — list active sessions
+/// GET /api/auth/sessions - list active sessions
 pub async fn list_sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -757,7 +761,7 @@ pub async fn list_sessions(
     (StatusCode::OK, Json(json!({ "sessions": sessions }))).into_response()
 }
 
-/// DELETE /api/auth/sessions/:id — revoke a specific session
+/// DELETE /api/auth/sessions/:id - revoke a specific session
 pub async fn revoke_session(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -782,7 +786,7 @@ pub async fn revoke_session(
     }
 }
 
-/// DELETE /api/auth/sessions — revoke all other sessions
+/// DELETE /api/auth/sessions - revoke all other sessions
 pub async fn revoke_other_sessions(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -799,7 +803,7 @@ pub async fn revoke_other_sessions(
         Ok(c) => c,
         Err(_) => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid token"}))).into_response(),
     };
-    // Use session_id from current token as the one to keep — we don't have it in claims,
+    // Use session_id from current token as the one to keep - we don't have it in claims,
     // so use the token hash as identifier
     // Use first 16 chars of token as identifier
     let current_id = &token[..token.len().min(16)];

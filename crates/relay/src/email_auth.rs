@@ -22,6 +22,7 @@ use flowlink_db::audit;
 #[derive(Deserialize)]
 pub struct SendCodeRequest {
     pub email: String,
+    pub lang: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -127,7 +128,7 @@ pub async fn send_code(
 
     // Send verification email
     let send_result = if let Some(ref email_svc) = state.email_service {
-        email_svc.send_verification_code(&email, &code).await
+        email_svc.send_verification_code(&email, &code, req.lang.as_deref().unwrap_or("ru")).await
     } else {
         log::info!("📧 Dev mode (no SMTP): code generated for {email}");
         Ok(())
@@ -215,6 +216,24 @@ pub async fn change_email_start(
         }))).into_response();
     }
 
+    // Get current account to get language preference
+    let current_account = match flowlink_db::accounts::AccountRepo::get(pool, &account_id).await {
+        Ok(Some(acc)) => acc,
+        Ok(None) => {
+            log::warn!("Account not found: {account_id}");
+            return (StatusCode::NOT_FOUND, Json(json!({
+                "ok": false, "error": "Account not found"
+            }))).into_response();
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch account: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false, "error": "Internal error"
+            }))).into_response();
+        }
+    };
+    let user_lang = current_account.preferred_language.as_deref().unwrap_or("ru");
+
     // Store pending_email
     if let Err(e) = sqlx::query("UPDATE accounts SET pending_email = $1 WHERE account_id = $2")
         .bind(&new_email)
@@ -230,7 +249,7 @@ pub async fn change_email_start(
 
     // Send verification email
     let send_result = if let Some(ref email_svc) = state.email_service {
-        email_svc.send_verification_code(&new_email, &code).await
+        email_svc.send_verification_code(&new_email, &code, user_lang).await
     } else {
         log::info!("📧 Dev mode (no SMTP): email change code generated for {new_email}");
         Ok(())
@@ -267,6 +286,24 @@ pub async fn change_email_confirm(
         }))).into_response(),
     };
     let pool = db.pool();
+
+    // Get current account to get language preference
+    let current_account = match flowlink_db::accounts::AccountRepo::get(pool, &account_id).await {
+        Ok(Some(acc)) => acc,
+        Ok(None) => {
+            log::warn!("Account not found: {account_id}");
+            return (StatusCode::NOT_FOUND, Json(json!({
+                "ok": false, "error": "Account not found"
+            }))).into_response();
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch account: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                "ok": false, "error": "Internal error"
+            }))).into_response();
+        }
+    };
+    let user_lang = current_account.preferred_language.as_deref().unwrap_or("ru");
 
     // Verify and consume code
     match flowlink_db::email_verification::EmailVerificationRepo::verify_and_consume_code(
@@ -346,8 +383,17 @@ pub async fn verify_code(
     let client_ip = headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or(s).trim())
+        .map(|s| {
+            // Prefer IPv4 if multiple IPs present
+            let ips: Vec<&str> = s.split(',').map(|x| x.trim()).collect();
+            ips.iter().find(|ip| !ip.contains(':')).copied().unwrap_or(ips.first().copied().unwrap_or("unknown"))
+        })
         .unwrap_or("unknown")
+        .to_string();
+    let client_country = headers
+        .get("cf-ipcountry")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
         .to_string();
     let _client_ua = headers
         .get("user-agent")
@@ -436,6 +482,7 @@ pub async fn verify_code(
                         let mut vars = std::collections::HashMap::new();
                         vars.insert("name".into(), email.split('@').next().unwrap_or(&email).into());
                         vars.insert("ip".into(), client_ip.clone());
+                        vars.insert("country".into(), client_country.clone());
                         vars.insert("time".into(), chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string());
                         if let Err(e) = queue.schedule(
                             &account_id,

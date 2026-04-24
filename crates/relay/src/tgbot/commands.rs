@@ -134,30 +134,26 @@ pub async fn cmd_start(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
 /// /help — list all commands
 pub async fn cmd_help(bot: Bot, msg: Message, _ctx: BotContext) -> ResponseResult<()> {
     let text = "\
-*📖 Справка FlowLink*
-
-*🖥 Серверы:*
-/status — статус серверов
-/servers — список агентов
-/logs — последние действия
-/approvals — ожидающие подтверждения
-
-*🛡 Безопасность:*
-/shield — оповещения
-/devices — устройства
-/reload — перезагрузить конфиг
-
-*💳 Биллинг:*
-/plans — тарифы
-/billing — статус подписки
-/myplan — текущий план с лимитами
-/subscribe <plan> — подписаться
-/invoices — история платежей
-/usage — статистика
-
-*⚙️ Управление:*
-/config — конфигурация
-/emergency — экстренная остановка";
+\u{1f4d6} <b>Справка FlowLink</b>\n\n\
+\u{1f5a5} <b>Серверы:</b>\n\
+/status \u{2014} статус серверов\n\
+/servers \u{2014} список агентов\n\
+/logs \u{2014} последние действия\n\
+/approvals \u{2014} ожидающие подтверждения\n\
+/devices \u{2014} устройства\n\n\
+\u{1f6e1} <b>Безопасность:</b>\n\
+/shield \u{2014} оповещения\n\
+/reload \u{2014} перезагрузить конфиг\n\
+/emergency \u{2014} экстренная остановка\n\n\
+\u{1f4b3} <b>Биллинг:</b>\n\
+/plans \u{2014} тарифы\n\
+/billing \u{2014} статус подписки\n\
+/myplan \u{2014} фичи и лимиты плана\n\
+/subscribe &lt;plan&gt; \u{2014} подписаться\n\
+/usage \u{2014} статистика с лимитами\n\n\
+\u{2699} <b>Система:</b>\n\
+/config \u{2014} конфигурация\n\
+/settings \u{2014} каналы уведомлений";
 
     bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
@@ -215,42 +211,87 @@ pub async fn cmd_servers(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRes
     Ok(())
 }
 
-/// /plans — available plans
+/// /plans — available plans (dynamic from DB)
 pub async fn cmd_plans(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
+    const PLAN_DESC: &[(&str, &str)] = &[
+        ("plan_starter_desc", "Режим наблюдения — 1 агент, базовые щиты, движок политик"),
+        ("plan_professional_desc", "Согласование команд, RBAC, вебхуки, экспорт SIEM"),
+        ("plan_scale_desc", "Обучение паттернам, безлимитные правила и политики, приоритетная поддержка"),
+        ("plan_enterprise_desc", "Безлимит — SSO/SAML, on-premise, SLA, выделенная поддержка"),
+    ];
+    fn resolve_desc(key: &str) -> &str {
+        PLAN_DESC.iter().find(|(k, _)| *k == key).map(|(_, v)| *v).unwrap_or(key)
+    }
     let plans = ctx.state.billing.as_ref()
         .map(|e| e.plans().list_available())
         .unwrap_or_default();
 
     if plans.is_empty() {
-        bot.send_message(msg.chat.id, "📭 Нет доступных планов.").await?;
+        bot.send_message(msg.chat.id, "Нет доступных планов.").await?;
         return Ok(());
     }
 
-    let mut sb = String::from("📋 <b>Тарифные планы FlowLink</b>\n\n");
+    let account_id = format!("tg:{}", msg.chat.id);
+    let current_plan_id = ctx.state.billing.as_ref()
+        .map(|b| b.get_or_create_account(&account_id).plan_id.clone());
+
+    let mut sb = String::from("\u{1f4cb} <b>Тарифные планы FlowLink</b>\n\n");
     for p in &plans {
-        sb.push_str(&format!("📦 <b>{}</b>\n", p.name));
+        let is_current = current_plan_id.as_deref() == Some(&p.id);
+        let badge = if is_current { " \u{2705} <i>текущий</i>" } else { "" };
+        sb.push_str(&format!("\u{1f4e6} <b>{}{}</b>\n", p.name, badge));
         if p.price_kopecks == 0 {
-            sb.push_str("   💰 Бесплатно");
+            sb.push_str("   \u{1f4b0} Бесплатно");
             if let Some(days) = p.trial_days {
-                sb.push_str(&format!(" ({} дней)", days));
+                sb.push_str(&format!(" ({} дн.)", days));
             }
             sb.push('\n');
         } else {
-            sb.push_str(&format!("   💰 <b>{} ₽</b>/мес\n", format_kopecks(p.price_kopecks)));
+            sb.push_str(&format!("   \u{1f4b0} <b>{} \u{20bd}</b>/мес\n", format_kopecks(p.price_kopecks)));
         }
         if !p.description.is_empty() {
-            sb.push_str(&format!("   📝 {}\n", p.description));
+            sb.push_str(&format!("   {}\n", resolve_desc(&p.description)));
         }
-        let max_f = p.features.len().min(4);
-        for f in &p.features[..max_f] {
-            sb.push_str(&format!("   ✅ {}\n", f));
+        // Features — dynamic
+        let features = [
+            ("Shield", p.features.shield),
+            ("MCP Gateway", p.features.mcp_gateway),
+            ("Approval", p.features.approval),
+            ("RBAC", p.features.rbac),
+            ("Policy Engine", p.features.policy_engine),
+            ("Pattern Learning", p.features.pattern_learning),
+            ("Webhooks", p.features.webhooks),
+            ("SIEM Export", p.features.siem_export),
+            ("SSO", p.features.sso),
+            ("E2EE", p.features.e2ee),
+            ("On-premise", p.features.on_premise),
+        ];
+        for (name, enabled) in &features {
+            if *enabled {
+                sb.push_str(&format!("   \u{2705} {}\n", name));
+            }
         }
-        if p.features.len() > max_f {
-            sb.push_str(&format!("   ...и ещё {}\n", p.features.len() - max_f));
+        // Limits — key ones
+        sb.push_str("   \u{1f4cf} ");
+        let mut limit_parts = Vec::new();
+        if p.limits.max_agents > 0 {
+            limit_parts.push(format!("{} аг.", p.limits.max_agents));
         }
+        if p.limits.max_users > 0 {
+            limit_parts.push(format!("{} польз.", p.limits.max_users));
+        }
+        if p.limits.audit_retention_days > 0 {
+            limit_parts.push(format!("{} дн. логов", p.limits.audit_retention_days));
+        }
+        if limit_parts.is_empty() {
+            sb.push_str("Без ограничений");
+        } else {
+            sb.push_str(&limit_parts.join(" | "));
+        }
+        sb.push_str(&format!("\n   \u{1f6e0} Поддержка: {}\n", p.limits.support_tier));
         sb.push('\n');
     }
-    sb.push_str("💡 /subscribe <code><plan></code> — подписаться");
+    sb.push_str("\u{1f4a1} /subscribe <code>&lt;plan&gt;</code> \u{2014} подписаться");
 
     bot.send_message(msg.chat.id, &sb).parse_mode(ParseMode::Html).await?;
     Ok(())
@@ -287,13 +328,13 @@ pub async fn cmd_billing(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRes
     Ok(())
 }
 
-/// /myplan — current plan details with limits and usage
+/// /myplan — current plan details with all features and limits
 pub async fn cmd_myplan(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
     let account_id = format!("tg:{}", msg.chat.id);
     let billing = match &ctx.state.billing {
         Some(b) => b,
         None => {
-            bot.send_message(msg.chat.id, "❌ Биллинг не настроен.").await?;
+            bot.send_message(msg.chat.id, "Биллинг не настроен.").await?;
             return Ok(());
         }
     };
@@ -302,27 +343,59 @@ pub async fn cmd_myplan(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
     let plan = match billing.plans().get(&acc.plan_id) {
         Some(p) => p,
         None => {
-            bot.send_message(msg.chat.id, "❌ План не найден.").await?;
+            bot.send_message(msg.chat.id, "План не найден.").await?;
             return Ok(());
         }
     };
 
-    let mut text = format!("📦 <b>Текущий план: {}</b>\n\n", plan.name);
-    text.push_str("📏 <b>Лимиты:</b>\n");
-    text.push_str(&format!("  🖥 Серверы: {}\n", plan.limits.max_hosts));
-    text.push_str(&format!("  👤 Пользователи: {}\n", plan.limits.max_users));
-    text.push_str(&format!(
-        "  💾 Хранилище бэкапов: {}\n",
-        if plan.limits.backup_storage_mb == 0 { "∞".to_string() } else { plan.limits.backup_storage_mb.to_string() }
-    ));
-    text.push_str(&format!(
-        "  📦 Снапшоты: {}\n",
-        if plan.limits.max_snapshots == 0 { "∞".to_string() } else { plan.limits.max_snapshots.to_string() }
-    ));
-    text.push_str(&format!("  📅 Хранение логов: {} дней\n", plan.limits.retention_days));
-    text.push_str(&format!("  🛡 Shield: {}\n", plan.limits.shield_level));
+    let mut text = format!("\u{1f4e6} <b>Текущий план: {}</b>\n\n", plan.name);
 
-    text.push_str("\n💡 /usage — статистика | /plans — сменить план");
+    // Features
+    text.push_str("\u{1f513} <b>Функции:</b>\n");
+    let features = [
+        ("Shield", plan.features.shield, Some(&plan.features.shield_level)),
+        ("MCP Gateway", plan.features.mcp_gateway, None),
+        ("Approval", plan.features.approval, None),
+        ("RBAC", plan.features.rbac, None),
+        ("Policy Engine", plan.features.policy_engine, None),
+        ("Pattern Learning", plan.features.pattern_learning, None),
+        ("E2EE", plan.features.e2ee, None),
+        ("Audit Log", plan.features.audit_log, None),
+        ("Webhooks", plan.features.webhooks, None),
+        ("SIEM Export", plan.features.siem_export, None),
+        ("SSO", plan.features.sso, None),
+        ("On-premise", plan.features.on_premise, None),
+    ];
+    for (name, enabled, detail) in &features {
+        let icon = if *enabled { "\u{2705}" } else { "\u{274c}" };
+        let detail_str = detail.map(|d| format!(" ({})", d)).unwrap_or_default();
+        text.push_str(&format!("   {} {}{}\n", icon, name, detail_str));
+    }
+
+    // Limits
+    text.push_str("\n\u{1f4cf} <b>Лимиты:</b>\n");
+    let limits = [
+        ("Агенты", plan.limits.max_agents, "шт."),
+        ("Пользователи", plan.limits.max_users, "шт."),
+        ("Хранение логов", plan.limits.audit_retention_days, "дн."),
+        ("API rate limit", plan.limits.api_rate_limit as u64, "зап./мин."),
+        ("Кастомных правил", plan.limits.max_custom_rules, "шт."),
+        ("Политик", plan.limits.max_policies, "шт."),
+        ("Вебхуков", plan.limits.max_webhooks, "шт."),
+    ];
+    for (name, val, unit) in &limits {
+        let display = if *val == 0 { "\u{221e}".to_string() } else { val.to_string() };
+        text.push_str(&format!("   {} / {} {}\n", name, display, unit));
+    }
+    if !plan.limits.approval_channels.is_empty() {
+        text.push_str(&format!("   Каналы одобрения: {}\n", plan.limits.approval_channels.join(", ")));
+    }
+    if !plan.limits.siem_formats.is_empty() {
+        text.push_str(&format!("   SIEM форматы: {}\n", plan.limits.siem_formats.join(", ")));
+    }
+    text.push_str(&format!("   Поддержка: <b>{}</b>\n", plan.limits.support_tier));
+
+    text.push_str("\n\u{1f4a1} /plans \u{2014} все тарифы | /usage \u{2014} статистика");
     bot.send_message(msg.chat.id, &text).parse_mode(ParseMode::Html).await?;
     Ok(())
 }
@@ -623,14 +696,43 @@ pub async fn cmd_invoices(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRe
 pub async fn cmd_usage(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
     let (daily_requests, daily_tokens) = ctx.state.usage_tracker.today_stats().await;
     let all_usage = ctx.state.usage_tracker.get_all_usage().await;
+    let active_agents = all_usage.len();
 
-    let text = format!(
-        "📊 <b>Использование</b>\n\n\
-         📈 Запросов сегодня: {}\n\
-         🔤 Токенов сегодня: {}\n\
-         🖥 Активных агентов: {}",
-        daily_requests, daily_tokens, all_usage.len(),
+    let account_id = format!("tg:{}", msg.chat.id);
+    let plan_info = ctx.state.billing.as_ref().map(|b| {
+        let acc = b.get_or_create_account(&account_id);
+        let plan = b.plans().get(&acc.plan_id);
+        plan.map(|p| (p.name.clone(), p.limits.clone()))
+    }).flatten();
+
+    let mut text = format!(
+        "\u{1f4ca} <b>Использование</b>\n\n\u{1f4c8} Запросов сегодня: {}\n\u{1f524} Токенов сегодня: {}\n\u{1f5a5} Активных агентов: {}",
+        daily_requests, daily_tokens, active_agents,
     );
+
+    if let Some((plan_name, limits)) = plan_info {
+        text.push_str(&format!("\n\n\u{1f4e6} План: <b>{}</b>\n\n\u{1f4cf} <b>Лимиты:</b>", plan_name));
+        let agent_pct = if limits.max_agents > 0 {
+            format!(" ({}/{}, {}%)", active_agents, limits.max_agents,
+                (active_agents as f64 / limits.max_agents as f64 * 100.0).min(100.0) as u64)
+        } else { " (\u{221e})".to_string() };
+        text.push_str(&format!("\n   \u{1f916} Агенты:{}", agent_pct));
+        if limits.api_rate_limit > 0 {
+            let rate_pct = (daily_requests as f64 / limits.api_rate_limit as f64 * 100.0).min(999.0) as u64;
+            let warn_str = if rate_pct > 80 { " \u{26a0}" } else { "" };
+            text.push_str(&format!("\n   \u{1f4e1} API: {}/{} зап/мин{}", daily_requests, limits.api_rate_limit, warn_str));
+        }
+        if limits.max_custom_rules > 0 {
+            text.push_str(&format!("\n   \u{1f9e9} Правил: /{}", limits.max_custom_rules));
+        }
+        if limits.max_policies > 0 {
+            text.push_str(&format!("\n   \u{1f6e1} Политик: /{}", limits.max_policies));
+        }
+        if limits.max_webhooks > 0 {
+            text.push_str(&format!("\n   \u{1f517} Вебхуков: /{}", limits.max_webhooks));
+        }
+        text.push_str(&format!("\n\n\u{1f6e0} Поддержка: {}", limits.support_tier));
+    }
 
     bot.send_message(msg.chat.id, text).parse_mode(ParseMode::Html).await?;
     Ok(())
@@ -658,6 +760,24 @@ pub async fn cmd_devices(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRes
 
 /// /shield — security alerts
 pub async fn cmd_shield(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
+    let account_id = format!("tg:{}", msg.chat.id);
+    if let Some(ref billing) = ctx.state.billing {
+        let acc = billing.get_or_create_account(&account_id);
+        if let Some(plan) = billing.plans().get(&acc.plan_id) {
+            if !plan.features.shield {
+                let kb = InlineKeyboardMarkup::new(vec![
+                    vec![InlineKeyboardButton::url(
+                        format!("\u{1f680} Перейти на Professional"),
+                        reqwest::Url::parse("https://flowlink.flow-masters.ru/pricing?upgrade=professional").unwrap(),
+                    )],
+                ]);
+                bot.send_message(msg.chat.id,
+                    "\u{1f512} <b>Функция недоступна</b>\n\nShield доступен на тарифе Starter и выше."
+                ).parse_mode(ParseMode::Html).reply_markup(kb).await?;
+                return Ok(());
+            }
+        }
+    }
     let active = ctx.state.shield_alerts.list_active();
     let all = ctx.state.shield_alerts.list_all();
 
@@ -675,6 +795,24 @@ pub async fn cmd_shield(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
 
 /// /logs — recent audit entries
 pub async fn cmd_logs(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
+    let account_id = format!("tg:{}", msg.chat.id);
+    if let Some(ref billing) = ctx.state.billing {
+        let acc = billing.get_or_create_account(&account_id);
+        if let Some(plan) = billing.plans().get(&acc.plan_id) {
+            if !plan.features.audit_log {
+                let kb = InlineKeyboardMarkup::new(vec![
+                    vec![InlineKeyboardButton::url(
+                        format!("\u{1f680} Перейти на Professional"),
+                        reqwest::Url::parse("https://flowlink.flow-masters.ru/pricing?upgrade=professional").unwrap(),
+                    )],
+                ]);
+                bot.send_message(msg.chat.id,
+                    "\u{1f512} <b>Функция недоступна</b>\n\nAudit log доступен на тарифе Professional и выше."
+                ).parse_mode(ParseMode::Html).reply_markup(kb).await?;
+                return Ok(());
+            }
+        }
+    }
     let filter = crate::audit::AuditFilter {
         agent_id: None,
         event_type: None,
@@ -701,12 +839,31 @@ pub async fn cmd_logs(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult
     Ok(())
 }
 
-/// /approvals — list pending approvals
+/// /approvals — list pending approvals (requires approval feature)
 pub async fn cmd_approvals(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
-    let approvals = ctx.state.approvals.list_pending();
+    // Feature gate check
+    let account_id = format!("tg:{}", msg.chat.id);
+    if let Some(ref billing) = ctx.state.billing {
+        let acc = billing.get_or_create_account(&account_id);
+        if let Some(plan) = billing.plans().get(&acc.plan_id) {
+            if !plan.features.approval {
+                let kb = InlineKeyboardMarkup::new(vec![
+                    vec![InlineKeyboardButton::url(
+                        format!("\u{1f680} Перейти на Professional"),
+                        reqwest::Url::parse("https://flowlink.flow-masters.ru/pricing?upgrade=professional").unwrap(),
+                    )],
+                ]);
+                bot.send_message(msg.chat.id,
+                    "\u{1f512} <b>Функция недоступна</b>\n\nApproval workflow доступен на тарифе Professional и выше."
+                ).parse_mode(ParseMode::Html).reply_markup(kb).await?;
+                return Ok(());
+            }
+        }
+    }
 
+    let approvals = ctx.state.approvals.list_pending();
     if approvals.is_empty() {
-        bot.send_message(msg.chat.id, "✅ Нет ожидающих подтверждений.").await?;
+        bot.send_message(msg.chat.id, "\u{2705} Нет ожидающих подтверждений.").await?;
         return Ok(());
     }
 

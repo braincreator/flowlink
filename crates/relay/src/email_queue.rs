@@ -168,7 +168,7 @@ impl EmailQueue {
             }
         };
 
-        for (id, _account_id, type_str, recipient, vars, attempts, max_attempts) in rows {
+        for (id, account_id, type_str, recipient, vars, attempts, max_attempts) in rows {
             if attempts >= max_attempts {
                 log::warn!("email_queue: skipping {} (max attempts reached)", id);
                 continue;
@@ -184,7 +184,14 @@ impl EmailQueue {
 
             let vars_map: HashMap<String, String> = serde_json::from_value(vars).unwrap_or_default();
 
-            let result = self.send_typed_email(&email_type, &recipient, &vars_map).await;
+            // Get account language preference
+            let lang = if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(self.pool.as_ref(), &account_id).await {
+                account.preferred_language.as_deref().unwrap_or("ru").to_string()
+            } else {
+                "ru".to_string()
+            };
+
+            let result = self.send_typed_email(&email_type, &recipient, &vars_map, &lang).await;
 
             match result {
                 Ok(()) => {
@@ -217,68 +224,70 @@ impl EmailQueue {
         email_type: &EmailType,
         recipient: &str,
         vars: &HashMap<String, String>,
+        lang: &str,
     ) -> Result<()> {
         let email = &self.email_service;
         match email_type {
             EmailType::Welcome1 => {
                 let name = vars.get("email").map(|s| s.split('@').next().unwrap_or(s)).unwrap_or("пользователь");
-                email.send_welcome_email1(recipient, name).await
+                email.send_welcome_email1(recipient, name, lang).await
             }
             EmailType::Welcome2 => {
                 let name = vars.get("email").map(|s| s.split('@').next().unwrap_or(s)).unwrap_or("пользователь");
-                email.send_welcome_email2(recipient, name).await
+                email.send_welcome_email2(recipient, name, lang).await
             }
             EmailType::Welcome3 => {
                 let name = vars.get("email").map(|s| s.split('@').next().unwrap_or(s)).unwrap_or("пользователь");
-                email.send_welcome_email3(recipient, name).await
+                email.send_welcome_email3(recipient, name, lang).await
             }
             EmailType::PaymentSuccess => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
                 let plan = vars.get("plan_name").map(|s| s.as_str()).unwrap_or("план");
                 let amount = vars.get("amount").map(|s| s.as_str()).unwrap_or("0 ₽");
-                email.send_payment_success(recipient, name, plan, amount).await
+                email.send_payment_success(recipient, name, plan, amount, lang).await
             }
             EmailType::PaymentFailed => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
                 let plan = vars.get("plan_name").map(|s| s.as_str()).unwrap_or("план");
-                email.send_payment_failed(recipient, name, plan).await
+                email.send_payment_failed(recipient, name, plan, lang).await
             }
             EmailType::RenewalReminder => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
                 let plan = vars.get("plan_name").map(|s| s.as_str()).unwrap_or("план");
                 let date = vars.get("renewal_date").map(|s| s.as_str()).unwrap_or("скоро");
-                email.send_renewal_reminder(recipient, name, plan, date).await
+                email.send_renewal_reminder(recipient, name, plan, date, lang).await
             }
             EmailType::SubscriptionCancelled => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
                 let until = vars.get("access_until").map(|s| s.as_str()).unwrap_or("");
-                email.send_subscription_cancelled(recipient, name, until).await
+                email.send_subscription_cancelled(recipient, name, until, lang).await
             }
             EmailType::NewLogin => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
                 let ip = vars.get("ip").map(|s| s.as_str()).unwrap_or("");
+                let country = vars.get("country").map(|s| s.as_str()).unwrap_or("");
                 let time = vars.get("time").map(|s| s.as_str()).unwrap_or("");
-                email.send_new_login(recipient, name, ip, time).await
+                email.send_new_login(recipient, name, ip, country, time, lang).await
             }
             EmailType::PasswordChanged => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
-                email.send_password_changed(recipient, name).await
+                email.send_password_changed(recipient, name, lang).await
             }
             EmailType::ApiKeyCreated => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
                 let key_name = vars.get("key_name").map(|s| s.as_str()).unwrap_or("API ключ");
-                email.send_api_key_created(recipient, name, key_name).await
+                email.send_api_key_created(recipient, name, key_name, lang).await
             }
             EmailType::ApiKeyDeleted => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
                 let key_name = vars.get("key_name").map(|s| s.as_str()).unwrap_or("API ключ");
-                email.send_api_key_deleted(recipient, name, key_name).await
+                email.send_api_key_deleted(recipient, name, key_name, lang).await
             }
             EmailType::PlanChanged => {
                 let name = vars.get("name").map(|s| s.as_str()).unwrap_or("пользователь");
                 let old_plan = vars.get("old_plan").map(|s| s.as_str()).unwrap_or("");
                 let new_plan = vars.get("new_plan").map(|s| s.as_str()).unwrap_or("");
-                email.send_plan_changed(recipient, name, old_plan, new_plan).await
+                email.send_plan_changed(recipient, name, old_plan, new_plan, lang).await
             }
         }
     }

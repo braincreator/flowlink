@@ -23,6 +23,8 @@ pub mod metrics;
 pub mod billing_api;
 pub mod billing_persist;
 pub mod billing_middleware;
+pub mod plan_gate;
+pub mod plan_enforcement;
 pub mod email;
 pub mod email_auth;
 pub mod notifications;
@@ -484,6 +486,22 @@ impl Relay {
                 if router.channel_count() > 0 {
                     let router = std::sync::Arc::new(router);
                     let _ = state.notification_router.set(router.clone());
+
+                    // Start plan reload listener — admin changes → hot reload billing cache
+                    let reload_state = state.clone();
+                    tokio::spawn(async move {
+                        let mut rx = reload_state.eventbus.subscribe("plans:updated");
+                        log::info!("\u{1f4e6} Plan reload listener active");
+                        while let Ok(msg) = rx.recv().await {
+                            if let Some(ref billing) = reload_state.billing {
+                                if let Some(ref db) = reload_state.db {
+                                    billing.plans().load_from_db(&*db).await;
+                                    log::info!("\u{1f4e6} Plans reloaded: {}", msg);
+                                }
+                            }
+                        }
+                        log::warn!("\u{1f4e6} Plan reload listener exited");
+                    });
 
                     // Start shield alert → notification channel forwarder
                     let notify_state = state.clone();

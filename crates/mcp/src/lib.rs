@@ -1323,4 +1323,172 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(text).unwrap();
         assert_eq!(v["risk_level"], "critical");
     }
+
+    // ── scan_file: hidden file, executable extension, large file ──
+    #[test]
+    fn scan_file_hidden() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_file(&json!({"path": "/home/.hidden", "operation": "write"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 10);
+    }
+
+    #[test]
+    fn scan_file_executable_extension() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_file(&json!({"path": "/tmp/run.sh", "operation": "execute"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 10);
+    }
+
+    #[test]
+    fn scan_file_large() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_file(&json!({"path": "/var/log/huge_10gb.log", "operation": "read"}))).unwrap();
+        // Large file operations are not dangerous per se; just check no error
+        assert!(r.get("risk_level").is_some());
+    }
+
+    // ── scan_url: credentials, suspicious TLD, webhook secret, malicious pattern ──
+    #[test]
+    fn scan_url_credentials() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "http://user:pass@evil.com/api"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 30);
+    }
+
+    #[test]
+    fn scan_url_suspicious_tld() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "https://evil.tk"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 10);
+    }
+
+    #[test]
+    fn scan_url_webhook_secret() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "https://discord.com/api/webhooks/12345/abcSECRETdef"}))).unwrap();
+        // webhook URLs are scored by the engine; verify structure at minimum
+        assert!(r.get("risk_level").is_some());
+        assert!(r.get("score").is_some());
+    }
+
+    #[test]
+    fn scan_url_malicious_pattern() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.scan_url(&json!({"url": "http://evil.com/shell.php?cmd=cat /etc/passwd"}))).unwrap();
+        assert!(r["score"].as_u64().unwrap() >= 20);
+    }
+
+    // ── policy: empty command / missing pid ──
+    #[test]
+    fn policy_block_command_empty() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.policy_block_command(&json!({"command": "", "reason": "test"}))).unwrap();
+        assert_eq!(r["error"], "command is required");
+    }
+
+    #[test]
+    fn policy_unblock_command_empty() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.policy_unblock_command(&json!({"command": "", "reason": "test"}))).unwrap();
+        assert_eq!(r["error"], "command is required");
+    }
+
+    #[test]
+    fn policy_block_pid_missing() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.policy_block_pid(&json!({"reason": "test"}))).unwrap();
+        assert_eq!(r["error"], "pid is required");
+    }
+
+    #[test]
+    fn policy_whitelist_pid_missing() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.policy_whitelist_pid(&json!({"reason": "test"}))).unwrap();
+        assert_eq!(r["error"], "pid is required");
+    }
+
+    // ── set_mode moderate / permissive ──
+    #[test]
+    fn set_mode_moderate() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.set_mode(&json!({"mode": "moderate"}))).unwrap();
+        assert_eq!(r["mode"], "moderate");
+        assert_eq!(r["threshold"], 50);
+    }
+
+    #[test]
+    fn set_mode_permissive() {
+        let s = server();
+        let r: serde_json::Value = serde_json::from_str(&s.set_mode(&json!({"mode": "permissive"}))).unwrap();
+        assert_eq!(r["mode"], "permissive");
+        assert_eq!(r["threshold"], 75);
+    }
+
+    // ── Struct instantiation: PendingApproval, AuditEntry ──
+    #[test]
+    fn pending_approval_struct() {
+        let pa = PendingApproval {
+            id: "test-123".into(),
+            action: "block_command".into(),
+            value: "rm -rf /".into(),
+            reason: "testing".into(),
+            created_at: chrono_free_now(),
+        };
+        assert_eq!(pa.id, "test-123");
+        assert_eq!(pa.action, "block_command");
+        assert_eq!(pa.value, "rm -rf /");
+    }
+
+    #[test]
+    fn audit_entry_struct() {
+        let ae = AuditEntry {
+            timestamp: chrono_free_now(),
+            tool: "scan_command".into(),
+            input: "ls".into(),
+            risk_level: "safe".into(),
+            threat: None,
+        };
+        assert_eq!(ae.tool, "scan_command");
+        assert_eq!(ae.risk_level, "safe");
+        assert!(ae.threat.is_none());
+    }
+
+    // ── Private helper functions ──
+    #[test]
+    fn error_response_format() {
+        let r = error_response(Some(json!(42)), -32601, "Method not found");
+        assert_eq!(r["jsonrpc"], "2.0");
+        assert_eq!(r["id"], 42);
+        assert_eq!(r["error"]["code"], -32601);
+        assert_eq!(r["error"]["message"], "Method not found");
+    }
+
+    #[test]
+    fn error_response_no_id() {
+        let r = error_response(None, -32700, "Parse error");
+        assert_eq!(r["id"], Value::Null);
+    }
+
+    #[test]
+    fn safe_result_format() {
+        let r: serde_json::Value = serde_json::from_str(&safe_result("All clear")).unwrap();
+        assert_eq!(r["risk_level"], "safe");
+        assert_eq!(r["score"], 0);
+        assert_eq!(r["explanation"], "All clear");
+    }
+
+    #[test]
+    fn threat_to_response_none() {
+        let r: serde_json::Value = serde_json::from_str(&threat_to_response(&None, 1)).unwrap();
+        assert_eq!(r["risk_level"], "safe");
+        assert_eq!(r["score"], 0);
+    }
+
+    #[test]
+    fn chrono_free_now_returns_seconds() {
+        let ts = chrono_free_now();
+        // Should parse as a positive integer (seconds since epoch)
+        let val: u64 = ts.parse().expect("chrono_free_now should return a u64 string");
+        assert!(val > 1_000_000_000, "timestamp should be a recent epoch in seconds");
+    }
 }

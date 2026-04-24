@@ -156,7 +156,7 @@ pub async fn get_billing_info(
     // Ensure account exists in DB
     if let Some(db) = &state.db {
         if let Err(e) = flowlink_db::accounts::AccountRepo::get_or_create(
-            db.pool(), &claims.0.account_id, flowlink_billing::plans::PlanId::Trial.as_str(),
+            db.pool(), &claims.0.account_id, flowlink_billing::plans::PlanId::Starter.as_str(),
         ).await {
             log::warn!("DB account lookup failed: {e}");
         }
@@ -244,8 +244,10 @@ pub async fn public_plans(State(state): State<AppState>) -> impl IntoResponse {
     let plans = match &state.billing {
         Some(engine) => engine.plans().list_available(),
         None => {
-            // Fallback to builtin plans if billing not configured
-            vec![flowlink_billing::plans::Plan::trial(), flowlink_billing::plans::Plan::starter(), flowlink_billing::plans::Plan::pro()]
+            // Fallback: create registry with defaults
+            let registry = flowlink_billing::plans::PlanRegistry::new();
+            registry.seed_defaults();
+            registry.list_available()
         }
     };
     (StatusCode::OK, Json(plans)).into_response()
@@ -260,6 +262,78 @@ pub async fn list_plans(State(state): State<AppState>) -> impl IntoResponse {
 
     let plans = billing_engine.plans().list_available();
     (StatusCode::OK, Json(plans)).into_response()
+}
+
+/// GET /api/billing/my-plan — returns current account plan with features and limits
+pub async fn my_plan(
+    State(state): State<AppState>,
+    claims: ClaimsExtractor,
+) -> impl IntoResponse {
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
+    };
+
+    let billing = billing_engine.get_or_create_account(&claims.0.account_id);
+    let plan = match billing_engine.plans().get(&billing.plan_id) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "plan_id": billing.plan_id,
+                    "plan": null,
+                    "error": "Plan not found"
+                })),
+            ).into_response();
+        }
+    };
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "plan_id": plan.id,
+        "plan": plan,
+    }))).into_response()
+}
+
+/// GET /api/billing/check-feature?feature=approval — check if a feature is available
+pub async fn check_feature(
+    State(state): State<AppState>,
+    claims: ClaimsExtractor,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let billing_engine = match get_billing_engine(&state) {
+        Ok(e) => e,
+        Err(r) => return r,
+    };
+
+    let feature = match params.get("feature") {
+        Some(f) => f.clone(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Missing ?feature= parameter"})),
+            ).into_response();
+        }
+    };
+
+    let billing = billing_engine.get_or_create_account(&claims.0.account_id);
+    let plan = match billing_engine.plans().get(&billing.plan_id) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "allowed": false,
+                    "reason": format!("Plan '{}' not found", billing.plan_id),
+                })),
+            ).into_response();
+        }
+    };
+
+    match plan.require_feature(&feature) {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"allowed": true, "reason": null}))).into_response(),
+        Err(e) => (StatusCode::OK, Json(serde_json::json!({"allowed": false, "reason": e.to_string()}))).into_response(),
+    }
 }
 
 /// POST /api/billing/change-plan — change plan
@@ -330,10 +404,11 @@ pub async fn change_plan(
                         if let Some(ref email) = account.email {
                             let old_plan = account.plan_id.clone();
                             let new_plan = body.plan_id.clone();
+                            let lang = account.preferred_language.as_deref().unwrap_or("ru").to_string();
                             let svc = email_svc.clone();
                             let to = email.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = svc.send_plan_changed(&to, to.split('@').next().unwrap_or(&to), &old_plan, &new_plan).await {
+                                if let Err(e) = svc.send_plan_changed(&to, to.split('@').next().unwrap_or(&to), &old_plan, &new_plan, &lang).await {
                                     log::warn!("Failed to send plan changed email to {to}: {e}");
                                 }
                             });
@@ -469,6 +544,7 @@ pub async fn subscribe(
         } else { None }
     });
     // Fetch email from account profile if not provided
+    let customer_phone = body.customer_phone.clone();
     let customer_email = if customer_email.is_none() {
         if let Some(db) = &state.db {
             match flowlink_db::accounts::AccountRepo::get(db.pool(), &claims.0.account_id).await {
@@ -477,7 +553,7 @@ pub async fn subscribe(
             }
         } else { None }
     } else { customer_email };
-    if customer_email.is_none() && body.customer_phone.is_none() {
+    if customer_email.is_none() && customer_phone.is_none() {
         return (StatusCode::BAD_REQUEST, Json(json!({
             "error": "Email or phone required for receipt (54-FZ)"
         }))).into_response();
@@ -500,6 +576,9 @@ pub async fn subscribe(
         start_date: None,
         trial_days: body.trial_days.unwrap_or(0),
         customer_email,
+        customer_phone,
+        return_url: Some(format!("https://flowlink.flow-masters.ru/dashboard/billing?plan={}&status=success", body.plan_id)),
+        fail_url: Some(format!("https://flowlink.flow-masters.ru/checkout/{}?status=failed", body.plan_id)),
     };
 
     match tochka.create_subscription(&req).await {
@@ -708,6 +787,9 @@ pub async fn change_subscription_plan(
             start_date: None,
             trial_days: 0,
             customer_email: None,
+            customer_phone: None,
+            return_url: None,
+            fail_url: None,
         };
 
         match tochka.create_subscription(&req).await {
@@ -1075,12 +1157,13 @@ pub async fn tochka_webhook(
                                                 if let Some(ref email) = account.email {
                                                     let plan_name = plan_id.clone();
                                                     let amount = format!("{:.2} \u{20bd}", order.amount_kopecks as f64 / 100.0);
+                                                    let lang = account.preferred_language.as_deref().unwrap_or("ru").to_string();
                                                     tokio::spawn({
                                                         let svc = email_service.clone();
                                                         let to = email.clone();
                                                         let name = to.clone();
                                                         async move {
-                                                            if let Err(e) = svc.send_payment_success(&to, &name, &plan_name, &amount).await {
+                                                            if let Err(e) = svc.send_payment_success(&to, &name, &plan_name, &amount, &lang).await {
                                                                 log::warn!("Failed to send payment email to {to}: {e}");
                                                             }
                                                         }
@@ -1104,11 +1187,12 @@ pub async fn tochka_webhook(
                                     if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &order.account_id).await {
                                         if let Some(ref email) = account.email {
                                             let plan_id = order.plan_id.clone().unwrap_or_default();
+                                            let lang = account.preferred_language.as_deref().unwrap_or("ru").to_string();
                                             tokio::spawn({
                                                 let svc = email_service.clone();
                                                 let to = email.clone();
                                                 async move {
-                                                    if let Err(e) = svc.send_payment_failed(&to, to.split('@').next().unwrap_or(&to), &plan_id).await {
+                                                    if let Err(e) = svc.send_payment_failed(&to, to.split('@').next().unwrap_or(&to), &plan_id, &lang).await {
                                                         log::warn!("Failed to send payment failed email to {to}: {e}");
                                                     }
                                                 }

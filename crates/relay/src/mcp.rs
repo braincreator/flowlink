@@ -265,6 +265,14 @@ pub async fn handle_mcp(
         }
     };
 
+    // Resolve plan for feature/limit enforcement
+    let plan = identity.as_ref().and_then(|id| {
+        state.billing.as_ref().and_then(|billing| {
+            let acc = billing.get_or_create_account(&id.account_id);
+            billing.plans().get(&acc.plan_id)
+        })
+    });
+
     match req.method.as_str() {
         "initialize" => {
             let result = json!({
@@ -288,14 +296,14 @@ pub async fn handle_mcp(
             if identity.is_none() {
                 return mcp_err(req.id, -32001, "Unauthorized: API key required for tool calls. Use Authorization: Bearer flk_... or x-api-key header").into_response();
             }
-            handle_tools_call(state, req, identity).await
+            handle_tools_call(state, req, identity, plan).await
         }
 
         _ => mcp_err(req.id, -32601, format!("method not found: {}", req.method)).into_response(),
     }
 }
 
-async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<KeyIdentity>) -> axum::response::Response {
+async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<KeyIdentity>, plan: Option<flowlink_billing::plans::Plan>) -> axum::response::Response {
     let params = match req.params {
         Some(Value::Object(map)) => map,
         _ => return mcp_err(req.id, -32602, "invalid params").into_response(),
@@ -345,10 +353,16 @@ async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<Ke
         }
         "flowlink_approve" => {
             if let Some(ref id) = identity { if !id.can_call("flowlink_approve") { return mcp_err(req.id, -32002, "Forbidden: missing approvals:write scope").into_response(); } }
+            if let Err(e) = crate::plan_gate::require_feature(&plan, "approval", Some(crate::plan_gate::feature_min_tier("approval"))) {
+                return mcp_err(req.id, -32003, &format!("Plan gate: {} (upgrade: {})", e.message, e.upgrade_url.as_deref().unwrap_or("/pricing"))).into_response();
+            }
             mcp_approve(&state, req.id, &args, identity.as_ref()).await
         }
         "flowlink_policy" => {
             if let Some(ref id) = identity { if !id.can_call("flowlink_policy") { return mcp_err(req.id, -32002, "Forbidden: missing policy:read scope").into_response(); } }
+            if let Err(e) = crate::plan_gate::require_feature(&plan, "policy_engine", Some(crate::plan_gate::feature_min_tier("policy_engine"))) {
+                return mcp_err(req.id, -32003, &format!("Plan gate: {} (upgrade: {})", e.message, e.upgrade_url.as_deref().unwrap_or("/pricing"))).into_response();
+            }
             mcp_policy(&state, req.id, &args).await
         }
         _ => mcp_err(req.id, -32602, format!("unknown tool: {name}")).into_response(),

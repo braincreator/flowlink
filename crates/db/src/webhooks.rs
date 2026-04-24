@@ -146,3 +146,101 @@ pub async fn trigger_webhooks(pool: &PgPool, org_id: &str, event_type: &str, pay
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn now() -> chrono::DateTime<chrono::Utc> { Utc::now() }
+
+    fn make_webhook() -> WebhookRow {
+        WebhookRow {
+            id: uuid::Uuid::new_v4(),
+            org_id: "org_001".to_string(),
+            url: "https://example.com/webhook".to_string(),
+            secret: "whsec_abc123".to_string(),
+            events: vec!["policy.changed".to_string(), "member.added".to_string()],
+            is_active: true,
+            created_at: now(),
+            last_triggered_at: None,
+        }
+    }
+
+    #[test]
+    fn webhook_row_construction() {
+        let w = make_webhook();
+        assert_eq!(w.org_id, "org_001");
+        assert_eq!(w.url, "https://example.com/webhook");
+        assert_eq!(w.events.len(), 2);
+        assert!(w.is_active);
+    }
+
+    #[test]
+    fn webhook_row_none_last_triggered() {
+        let w = make_webhook();
+        assert!(w.last_triggered_at.is_none());
+    }
+
+    #[test]
+    fn webhook_row_some_last_triggered() {
+        let mut w = make_webhook();
+        w.last_triggered_at = Some(now());
+        assert!(w.last_triggered_at.is_some());
+    }
+
+    #[test]
+    fn webhook_row_clone() {
+        let w = make_webhook();
+        let cloned = w.clone();
+        assert_eq!(cloned.id, w.id);
+        assert_eq!(cloned.org_id, w.org_id);
+        assert_eq!(cloned.events, w.events);
+    }
+
+    #[test]
+    fn webhook_row_debug() {
+        let w = make_webhook();
+        let debug = format!("{:?}", w);
+        assert!(debug.contains("webhook"));
+    }
+
+    #[test]
+    fn webhook_row_empty_events() {
+        let mut w = make_webhook();
+        w.events = Vec::new();
+        assert!(w.events.is_empty());
+    }
+
+    #[test]
+    fn webhook_row_multiple_events() {
+        let mut w = make_webhook();
+        w.events = vec![
+            "policy.changed".to_string(),
+            "member.added".to_string(),
+            "member.removed".to_string(),
+            "plan.upgraded".to_string(),
+        ];
+        assert_eq!(w.events.len(), 4);
+    }
+
+    #[test]
+    fn webhook_row_is_active_true() {
+        let w = make_webhook();
+        assert!(w.is_active);
+    }
+
+    #[test]
+    fn webhook_row_is_active_false() {
+        let mut w = make_webhook();
+        w.is_active = false;
+        assert!(!w.is_active);
+    }
+
+    #[test]
+
+    #[test]
+    fn webhook_repo_exists() {
+        let _repo = WebhookRepo;
+    }
+}

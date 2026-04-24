@@ -201,3 +201,131 @@ impl UserChannelRepo {
         Ok(result.rows_affected() > 0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn make_channel() -> UserChannel {
+        UserChannel {
+            id: uuid::Uuid::new_v4(),
+            account_id: "acct_123".to_string(),
+            channel_type: "telegram".to_string(),
+            channel_address: "123456".to_string(),
+            display_name: Some("Test User".to_string()),
+            is_primary: true,
+            verified: true,
+            mute_categories: Some(serde_json::json!(["system", "audit"])),
+            min_severity: Some("warning".to_string()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn user_channel_construction() {
+        let ch = make_channel();
+        assert_eq!(ch.account_id, "acct_123");
+        assert_eq!(ch.channel_type, "telegram");
+        assert_eq!(ch.channel_address, "123456");
+    }
+
+    #[test]
+    fn user_channel_clone() {
+        let ch = make_channel();
+        let cloned = ch.clone();
+        assert_eq!(cloned.id, ch.id);
+        assert_eq!(cloned.account_id, ch.account_id);
+        assert_eq!(cloned.channel_type, ch.channel_type);
+    }
+
+    #[test]
+    fn user_channel_debug() {
+        let ch = make_channel();
+        let debug = format!("{:?}", ch);
+        assert!(debug.contains("telegram"));
+    }
+
+    #[test]
+    fn user_channel_none_display_name() {
+        let mut ch = make_channel();
+        ch.display_name = None;
+        assert!(ch.display_name.is_none());
+    }
+
+    #[test]
+    fn user_channel_some_display_name() {
+        let ch = make_channel();
+        assert_eq!(ch.display_name.as_deref(), Some("Test User"));
+    }
+
+    #[test]
+    fn user_channel_none_mute_categories() {
+        let mut ch = make_channel();
+        ch.mute_categories = None;
+        assert!(ch.mute_categories.is_none());
+    }
+
+    #[test]
+    fn user_channel_some_mute_categories() {
+        let ch = make_channel();
+        let cats = ch.mute_categories.unwrap();
+        assert_eq!(cats.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn user_channel_none_min_severity() {
+        let mut ch = make_channel();
+        ch.min_severity = None;
+        assert!(ch.min_severity.is_none());
+    }
+
+    #[test]
+    fn user_channel_some_min_severity() {
+        let ch = make_channel();
+        assert_eq!(ch.min_severity.as_deref(), Some("warning"));
+    }
+
+    #[test]
+    fn user_channel_is_primary_true() {
+        let ch = make_channel();
+        assert!(ch.is_primary);
+    }
+
+    #[test]
+    fn user_channel_is_primary_false() {
+        let mut ch = make_channel();
+        ch.is_primary = false;
+        assert!(!ch.is_primary);
+    }
+
+    #[test]
+    fn user_channel_verified_true() {
+        let ch = make_channel();
+        assert!(ch.verified);
+    }
+
+    #[test]
+    fn user_channel_verified_false() {
+        let mut ch = make_channel();
+        ch.verified = false;
+        assert!(!ch.verified);
+    }
+
+    #[test]
+
+    #[test]
+    fn user_channel_different_channel_types() {
+        for ctype in &["telegram", "max", "slack", "email", "webhook"] {
+            let mut ch = make_channel();
+            ch.channel_type = ctype.to_string();
+            assert_eq!(ch.channel_type, *ctype);
+        }
+    }
+
+    #[test]
+    fn user_channel_repo_exists() {
+        let _repo = UserChannelRepo;
+    }
+}

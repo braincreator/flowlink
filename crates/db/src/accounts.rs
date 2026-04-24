@@ -27,6 +27,7 @@ pub struct AccountRow {
     #[allow(dead_code)]
     pub totp_enabled: bool,
     pub is_admin: bool,
+    pub preferred_language: Option<String>,
     #[sqlx(default)]
     pub pending_email: Option<String>,
     pub deleted_at: Option<DateTime<Utc>>,
@@ -357,6 +358,8 @@ mod tests {
             payment_method: Some("card".into()),
             tg_id: None,
             email: None,
+            preferred_language: None,
+            phone: None,
             totp_secret: None,
             totp_enabled: false,
             is_admin: false,
@@ -366,6 +369,7 @@ mod tests {
             cycle_start: now,
             created_at: now,
             updated_at: now,
+            pending_email: None,
         }
     }
 
@@ -409,6 +413,8 @@ mod tests {
             payment_method: None,
             tg_id: None,
             email: None,
+            preferred_language: None,
+            phone: None,
             totp_secret: None,
             totp_enabled: false,
             is_admin: false,
@@ -418,6 +424,7 @@ mod tests {
             cycle_start: now,
             created_at: now,
             updated_at: now,
+            pending_email: None,
         };
         assert!(!acc.active);
         assert_eq!(acc.balance_kopecks, 0);

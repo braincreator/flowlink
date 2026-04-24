@@ -93,9 +93,6 @@ pub async fn jwt_auth(
                             let pool = db_opt.pool();
                             if let Ok(Some(identity)) = crate::api_keys::ApiKeyRepo::validate(pool, token).await {
                                 let rate_key = identity.key_id.to_string();
-                                if !state.key_rate_limiter.check(&rate_key).await {
-                                    return json_error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "API key rate limit exceeded");
-                                }
                                 let is_admin = matches!(identity.role, crate::api_keys::ApiKeyRole::Admin);
                                 let claims = crate::auth::Claims {
                                     sub: identity.account_id.clone(),
@@ -108,8 +105,22 @@ pub async fn jwt_auth(
                                     exp: 0,
                                 };
                                 req.extensions_mut().insert(AccountId(identity.account_id.clone()));
-                                req.extensions_mut().insert(claims);
+                                let account_id = identity.account_id.clone();
+                                req.extensions_mut().insert(claims.clone());
                                 req.extensions_mut().insert(identity);
+                                // Resolve plan for billing enforcement
+                                let mut plan_rate_limit: u32 = 0;
+                                if let Some(ref billing) = state.billing {
+                                    let billing_acc = billing.get_or_create_account(&account_id);
+                                    if let Some(plan) = billing.plans().get(&billing_acc.plan_id) {
+                                        plan_rate_limit = plan.limits.api_rate_limit;
+                                        req.extensions_mut().insert(plan);
+                                    }
+                                }
+                                // Per-plan rate limiting
+                                if !state.key_rate_limiter.check_plan(&rate_key, plan_rate_limit).await {
+                                    return json_error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "API key rate limit exceeded");
+                                }
                                 return next.run(req).await;
                             }
                         }
@@ -141,7 +152,14 @@ pub async fn jwt_auth(
     match auth_engine.validate_access_token(token) {
         Ok(claims) => {
             req.extensions_mut().insert(AccountId(claims.account_id.clone()));
-            req.extensions_mut().insert(claims);
+            req.extensions_mut().insert(claims.clone());
+            // Resolve plan for billing enforcement
+            if let Some(ref billing) = state.billing {
+                let billing_acc = billing.get_or_create_account(&claims.account_id);
+                if let Some(plan) = billing.plans().get(&billing_acc.plan_id) {
+                    req.extensions_mut().insert(plan);
+                }
+            }
             next.run(req).await
         }
         Err(_) => {
@@ -151,11 +169,6 @@ pub async fn jwt_auth(
                     let pool = db_opt.pool();
                     match crate::api_keys::ApiKeyRepo::validate(pool, token).await {
                         Ok(Some(identity)) => {
-                            // Rate limit check
-                            let rate_key = identity.key_id.to_string();
-                            if !state.key_rate_limiter.check(&rate_key).await {
-                                return json_error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "API key rate limit exceeded");
-                            }
                             // Create synthetic Claims from API key identity
                             let is_admin = matches!(identity.role, crate::api_keys::ApiKeyRole::Admin);
                             let claims = crate::auth::Claims {
@@ -169,9 +182,24 @@ pub async fn jwt_auth(
                                 exp: 0,
                             };
                             req.extensions_mut().insert(AccountId(identity.account_id.clone()));
-                            req.extensions_mut().insert(claims);
+                            let account_id = identity.account_id.clone();
+                            req.extensions_mut().insert(claims.clone());
                             // Also store KeyIdentity for scope-aware handlers
                             req.extensions_mut().insert(identity);
+                            // Resolve plan for billing enforcement
+                            let mut plan_rate_limit: u32 = 0;
+                            if let Some(ref billing) = state.billing {
+                                let billing_acc = billing.get_or_create_account(&account_id);
+                                if let Some(plan) = billing.plans().get(&billing_acc.plan_id) {
+                                    plan_rate_limit = plan.limits.api_rate_limit;
+                                    req.extensions_mut().insert(plan);
+                                }
+                            }
+                            // Per-plan rate limiting
+                            let rate_key = account_id.clone();
+                            if !state.key_rate_limiter.check_plan(&rate_key, plan_rate_limit).await {
+                                return json_error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "API key rate limit exceeded");
+                            }
                             return next.run(req).await;
                         }
                         Ok(None) => return json_error(StatusCode::UNAUTHORIZED, "api_key_invalid", "Invalid or expired API key"),

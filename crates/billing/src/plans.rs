@@ -1,10 +1,13 @@
-//! Plan definitions and registry
+//! Plan definitions, feature gates, and registry
 //!
-//! Three tiers: Trial, Starter, Pro
-//! Strategy: ALL features available on every plan. Only limits differ.
-//! This eliminates feature gating complexity and makes upgrades natural.
+//! Plans are the single source of truth loaded from PostgreSQL.
+//! Each plan has:
+//! - `features` (JSONB): which capabilities are enabled (shield, approval, rbac, etc.)
+//! - `limits` (JSONB): numeric constraints (max_agents, max_users, etc.)
 //!
-//! All prices in RUB (Russian market)
+//! Change a plan = UPDATE in DB → all levels pick up automatically.
+//!
+//! All prices in RUB (kopecks). 0 = free / unlimited.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,17 +16,19 @@ use std::sync::RwLock;
 /// Built-in plan IDs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlanId {
-    Trial,
     Starter,
-    Pro,
+    Professional,
+    Scale,
+    Enterprise,
 }
 
 impl PlanId {
     pub fn as_str(&self) -> &'static str {
         match self {
-            PlanId::Trial => "trial",
             PlanId::Starter => "starter",
-            PlanId::Pro => "pro",
+            PlanId::Professional => "professional",
+            PlanId::Scale => "scale",
+            PlanId::Enterprise => "enterprise",
         }
     }
 }
@@ -34,33 +39,83 @@ impl std::fmt::Display for PlanId {
     }
 }
 
-/// Plan limits — the ONLY thing that differs between plans.
-/// Features are identical across all tiers.
+/// Plan features — which capabilities are enabled.
+/// Deserialized from `features` JSONB column.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PlanLimits {
-    /// Max hosts (0 = unlimited)
-    pub max_hosts: u64,
-    /// Max users (0 = unlimited)
-    pub max_users: u64,
-    /// Backup storage in MB (0 = unlimited)
-    pub backup_storage_mb: u64,
-    /// Max snapshots (0 = unlimited)
-    pub max_snapshots: u64,
-    /// Backup retention in days
-    pub retention_days: u16,
-    /// Audit log retention in days
-    pub audit_retention_days: u64,
-    /// Max file size in MB (0 = configurable)
-    pub max_file_size_mb: u64,
-    /// Execution timeout in seconds (0 = configurable)
-    pub exec_timeout_sec: u64,
-    /// Shield level: "basic", "advanced", "enterprise"
+#[serde(default)]
+pub struct PlanFeatures {
+    pub shield: bool,
     pub shield_level: String,
-    /// Rate limit: max API requests per window
-    pub rate_limit_requests: u32,
-    /// Rate limit: window in seconds
-    pub rate_limit_window_secs: u32,
+    pub mcp_gateway: bool,
+    pub policy_engine: bool,
+    pub approval: bool,
+    pub rbac: bool,
+    pub pattern_learning: bool,
+    pub e2ee: bool,
+    pub audit_log: bool,
+    pub webhooks: bool,
+    pub siem_export: bool,
+    pub sso: bool,
+    pub on_premise: bool,
 }
+
+/// Plan limits — numeric and structural constraints.
+/// Deserialized from `limits` JSONB column.
+/// 0 means unlimited (for numeric fields).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct PlanLimits {
+    pub max_agents: u64,
+    pub max_users: u64,
+    pub audit_retention_days: u64,
+    pub api_rate_limit: u32,
+    pub api_rate_window_secs: u32,
+    pub max_custom_rules: u64,
+    pub max_policies: u64,
+    pub max_webhooks: u64,
+    pub approval_channels: Vec<String>,
+    pub siem_formats: Vec<String>,
+    pub allowed_shield_levels: Vec<String>,
+    pub support_tier: String,
+}
+
+/// Plan gate errors
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum PlanGateError {
+    #[error("Feature '{feature}' is not available on your plan ({plan_id}). Upgrade to {min_plan} or higher.")]
+    FeatureNotAvailable {
+        feature: String,
+        plan_id: String,
+        min_plan: String,
+    },
+    #[error("Limit '{limit}' exceeded: {current}/{max}.")]
+    LimitExceeded {
+        limit: String,
+        current: u64,
+        max: u64,
+    },
+    #[error("Plan not found: {0}")]
+    PlanNotFound(String),
+}
+
+/// Minimum plan tier required for each feature.
+/// If a plan's features don't include the key → FeatureNotAvailable.
+/// The "min_plan" hint tells the user what to upgrade to.
+static FEATURE_MIN_TIER: &[(&str, &str, u32)] = &[
+    ("shield", "Starter", 0),
+    ("shield_level", "Starter", 0),
+    ("mcp_gateway", "Starter", 0),
+    ("policy_engine", "Starter", 0),
+    ("e2ee", "Starter", 0),
+    ("audit_log", "Starter", 0),
+    ("approval", "Professional", 1),
+    ("rbac", "Professional", 1),
+    ("webhooks", "Professional", 1),
+    ("siem_export", "Professional", 1),
+    ("pattern_learning", "Scale", 2),
+    ("sso", "Enterprise", 3),
+    ("on_premise", "Enterprise", 3),
+];
 
 /// A billing plan
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,15 +130,17 @@ pub struct Plan {
     pub tier: u32,
     /// Price per month in kopecks (1/100 RUB). 0 = free
     pub price_kopecks: u64,
-    /// Price per year in kopecks (None = no annual discount)
+    /// Price per year in kopecks (None = no annual option)
     pub annual_price_kopecks: Option<u64>,
+    /// Annual discount percent
+    pub annual_discount_percent: u32,
+    /// Plan features
+    pub features: PlanFeatures,
     /// Plan limits
     pub limits: PlanLimits,
-    /// Features list (for display — identical across all plans)
-    pub features: Vec<String>,
     /// Is this plan available for new signups
     pub available: bool,
-    /// Is this a legacy plan (can't signup, existing users keep it)
+    /// Is this a legacy plan
     pub legacy: bool,
     /// Trial days (None = no trial)
     pub trial_days: Option<u16>,
@@ -91,109 +148,106 @@ pub struct Plan {
     pub billing_period: String,
 }
 
-/// All features available on every plan.
-/// Copy-paste into each plan — no conditional feature logic needed.
-fn all_features() -> Vec<String> {
-    vec![
-        "Pattern blocking".to_string(),
-        "AST-анализ обфускации".to_string(),
-        "E2EE шифрование".to_string(),
-        "Telegram бот".to_string(),
-        "Web dashboard".to_string(),
-        "Device trust".to_string(),
-        "MCP protocol".to_string(),
-        "Audit log + HMAC".to_string(),
-    ]
-}
-
 impl Plan {
-    /// Trial plan — free for 7 days, 1 host
-    pub fn trial() -> Self {
-        Self {
-            id: PlanId::Trial.as_str().to_string(),
-            name: "Trial".to_string(),
-            description: "Попробуйте FlowLink бесплатно".to_string(),
-            tier: 0,
-            price_kopecks: 0,
-            annual_price_kopecks: None,
-            limits: PlanLimits {
-                max_hosts: 1,
-                max_users: 1,
-                backup_storage_mb: 500,
-                max_snapshots: 5,
-                retention_days: 3,
-                audit_retention_days: 3,
-                max_file_size_mb: 10,
-                exec_timeout_sec: 60,
-                shield_level: "basic".to_string(),
-                rate_limit_requests: 30,
-                rate_limit_window_secs: 60,
-            },
-            features: all_features(),
-            available: true,
-            legacy: false,
-            trial_days: Some(7),
-            billing_period: "month".to_string(),
+    /// Check if a feature is available on this plan.
+    /// Returns Ok(()) if the feature exists in the plan's features, or Err with upgrade hint.
+    pub fn require_feature(&self, feature: &str) -> Result<(), PlanGateError> {
+        // Check boolean features
+        let has_feature = match feature {
+            "shield" => self.features.shield,
+            "mcp_gateway" => self.features.mcp_gateway,
+            "policy_engine" => self.features.policy_engine,
+            "approval" => self.features.approval,
+            "rbac" => self.features.rbac,
+            "pattern_learning" => self.features.pattern_learning,
+            "e2ee" => self.features.e2ee,
+            "audit_log" => self.features.audit_log,
+            "webhooks" => self.features.webhooks,
+            "siem_export" => self.features.siem_export,
+            "sso" => self.features.sso,
+            "on_premise" => self.features.on_premise,
+            _ => {
+                // Unknown feature — allow by default (don't break new features)
+                tracing::warn!("Unknown feature check: {}", feature);
+                return Ok(());
+            }
+        };
+
+        if has_feature {
+            return Ok(());
         }
+
+        // Find min plan tier for this feature
+        let (min_plan, _) = FEATURE_MIN_TIER
+            .iter()
+            .find(|(f, _, _)| *f == feature)
+            .map(|(_, p, _)| (*p, true))
+            .unwrap_or(("Professional", true));
+
+        Err(PlanGateError::FeatureNotAvailable {
+            feature: feature.to_string(),
+            plan_id: self.id.clone(),
+            min_plan: min_plan.to_string(),
+        })
     }
 
-    /// Starter plan — 1 990 ₽/мес
-    pub fn starter() -> Self {
-        Self {
-            id: PlanId::Starter.as_str().to_string(),
-            name: "Starter".to_string(),
-            description: "Для фрилансеров и small teams".to_string(),
-            tier: 1,
-            price_kopecks: 199_000,                // 1 990 RUB/month
-            annual_price_kopecks: Some(1_910_400), // 19 104 RUB/year (~20% discount)
-            limits: PlanLimits {
-                max_hosts: 5,
-                max_users: 5,
-                backup_storage_mb: 5120,
-                max_snapshots: 50,
-                retention_days: 30,
-                audit_retention_days: 30,
-                max_file_size_mb: 100,
-                exec_timeout_sec: 300,
-                shield_level: "advanced".to_string(),
-                rate_limit_requests: 200,
-                rate_limit_window_secs: 60,
-            },
-            features: all_features(),
-            available: true,
-            legacy: false,
-            trial_days: None,
-            billing_period: "month".to_string(),
+    /// Check if a numeric limit is respected.
+    /// `current` is the current usage count. Returns Ok(()) if under limit.
+    pub fn check_limit(&self, limit: &str, current: u64) -> Result<(), PlanGateError> {
+        let (max, is_unlimited) = match limit {
+            "max_agents" => (self.limits.max_agents, self.limits.max_agents == 0),
+            "max_users" => (self.limits.max_users, self.limits.max_users == 0),
+            "max_custom_rules" => (self.limits.max_custom_rules, self.limits.max_custom_rules == 0),
+            "max_policies" => (self.limits.max_policies, self.limits.max_policies == 0),
+            "max_webhooks" => (self.limits.max_webhooks, self.limits.max_webhooks == 0),
+            _ => {
+                // Unknown limit — allow by default
+                tracing::warn!("Unknown limit check: {}", limit);
+                return Ok(());
+            }
+        };
+
+        if is_unlimited {
+            return Ok(());
         }
+
+        if current >= max {
+            return Err(PlanGateError::LimitExceeded {
+                limit: limit.to_string(),
+                current,
+                max,
+            });
+        }
+
+        Ok(())
     }
 
-    /// Pro plan — 4 990 ₽/мес
-    pub fn pro() -> Self {
-        Self {
-            id: PlanId::Pro.as_str().to_string(),
-            name: "Pro".to_string(),
-            description: "Для стартапов, IT-отделов и DevOps teams".to_string(),
-            tier: 2,
-            price_kopecks: 499_000,                // 4 990 RUB/month
-            annual_price_kopecks: Some(4_790_400), // 47 904 RUB/year (~20% discount)
-            limits: PlanLimits {
-                max_hosts: 50,
-                max_users: 25,
-                backup_storage_mb: 0, // unlimited
-                max_snapshots: 0,     // unlimited
-                retention_days: 365,
-                audit_retention_days: 365,
-                max_file_size_mb: 0, // configurable
-                exec_timeout_sec: 0, // configurable
-                shield_level: "enterprise".to_string(),
-                rate_limit_requests: 0, // unlimited
-                rate_limit_window_secs: 60,
-            },
-            features: all_features(),
-            available: true,
-            legacy: false,
-            trial_days: None,
-            billing_period: "month".to_string(),
+    /// Check if a value is allowed in a list-type limit.
+    /// e.g. check_channel("slack") checks if "slack" is in approval_channels.
+    pub fn check_allowed(&self, limit: &str, value: &str) -> Result<(), PlanGateError> {
+        let allowed = match limit {
+            "approval_channels" => &self.limits.approval_channels,
+            "siem_formats" => &self.limits.siem_formats,
+            "allowed_shield_levels" => &self.limits.allowed_shield_levels,
+            _ => return Ok(()),
+        };
+
+        if allowed.is_empty() {
+            return Err(PlanGateError::FeatureNotAvailable {
+                feature: limit.to_string(),
+                plan_id: self.id.clone(),
+                min_plan: "Professional".to_string(),
+            });
+        }
+
+        if allowed.iter().any(|a| a.eq_ignore_ascii_case(value)) {
+            Ok(())
+        } else {
+            Err(PlanGateError::FeatureNotAvailable {
+                feature: format!("{}:{}", limit, value),
+                plan_id: self.id.clone(),
+                min_plan: "Professional".to_string(),
+            })
         }
     }
 
@@ -205,7 +259,7 @@ impl Plan {
     /// Format price in RUB
     pub fn format_price(kopecks: u64) -> String {
         let rubles = kopecks as f64 / 100.0;
-        format!("{:.2} ₽", rubles)
+        format!("{:.0} ₽", rubles)
     }
 
     /// Format price per month
@@ -213,7 +267,7 @@ impl Plan {
         Self::format_price(self.price_kopecks)
     }
 
-    /// Convert from database plan
+    /// Convert from database plan row
     pub fn from_db_plan(db: flowlink_db::plans::DbPlan) -> Self {
         Self {
             id: db.id,
@@ -222,20 +276,9 @@ impl Plan {
             tier: db.tier as u32,
             price_kopecks: db.price_kopecks as u64,
             annual_price_kopecks: db.annual_price_kopecks.map(|v| v as u64),
-            limits: PlanLimits {
-                max_hosts: db.limits.max_hosts,
-                max_users: db.limits.max_users,
-                backup_storage_mb: db.limits.backup_storage_mb,
-                max_snapshots: db.limits.max_snapshots,
-                retention_days: db.limits.retention_days,
-                audit_retention_days: db.limits.audit_retention_days,
-                max_file_size_mb: db.limits.max_file_size_mb,
-                exec_timeout_sec: db.limits.exec_timeout_sec,
-                shield_level: db.limits.shield_level.clone(),
-                rate_limit_requests: if db.limits.rate_limit_requests > 0 { db.limits.rate_limit_requests as u32 } else { 100 },
-                rate_limit_window_secs: if db.limits.rate_limit_window_secs > 0 { db.limits.rate_limit_window_secs as u32 } else { 60 },
-            },
-            features: db.features,
+            annual_discount_percent: db.annual_discount_percent.max(0) as u32,
+            features: serde_json::from_value(serde_json::to_value(&db.features).unwrap_or_default()).unwrap_or_default(),
+            limits: serde_json::from_value(serde_json::to_value(&db.limits).unwrap_or_default()).unwrap_or_default(),
             available: db.is_active,
             legacy: false,
             trial_days: if db.trial_days > 0 {
@@ -248,7 +291,7 @@ impl Plan {
     }
 }
 
-/// Plan registry — stores all available plans
+/// Plan registry — stores all available plans, loaded from database.
 ///
 /// Loads from database on startup, falls back to built-in defaults if DB unavailable.
 pub struct PlanRegistry {
@@ -258,15 +301,10 @@ pub struct PlanRegistry {
 }
 
 impl PlanRegistry {
-    /// Create with default plans (Trial, Starter, Pro)
+    /// Create with empty registry (plans loaded from DB on startup)
     pub fn new() -> Self {
-        let mut plans = HashMap::new();
-        plans.insert(PlanId::Trial.as_str().to_string(), Plan::trial());
-        plans.insert(PlanId::Starter.as_str().to_string(), Plan::starter());
-        plans.insert(PlanId::Pro.as_str().to_string(), Plan::pro());
-
         Self {
-            plans: RwLock::new(plans),
+            plans: RwLock::new(HashMap::new()),
             last_loaded: std::sync::Mutex::new(std::time::Instant::now()),
         }
     }
@@ -286,10 +324,166 @@ impl PlanRegistry {
             }
             Ok(_) => {
                 tracing::warn!("📦 No plans in database, using built-in defaults");
+                self.seed_defaults();
             }
             Err(e) => {
                 tracing::warn!("📦 Failed to load plans from DB: {e}. Using built-in defaults.");
+                self.seed_defaults();
             }
+        }
+    }
+
+    /// Seed with built-in default plans (used as fallback)
+    pub fn seed_defaults(&self) {
+        let mut plans = self.plans.write().unwrap();
+        if plans.is_empty() {
+            plans.insert(PlanId::Starter.as_str().to_string(), Plan {
+                id: PlanId::Starter.as_str().to_string(),
+                name: "Starter".to_string(),
+                description: "Free forever for 1 agent".to_string(),
+                tier: 0,
+                price_kopecks: 0,
+                annual_price_kopecks: None,
+                annual_discount_percent: 0,
+                features: PlanFeatures {
+                    shield: true,
+                    shield_level: "basic".to_string(),
+                    mcp_gateway: true,
+                    policy_engine: true,
+                    e2ee: true,
+                    audit_log: true,
+                    ..Default::default()
+                },
+                limits: PlanLimits {
+                    max_agents: 1,
+                    max_users: 1,
+                    audit_retention_days: 30,
+                    api_rate_limit: 100,
+                    api_rate_window_secs: 60,
+                    max_custom_rules: 3,
+                    max_policies: 1,
+                    support_tier: "community".to_string(),
+                    ..Default::default()
+                },
+                available: true,
+                legacy: false,
+                trial_days: None,
+                billing_period: "month".to_string(),
+            });
+            plans.insert(PlanId::Professional.as_str().to_string(), Plan {
+                id: PlanId::Professional.as_str().to_string(),
+                name: "Professional".to_string(),
+                description: "For small SaaS teams".to_string(),
+                tier: 1,
+                price_kopecks: 199_000,
+                annual_price_kopecks: Some(1_910_400),
+                annual_discount_percent: 20,
+                features: PlanFeatures {
+                    shield: true,
+                    shield_level: "advanced".to_string(),
+                    mcp_gateway: true,
+                    policy_engine: true,
+                    approval: true,
+                    rbac: true,
+                    e2ee: true,
+                    audit_log: true,
+                    webhooks: true,
+                    siem_export: true,
+                    ..Default::default()
+                },
+                limits: PlanLimits {
+                    max_agents: 5,
+                    max_users: 5,
+                    audit_retention_days: 60,
+                    api_rate_limit: 500,
+                    api_rate_window_secs: 60,
+                    max_custom_rules: 50,
+                    max_policies: 5,
+                    max_webhooks: 3,
+                    approval_channels: vec!["telegram".to_string()],
+                    siem_formats: vec!["json".to_string()],
+                    support_tier: "email".to_string(),
+                    ..Default::default()
+                },
+                available: true,
+                legacy: false,
+                trial_days: None,
+                billing_period: "month".to_string(),
+            });
+            plans.insert(PlanId::Scale.as_str().to_string(), Plan {
+                id: PlanId::Scale.as_str().to_string(),
+                name: "Scale".to_string(),
+                description: "For agencies and multi-cluster setups".to_string(),
+                tier: 2,
+                price_kopecks: 499_000,
+                annual_price_kopecks: Some(4_790_400),
+                annual_discount_percent: 20,
+                features: PlanFeatures {
+                    shield: true,
+                    shield_level: "full".to_string(),
+                    mcp_gateway: true,
+                    policy_engine: true,
+                    approval: true,
+                    rbac: true,
+                    pattern_learning: true,
+                    e2ee: true,
+                    audit_log: true,
+                    webhooks: true,
+                    siem_export: true,
+                    ..Default::default()
+                },
+                limits: PlanLimits {
+                    max_agents: 25,
+                    max_users: 10,
+                    audit_retention_days: 90,
+                    api_rate_limit: 2000,
+                    api_rate_window_secs: 60,
+                    max_webhooks: 20,
+                    approval_channels: vec!["telegram".to_string(), "email".to_string(), "slack".to_string()],
+                    siem_formats: vec!["json".to_string(), "cef".to_string(), "leef".to_string()],
+                    support_tier: "priority".to_string(),
+                    ..Default::default()
+                },
+                available: true,
+                legacy: false,
+                trial_days: None,
+                billing_period: "month".to_string(),
+            });
+            plans.insert(PlanId::Enterprise.as_str().to_string(), Plan {
+                id: PlanId::Enterprise.as_str().to_string(),
+                name: "Enterprise".to_string(),
+                description: "For large orgs with dedicated support".to_string(),
+                tier: 3,
+                price_kopecks: 0,
+                annual_price_kopecks: None,
+                annual_discount_percent: 0,
+                features: PlanFeatures {
+                    shield: true,
+                    shield_level: "full".to_string(),
+                    mcp_gateway: true,
+                    policy_engine: true,
+                    approval: true,
+                    rbac: true,
+                    pattern_learning: true,
+                    e2ee: true,
+                    audit_log: true,
+                    webhooks: true,
+                    siem_export: true,
+                    sso: true,
+                    on_premise: true,
+                },
+                limits: PlanLimits {
+                    audit_retention_days: 365,
+                    approval_channels: vec!["telegram".to_string(), "email".to_string(), "slack".to_string(), "webhook".to_string()],
+                    siem_formats: vec!["json".to_string(), "cef".to_string(), "leef".to_string(), "syslog".to_string()],
+                    support_tier: "dedicated".to_string(),
+                    ..Default::default()
+                },
+                available: true,
+                legacy: false,
+                trial_days: None,
+                billing_period: "month".to_string(),
+            });
         }
     }
 
@@ -298,7 +492,7 @@ impl PlanRegistry {
         self.plans.read().unwrap().get(id).cloned()
     }
 
-    /// Get all available plans
+    /// Get all available plans (for public listing)
     pub fn list_available(&self) -> Vec<Plan> {
         self.plans
             .read()
@@ -333,70 +527,170 @@ impl Default for PlanRegistry {
 mod tests {
     use super::*;
 
+    fn make_registry() -> PlanRegistry {
+        let r = PlanRegistry::new();
+        r.seed_defaults();
+        r
+    }
+
     #[test]
     fn test_default_plans() {
-        let registry = PlanRegistry::new();
-        assert!(registry.get("trial").is_some());
+        let registry = make_registry();
         assert!(registry.get("starter").is_some());
-        assert!(registry.get("pro").is_some());
+        assert!(registry.get("professional").is_some());
+        assert!(registry.get("scale").is_some());
+        assert!(registry.get("enterprise").is_some());
     }
 
     #[test]
-    fn test_free_plan_limits() {
-        let free = Plan::trial();
-        assert_eq!(free.limits.max_hosts, 1);
-        assert_eq!(free.limits.max_users, 1);
-        assert_eq!(free.limits.backup_storage_mb, 500);
-        assert_eq!(free.price_kopecks, 0);
-        assert_eq!(free.limits.shield_level, "basic");
-        assert_eq!(free.trial_days, Some(7));
+    fn test_starter_features() {
+        let starter = make_registry().get("starter").unwrap();
+        assert!(starter.features.shield);
+        assert!(starter.features.mcp_gateway);
+        assert!(starter.features.policy_engine);
+        assert!(!starter.features.approval);
+        assert!(!starter.features.rbac);
+        assert!(!starter.features.pattern_learning);
+        assert!(!starter.features.webhooks);
+        assert!(!starter.features.sso);
     }
 
     #[test]
-    fn test_starter_plan_limits() {
-        let starter = Plan::starter();
-        assert_eq!(starter.limits.max_hosts, 5);
-        assert_eq!(starter.limits.max_users, 5);
-        assert_eq!(starter.limits.backup_storage_mb, 5120);
-        assert_eq!(starter.price_kopecks, 199_000);
-        assert_eq!(starter.limits.shield_level, "advanced");
-        assert_eq!(starter.trial_days, None);
-        assert_eq!(starter.annual_price_kopecks, Some(1_910_400));
+    fn test_professional_features() {
+        let pro = make_registry().get("professional").unwrap();
+        assert!(pro.features.approval);
+        assert!(pro.features.rbac);
+        assert!(pro.features.webhooks);
+        assert!(pro.features.siem_export);
+        assert!(!pro.features.pattern_learning);
+        assert!(!pro.features.sso);
     }
 
     #[test]
-    fn test_pro_unlimited() {
-        let pro = Plan::pro();
-        assert!(Plan::is_unlimited(pro.limits.max_snapshots));
-        assert!(Plan::is_unlimited(pro.limits.max_file_size_mb));
-        assert!(Plan::is_unlimited(pro.limits.exec_timeout_sec));
-        assert_eq!(pro.limits.max_hosts, 50);
-        assert_eq!(pro.limits.max_users, 25);
-        assert_eq!(pro.limits.audit_retention_days, 365);
-        assert_eq!(pro.price_kopecks, 499_000);
-        assert_eq!(pro.trial_days, None);
+    fn test_scale_features() {
+        let scale = make_registry().get("scale").unwrap();
+        assert!(scale.features.pattern_learning);
+        assert!(!scale.features.sso);
+        assert!(!scale.features.on_premise);
     }
 
     #[test]
-    fn test_all_features_identical() {
-        let trial = Plan::trial();
-        let starter = Plan::starter();
-        let pro = Plan::pro();
-        // Core feature set is the same across all plans
-        assert_eq!(trial.features, starter.features);
-        assert_eq!(starter.features, pro.features);
+    fn test_enterprise_features() {
+        let ent = make_registry().get("enterprise").unwrap();
+        assert!(ent.features.sso);
+        assert!(ent.features.on_premise);
+        assert!(ent.features.pattern_learning);
+    }
+
+    #[test]
+    fn test_starter_limits() {
+        let starter = make_registry().get("starter").unwrap();
+        assert_eq!(starter.limits.max_agents, 1);
+        assert_eq!(starter.limits.max_users, 1);
+        assert_eq!(starter.limits.max_custom_rules, 3);
+        assert_eq!(starter.limits.max_policies, 1);
+        assert_eq!(starter.limits.max_webhooks, 0);
+        assert_eq!(starter.limits.support_tier, "community");
+    }
+
+    #[test]
+    fn test_professional_limits() {
+        let pro = make_registry().get("professional").unwrap();
+        assert_eq!(pro.limits.max_agents, 5);
+        assert_eq!(pro.limits.max_users, 5);
+        assert_eq!(pro.limits.max_webhooks, 3);
+        assert_eq!(pro.limits.support_tier, "email");
+    }
+
+    #[test]
+    fn test_enterprise_unlimited() {
+        let ent = make_registry().get("enterprise").unwrap();
+        assert_eq!(ent.limits.max_agents, 0); // 0 = unlimited
+        assert!(Plan::is_unlimited(ent.limits.max_agents));
+        assert!(Plan::is_unlimited(ent.limits.max_policies));
+    }
+
+    #[test]
+    fn test_require_feature_ok() {
+        let pro = make_registry().get("professional").unwrap();
+        assert!(pro.require_feature("approval").is_ok());
+        assert!(pro.require_feature("rbac").is_ok());
+    }
+
+    #[test]
+    fn test_require_feature_rejected() {
+        let starter = make_registry().get("starter").unwrap();
+        let err = starter.require_feature("approval").unwrap_err();
+        match err {
+            PlanGateError::FeatureNotAvailable { feature, min_plan, .. } => {
+                assert_eq!(feature, "approval");
+                assert_eq!(min_plan, "Professional");
+            }
+            _ => panic!("Wrong error type"),
+        }
+    }
+
+    #[test]
+    fn test_check_limit_ok() {
+        let starter = make_registry().get("starter").unwrap();
+        assert!(starter.check_limit("max_agents", 0).is_ok());
+    }
+
+    #[test]
+    fn test_check_limit_exceeded() {
+        let starter = make_registry().get("starter").unwrap();
+        let err = starter.check_limit("max_agents", 1).unwrap_err();
+        match err {
+            PlanGateError::LimitExceeded { limit, current, max } => {
+                assert_eq!(limit, "max_agents");
+                assert_eq!(current, 1);
+                assert_eq!(max, 1);
+            }
+            _ => panic!("Wrong error type"),
+        }
+    }
+
+    #[test]
+    fn test_check_limit_unlimited() {
+        let ent = make_registry().get("enterprise").unwrap();
+        assert!(ent.check_limit("max_agents", 999999).is_ok());
+    }
+
+    #[test]
+    fn test_check_allowed_ok() {
+        let pro = make_registry().get("professional").unwrap();
+        assert!(pro.check_allowed("approval_channels", "telegram").is_ok());
+    }
+
+    #[test]
+    fn test_check_allowed_rejected() {
+        let pro = make_registry().get("professional").unwrap();
+        assert!(pro.check_allowed("approval_channels", "slack").is_err());
+    }
+
+    #[test]
+    fn test_features_differ_between_plans() {
+        let starter = make_registry().get("starter").unwrap();
+        let pro = make_registry().get("professional").unwrap();
+        let scale = make_registry().get("scale").unwrap();
+        let ent = make_registry().get("enterprise").unwrap();
+
+        // Features are NOT identical — that's the whole point
+        assert_ne!(starter.features.approval, pro.features.approval);
+        assert_ne!(pro.features.pattern_learning, scale.features.pattern_learning);
+        assert_ne!(scale.features.sso, ent.features.sso);
     }
 
     #[test]
     fn test_list_available() {
-        let registry = PlanRegistry::new();
+        let registry = make_registry();
         let available = registry.list_available();
-        assert_eq!(available.len(), 3);
+        assert_eq!(available.len(), 4);
     }
 
     #[test]
     fn test_register_custom_plan() {
-        let registry = PlanRegistry::new();
+        let registry = make_registry();
         let custom = Plan {
             id: "custom-1".to_string(),
             name: "Custom".to_string(),
@@ -404,8 +698,9 @@ mod tests {
             tier: 1,
             price_kopecks: 19_990,
             annual_price_kopecks: None,
+            annual_discount_percent: 0,
+            features: PlanFeatures::default(),
             limits: PlanLimits::default(),
-            features: vec![],
             available: true,
             legacy: false,
             trial_days: None,
@@ -413,86 +708,77 @@ mod tests {
         };
         registry.register(custom);
         assert!(registry.get("custom-1").is_some());
-        assert_eq!(registry.list_available().len(), 4);
+        assert_eq!(registry.list_available().len(), 5);
     }
 
     #[test]
     fn test_deprecate_plan() {
-        let registry = PlanRegistry::new();
-        registry.deprecate("starter");
+        let registry = make_registry();
+        registry.deprecate("professional");
         let available = registry.list_available();
-        assert_eq!(available.len(), 2); // Trial + Pro
-        let starter = registry.get("starter").unwrap();
-        assert!(!starter.available);
-        assert!(starter.legacy);
+        assert_eq!(available.len(), 3); // Starter + Scale + Enterprise
+        let pro = registry.get("professional").unwrap();
+        assert!(!pro.available);
+        assert!(pro.legacy);
     }
 
     #[test]
     fn test_format_price() {
-        assert_eq!(Plan::format_price(199_000), "1990.00 ₽");
-        assert_eq!(Plan::format_price(0), "0.00 ₽");
-        assert_eq!(Plan::format_price(599_000), "5990.00 ₽");
+        assert_eq!(Plan::format_price(199_000), "1990 ₽");
+        assert_eq!(Plan::format_price(0), "0 ₽");
+        assert_eq!(Plan::format_price(499_000), "4990 ₽");
     }
 
     #[test]
     fn test_plan_id_display() {
-        assert_eq!(PlanId::Trial.to_string(), "trial");
         assert_eq!(PlanId::Starter.to_string(), "starter");
-        assert_eq!(PlanId::Pro.to_string(), "pro");
+        assert_eq!(PlanId::Professional.to_string(), "professional");
+        assert_eq!(PlanId::Scale.to_string(), "scale");
+        assert_eq!(PlanId::Enterprise.to_string(), "enterprise");
     }
 
     #[test]
     fn test_plan_limits_default() {
         let limits = PlanLimits::default();
-        assert_eq!(limits.max_hosts, 0);
+        assert_eq!(limits.max_agents, 0);
         assert_eq!(limits.max_users, 0);
-        assert_eq!(limits.backup_storage_mb, 0);
-        assert_eq!(limits.max_snapshots, 0);
-        assert_eq!(limits.retention_days, 0);
-        assert!(limits.shield_level.is_empty());
-        assert_eq!(limits.rate_limit_requests, 0);
-        assert_eq!(limits.rate_limit_window_secs, 0);
-    }
-
-    #[test]
-    fn test_is_unlimited() {
-        assert!(Plan::is_unlimited(0));
-        assert!(!Plan::is_unlimited(1));
-        assert!(!Plan::is_unlimited(999));
+        assert!(Plan::is_unlimited(limits.max_agents));
     }
 
     #[test]
     fn test_tier_ordering() {
-        let trial = Plan::trial();
-        let starter = Plan::starter();
-        let pro = Plan::pro();
-        assert!(trial.tier < starter.tier);
+        let starter = make_registry().get("starter").unwrap();
+        let pro = make_registry().get("professional").unwrap();
+        let scale = make_registry().get("scale").unwrap();
+        let ent = make_registry().get("enterprise").unwrap();
         assert!(starter.tier < pro.tier);
+        assert!(pro.tier < scale.tier);
+        assert!(scale.tier < ent.tier);
     }
 
     #[test]
     fn test_annual_discount() {
-        let starter = Plan::starter();
-        let annual = starter.annual_price_kopecks.unwrap();
-        let monthly_x12 = starter.price_kopecks * 12;
+        let pro = make_registry().get("professional").unwrap();
+        let annual = pro.annual_price_kopecks.unwrap();
+        let monthly_x12 = pro.price_kopecks * 12;
         assert!(annual < monthly_x12, "Annual should be cheaper than 12 months");
-
-        let pro = Plan::pro();
-        let pro_annual = pro.annual_price_kopecks.unwrap();
-        let pro_monthly_x12 = pro.price_kopecks * 12;
-        assert!(pro_annual < pro_monthly_x12);
+        assert_eq!(pro.annual_discount_percent, 20);
     }
 
     #[test]
     fn test_format_monthly() {
-        assert_eq!(Plan::trial().format_monthly(), "0.00 ₽");
-        assert_eq!(Plan::starter().format_monthly(), "1990.00 ₽");
-        assert_eq!(Plan::pro().format_monthly(), "4990.00 ₽");
+        let starter = make_registry().get("starter").unwrap();
+        let pro = make_registry().get("professional").unwrap();
+        assert_eq!(starter.format_monthly(), "0 ₽");
+        assert_eq!(pro.format_monthly(), "1990 ₽");
     }
 
     #[test]
     fn test_default_registry() {
         let registry = PlanRegistry::default();
-        assert_eq!(registry.list_available().len(), 3);
+        // Initially empty, seed_defaults must be called
+        assert_eq!(registry.list_available().len(), 0);
+        registry.seed_defaults();
+        assert_eq!(registry.list_available().len(), 4);
     }
 }

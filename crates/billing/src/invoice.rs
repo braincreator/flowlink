@@ -314,6 +314,24 @@ mod tests {
         InvoiceStore::new()
     }
 
+    fn make_plan(id: &str, price: u64) -> Plan {
+        Plan {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            tier: 0,
+            price_kopecks: price,
+            annual_price_kopecks: None,
+            annual_discount_percent: 0,
+            features: Default::default(),
+            limits: Default::default(),
+            available: true,
+            legacy: false,
+            trial_days: None,
+            billing_period: "month".to_string(),
+        }
+    }
+
     #[test]
     fn test_create_invoice() {
         let store = make_store();
@@ -329,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_invoice_for_plan() {
-        let plan = Plan::starter();
+        let plan = make_plan("starter", 199_000);
         let store = make_store();
         let invoice = store.create(Invoice::for_plan("acc-1", &plan));
 
@@ -341,7 +359,7 @@ mod tests {
     #[test]
     fn test_mark_paid() {
         let store = make_store();
-        let mut invoice = store.create(Invoice::for_plan("acc-1", &Plan::starter()));
+        let mut invoice = store.create(Invoice::for_plan("acc-1", &make_plan("starter", 199_000)));
         invoice.mark_paid(PaymentMethod::Sbp);
         store.update(invoice.clone());
 
@@ -353,9 +371,9 @@ mod tests {
     #[test]
     fn test_list_for_account() {
         let store = make_store();
-        store.create(Invoice::for_plan("acc-1", &Plan::starter()));
-        store.create(Invoice::for_plan("acc-1", &Plan::starter()));
-        store.create(Invoice::for_plan("acc-2", &Plan::trial()));
+        store.create(Invoice::for_plan("acc-1", &make_plan("starter", 199_000)));
+        store.create(Invoice::for_plan("acc-1", &make_plan("starter", 199_000)));
+        store.create(Invoice::for_plan("acc-2", &make_plan("starter", 0)));
 
         assert_eq!(store.list_for_account("acc-1").len(), 2);
         assert_eq!(store.list_for_account("acc-2").len(), 1);
@@ -373,20 +391,20 @@ mod tests {
 
     #[test]
     fn test_format_price() {
-        let plan = Plan::trial();
+        let plan = make_plan("starter", 0);
         let invoice = Invoice::for_plan("acc-1", &plan);
-        assert_eq!(invoice.format_total(), "0.00 ₽");
+        assert_eq!(invoice.format_total(), "0 ₽");
     }
 
     #[test]
     fn test_total_revenue() {
         let store = make_store();
 
-        let mut inv1 = store.create(Invoice::for_plan("acc-1", &Plan::starter()));
+        let mut inv1 = store.create(Invoice::for_plan("acc-1", &make_plan("starter", 199_000)));
         inv1.mark_paid(PaymentMethod::Card);
         store.update(inv1);
 
-        let _inv2 = store.create(Invoice::for_plan("acc-2", &Plan::starter()));
+        let _inv2 = store.create(Invoice::for_plan("acc-2", &make_plan("starter", 199_000)));
         // inv2 is pending, not counted
 
         assert_eq!(store.total_revenue(), 238_800); // 199000 + 20% NDS

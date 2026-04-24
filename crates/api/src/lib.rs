@@ -857,3 +857,496 @@ fn threat_level_to_score(level: &flowlink_shield::ThreatLevel) -> u32 {
         flowlink_shield::ThreatLevel::Low => 25,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_command ──
+
+    #[test]
+    fn parse_empty_string() {
+        let cmd = parse_command("");
+        assert_eq!(cmd.binary, "");
+        assert!(cmd.args.is_empty());
+        assert_eq!(cmd.raw, "");
+    }
+
+    #[test]
+    fn parse_whitespace_only() {
+        let cmd = parse_command("   ");
+        assert_eq!(cmd.binary, "");
+        assert!(cmd.args.is_empty());
+    }
+
+    #[test]
+    fn parse_single_word() {
+        let cmd = parse_command("ls");
+        assert_eq!(cmd.binary, "ls");
+        assert!(cmd.args.is_empty());
+        assert_eq!(cmd.raw, "ls");
+    }
+
+    #[test]
+    fn parse_multiple_args() {
+        let cmd = parse_command("git push --force origin");
+        assert_eq!(cmd.binary, "git");
+        assert_eq!(cmd.args, vec!["push", "--force", "origin"]);
+        assert_eq!(cmd.raw, "git push --force origin");
+    }
+
+    #[test]
+    fn parse_command_with_pipe() {
+        let cmd = parse_command("cat file | grep pattern");
+        assert_eq!(cmd.binary, "cat");
+        assert_eq!(cmd.args, vec!["file", "|", "grep", "pattern"]);
+    }
+
+    #[test]
+    fn parse_command_with_flags() {
+        let cmd = parse_command("rm -rf /tmp/test");
+        assert_eq!(cmd.binary, "rm");
+        assert_eq!(cmd.args, vec!["-rf", "/tmp/test"]);
+    }
+
+    #[test]
+    fn parse_command_trailing_spaces() {
+        let cmd = parse_command("ls   ");
+        assert_eq!(cmd.binary, "ls");
+        assert!(cmd.args.is_empty());
+    }
+
+    #[test]
+    fn parse_command_leading_spaces() {
+        let cmd = parse_command("   ls -la");
+        assert_eq!(cmd.binary, "ls");
+        assert_eq!(cmd.args, vec!["-la"]);
+    }
+
+    // ── threat_level_to_score ──
+
+    #[test]
+    fn score_critical() {
+        assert_eq!(threat_level_to_score(&flowlink_shield::ThreatLevel::Critical), 100);
+    }
+
+    #[test]
+    fn score_high() {
+        assert_eq!(threat_level_to_score(&flowlink_shield::ThreatLevel::High), 75);
+    }
+
+    #[test]
+    fn score_medium() {
+        assert_eq!(threat_level_to_score(&flowlink_shield::ThreatLevel::Medium), 50);
+    }
+
+    #[test]
+    fn score_low() {
+        assert_eq!(threat_level_to_score(&flowlink_shield::ThreatLevel::Low), 25);
+    }
+
+    // ── chrono_now ──
+
+    #[test]
+    fn chrono_now_returns_non_empty() {
+        let now = chrono_now();
+        assert!(!now.is_empty());
+        let parsed: u64 = now.parse().expect("chrono_now should return valid timestamp");
+        assert!(parsed > 1_700_000_000);
+    }
+
+    // ── BlockKind enum ──
+
+    #[test]
+    fn block_kind_command_deserialize() {
+        let v: BlockKind = serde_json::from_str(r#""command""#).unwrap();
+        match v {
+            BlockKind::command => {}
+            _ => panic!("expected command variant"),
+        }
+    }
+
+    #[test]
+    fn block_kind_path_deserialize() {
+        let v: BlockKind = serde_json::from_str(r#""path""#).unwrap();
+        match v {
+            BlockKind::path => {}
+            _ => panic!("expected path variant"),
+        }
+    }
+
+    #[test]
+    fn block_kind_pid_deserialize() {
+        let v: BlockKind = serde_json::from_str(r#""pid""#).unwrap();
+        match v {
+            BlockKind::pid => {}
+            _ => panic!("expected pid variant"),
+        }
+    }
+
+    // ── ApprovalStatus ──
+
+    #[test]
+    fn approval_status_roundtrip() {
+        let statuses = [
+            ApprovalStatus::Pending,
+            ApprovalStatus::Approved,
+            ApprovalStatus::Rejected,
+            ApprovalStatus::Expired,
+        ];
+        for s in &statuses {
+            let json = serde_json::to_string(s).unwrap();
+            let back: ApprovalStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(*s, back);
+        }
+    }
+
+    #[test]
+    fn approval_status_equality() {
+        assert_eq!(ApprovalStatus::Pending, ApprovalStatus::Pending);
+        assert_ne!(ApprovalStatus::Approved, ApprovalStatus::Rejected);
+    }
+
+    // ── ApprovalAction ──
+
+    #[test]
+    fn approval_action_roundtrip() {
+        let actions = [
+            ApprovalAction::BlockCommand,
+            ApprovalAction::UnblockCommand,
+            ApprovalAction::ProtectPath,
+            ApprovalAction::UnprotectPath,
+            ApprovalAction::BlockPid,
+            ApprovalAction::WhitelistPid,
+        ];
+        for a in &actions {
+            let json = serde_json::to_string(a).unwrap();
+            let back: ApprovalAction = serde_json::from_str(&json).unwrap();
+            let json2 = serde_json::to_string(&back).unwrap();
+            assert_eq!(json, json2);
+        }
+    }
+
+    // ── ApprovalRequest ──
+
+    fn make_approval_request() -> ApprovalRequest {
+        ApprovalRequest {
+            id: "apr_001".to_string(),
+            action: ApprovalAction::BlockCommand,
+            value: "rm".to_string(),
+            reason: "dangerous command".to_string(),
+            requested_by: "agent-01".to_string(),
+            requested_at: "2026-01-01T00:00:00Z".to_string(),
+            status: ApprovalStatus::Pending,
+        }
+    }
+
+    #[test]
+    fn approval_request_roundtrip() {
+        let req = make_approval_request();
+        let json = serde_json::to_string(&req).unwrap();
+        let back: ApprovalRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, req.id);
+        assert_eq!(back.value, "rm");
+        assert_eq!(back.status, ApprovalStatus::Pending);
+    }
+
+    #[test]
+    fn approval_request_clone() {
+        let req = make_approval_request();
+        let cloned = req.clone();
+        assert_eq!(cloned.id, req.id);
+        assert!(matches!(cloned.action, ApprovalAction::BlockCommand));
+    }
+
+    #[test]
+    fn approval_request_debug() {
+        let req = make_approval_request();
+        let dbg = format!("{:?}", req);
+        assert!(dbg.contains("apr_001"));
+    }
+
+    // ── BlockedItem ──
+
+    fn make_blocked_item() -> BlockedItem {
+        BlockedItem {
+            value: "chmod".to_string(),
+            reason: "test".to_string(),
+            blocked_at: "12345".to_string(),
+        }
+    }
+
+    #[test]
+    fn blocked_item_roundtrip() {
+        let item = make_blocked_item();
+        let json = serde_json::to_string(&item).unwrap();
+        let back: BlockedItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.value, "chmod");
+        assert_eq!(back.reason, "test");
+    }
+
+    #[test]
+    fn blocked_item_clone() {
+        let item = make_blocked_item();
+        let cloned = item.clone();
+        assert_eq!(cloned.value, item.value);
+    }
+
+    // ── Request types ──
+
+    #[test]
+    fn scan_request_deserialize() {
+        let json = r#"{"command":"ls -la"}"#;
+        let req: ScanRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.command, "ls -la");
+        assert!(req.context.is_none());
+    }
+
+    #[test]
+    fn scan_request_with_context() {
+        let json = r#"{"command":"curl x.com","context":"user request"}"#;
+        let req: ScanRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.context.as_deref(), Some("user request"));
+    }
+
+    #[test]
+    fn block_request_deserialize() {
+        let json = r#"{"kind":"command","value":"rm","reason":"danger"}"#;
+        let req: BlockRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.value, "rm");
+        assert_eq!(req.reason.as_deref(), Some("danger"));
+    }
+
+    #[test]
+    fn block_request_default_reason() {
+        let json = r#"{"kind":"path","value":"/etc"}"#;
+        let req: BlockRequest = serde_json::from_str(json).unwrap();
+        assert!(req.reason.is_none());
+    }
+
+    #[test]
+    fn script_scan_request_deserialize() {
+        let val = serde_json::json!({"script": "#!/bin/bash", "language": "bash"});
+        let req: ScriptScanRequest = serde_json::from_value(val).unwrap();
+        assert_eq!(req.script, "#!/bin/bash");
+        assert_eq!(req.language.as_deref(), Some("bash"));
+    }
+
+    #[test]
+    fn whitelist_request_deserialize() {
+        let json = r#"{"pid":1234,"reason":"system"}"#;
+        let req: WhitelistRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.pid, 1234);
+        assert_eq!(req.reason.as_deref(), Some("system"));
+    }
+
+    #[test]
+    fn unblock_request_deserialize() {
+        let json = r#"{"kind":"command","value":"rm"}"#;
+        let req: UnblockRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.value, "rm");
+    }
+
+    // ── KernelBlocker stub (macOS) ──
+
+    #[test]
+    fn kernel_blocker_try_load_none_on_macos() {
+        let result = KernelBlocker::try_load(&SentinelConfig::default());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn kernel_blocker_block_cmd_stub() {
+        let blocker = KernelBlocker;
+        assert!(blocker.block_cmd("rm").is_ok());
+    }
+
+    #[test]
+    fn kernel_blocker_unblock_cmd_stub() {
+        let blocker = KernelBlocker;
+        assert!(blocker.unblock_cmd("rm").is_ok());
+    }
+
+    #[test]
+    fn kernel_blocker_protect_path_stub() {
+        let blocker = KernelBlocker;
+        assert!(blocker.protect_path("/etc").is_ok());
+    }
+
+    #[test]
+    fn kernel_blocker_unprotect_path_stub() {
+        let blocker = KernelBlocker;
+        assert!(blocker.unprotect_path("/etc").is_ok());
+    }
+
+    // ── AppState construction ──
+
+    fn make_state() -> Arc<AppState> {
+        Arc::new(AppState {
+            engine: AnalysisEngine { enable_ast: false, enable_interpreter: false },
+            config: Mutex::new(SentinelConfig::default()),
+            blocked_commands: Mutex::new(Vec::new()),
+            protected_paths: Mutex::new(Vec::new()),
+            blocked_pids: Mutex::new(Vec::new()),
+            whitelisted_pids: Mutex::new(Vec::new()),
+            approvals: Mutex::new(Vec::new()),
+            kernel: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn app_state_default_empty() {
+        let state = make_state();
+        assert!(state.blocked_commands.lock().await.is_empty());
+        assert!(state.protected_paths.lock().await.is_empty());
+        assert!(state.blocked_pids.lock().await.is_empty());
+        assert!(state.whitelisted_pids.lock().await.is_empty());
+        assert!(state.approvals.lock().await.is_empty());
+    }
+
+    // ── Handlers (integration-style, no network) ──
+
+    // Note: block_item, unblock_item, create_approval_request, approve_request,
+    // reject_request return impl IntoResponse — cannot access .0 directly.
+    // Test state side-effects instead.
+
+    #[tokio::test]
+    async fn health_returns_ok() {
+        assert_eq!(health().await, "ok");
+    }
+
+    #[tokio::test]
+    async fn get_policy_returns_json() {
+        let state = make_state();
+        let resp = get_policy(State(state)).await;
+        assert_eq!(resp.0["status"], "active");
+    }
+
+    #[tokio::test]
+    async fn handler_reload_policy() {
+        let state = make_state();
+        let resp = reload_policy(State(state)).await;
+        assert_eq!(resp.0["status"], "reloaded");
+    }
+
+    #[tokio::test]
+    async fn block_command_state_mutated() {
+        let state = make_state();
+        let req = BlockRequest { kind: BlockKind::command, value: "danger".into(), reason: Some("test".into()) };
+        block_item(State(state.clone()), Json(req)).await;
+        let blocked = state.blocked_commands.lock().await;
+        assert_eq!(blocked.len(), 1);
+        assert_eq!(blocked[0].value, "danger");
+    }
+
+    #[tokio::test]
+    async fn block_path_state_mutated() {
+        let state = make_state();
+        let req = BlockRequest { kind: BlockKind::path, value: "/etc/shadow".into(), reason: None };
+        block_item(State(state.clone()), Json(req)).await;
+        let paths = state.protected_paths.lock().await;
+        assert_eq!(paths.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn block_pid_state_mutated() {
+        let state = make_state();
+        let req = BlockRequest { kind: BlockKind::pid, value: "1234".into(), reason: None };
+        block_item(State(state.clone()), Json(req)).await;
+        let pids = state.blocked_pids.lock().await;
+        assert_eq!(pids.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn unblock_removes_item() {
+        let state = make_state();
+        state.blocked_commands.lock().await.push(make_blocked_item());
+        let req = UnblockRequest { kind: BlockKind::command, value: "chmod".into() };
+        unblock_item(State(state.clone()), Json(req)).await;
+        assert!(state.blocked_commands.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn whitelist_pid_added() {
+        let state = make_state();
+        let req = WhitelistRequest { pid: 1234, reason: None };
+        whitelist_pid(State(state.clone()), Json(req)).await;
+        let wl = state.whitelisted_pids.lock().await;
+        assert_eq!(*wl, vec![1234]);
+    }
+
+    #[tokio::test]
+    async fn scan_empty_command_safe() {
+        let state = make_state();
+        let req = ScanRequest { command: "".into(), context: None };
+        let resp = scan_command(State(state), Json(req)).await;
+        assert_eq!(resp.0["risk_level"], "safe");
+    }
+
+    #[tokio::test]
+    async fn scan_safe_command() {
+        let state = make_state();
+        let req = ScanRequest { command: "ls -la".into(), context: None };
+        let resp = scan_command(State(state), Json(req)).await;
+        assert_eq!(resp.0["safe"], true);
+    }
+
+    #[tokio::test]
+    async fn scan_script_empty() {
+        let state = make_state();
+        let req = ScriptScanRequest { script: "".into(), language: None };
+        let resp = scan_script(State(state), Json(req)).await;
+        assert_eq!(resp.0["overall_risk_level"], "safe");
+        assert_eq!(resp.0["max_score"], 0);
+    }
+
+    #[tokio::test]
+    async fn scan_script_with_dangerous_line() {
+        let state = make_state();
+        let req = ScriptScanRequest {
+            script: "#!/bin/bash\nrm -rf /".into(),
+            language: Some("bash".into()),
+        };
+        let resp = scan_script(State(state), Json(req)).await;
+        let score = resp.0["max_score"].as_u64().unwrap_or(0);
+        assert!(score > 0, "rm -rf / should score above 0");
+    }
+
+    #[tokio::test]
+    async fn approval_create_adds_to_state() {
+        let state = make_state();
+        let req = make_approval_request();
+        create_approval_request(State(state.clone()), Json(req)).await;
+        let approvals = state.approvals.lock().await;
+        assert_eq!(approvals.len(), 1);
+        assert_eq!(approvals[0].id, "apr_001");
+    }
+
+    #[tokio::test]
+    async fn approval_approve_adds_blocked_command() {
+        let state = make_state();
+        let req = make_approval_request();
+        create_approval_request(State(state.clone()), Json(req)).await;
+        approve_request(State(state.clone()), axum::extract::Path("apr_001".into())).await;
+        let blocked = state.blocked_commands.lock().await;
+        assert_eq!(blocked.len(), 1);
+        assert_eq!(blocked[0].value, "rm");
+    }
+
+    #[tokio::test]
+    async fn approval_reject_does_not_block() {
+        let state = make_state();
+        let req = make_approval_request();
+        create_approval_request(State(state.clone()), Json(req)).await;
+        reject_request(State(state.clone()), axum::extract::Path("apr_001".into())).await;
+        assert!(state.blocked_commands.lock().await.is_empty());
+    }
+
+    // ── build_router ──
+
+    #[test]
+    fn build_router_creates_routes() {
+        let state = make_state();
+        let _router = build_router(state);
+    }
+}

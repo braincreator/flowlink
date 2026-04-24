@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State, ws::{WebSocket, WebSocketUpgrade, Message as AxumMsg}},
+    extract::{Path, Query, State, Extension, ws::{WebSocket, WebSocketUpgrade, Message as AxumMsg}},
     http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -530,17 +530,32 @@ async fn account_info(
 
 /// GET /api/account/settings
 async fn account_get_settings(
-    State(_state): State<AppState>,
-    _claims: axum::extract::Extension<crate::auth::Claims>,
+    State(state): State<AppState>,
+    Extension(claims): Extension<crate::auth::Claims>,
 ) -> impl IntoResponse {
-    (StatusCode::OK, Json(serde_json::json!({
+    let mut resp = serde_json::json!({
         "name": "",
         "email": "",
         "notifications": {
             "push_enabled": true,
             "email_frequency": "immediate"
         }
-    }))).into_response()
+    });
+
+    // Fetch preferred_language from DB
+    if let Some(ref db) = state.db {
+        if let Ok(Some(row)) = sqlx::query_as::<_, (Option<String>,)>(
+            "SELECT preferred_language FROM accounts WHERE account_id = $1"
+        ).bind(&claims.account_id).fetch_optional(db.pool()).await {
+            if let Some(lang) = row.0 {
+                resp["preferred_language"] = serde_json::json!(lang);
+            } else {
+                resp["preferred_language"] = serde_json::json!("ru");
+            }
+        }
+    }
+
+    (StatusCode::OK, Json(resp)).into_response()
 }
 
 /// PUT /api/account/settings — persist settings to DB
@@ -565,6 +580,20 @@ async fn account_update_settings(
         },
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "auth not configured"}))).into_response(),
     };
+
+    // Update preferred_language if provided
+    if let Some(lang) = body.get("preferred_language").and_then(|v| v.as_str()) {
+        if lang == "en" || lang == "ru" {
+            if let Some(ref db) = state.db {
+                if let Err(e) = sqlx::query("UPDATE accounts SET preferred_language = $1, updated_at = NOW() WHERE account_id = $2")
+                    .bind(lang).bind(&account_id)
+                    .execute(db.pool()).await
+                {
+                    log::warn!("Failed to update preferred_language: {e}");
+                }
+            }
+        }
+    }
 
     // Update email if provided
     if let Some(email) = body.get("email").and_then(|v| v.as_str()) {
@@ -1113,6 +1142,24 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
                             }
                             flowlink_core::MessageType::NeedsApproval => {
                                 log::info!("Agent {aid}: approval requested");
+                                // Plan gate: check if account has approval feature
+                                if let Some(ref billing_engine) = state.billing {
+                                    let acc = billing_engine.get_or_create_account(&client_id);
+                                    if let Some(plan) = billing_engine.plans().get(&acc.plan_id) {
+                                        if !plan.features.approval {
+                                            log::info!("Agent {aid}: approval rejected — plan lacks 'approval' feature");
+                                            // Auto-reject via tx channel (write_task will send via ws_sink)
+                                            if let Some(ref payload) = msg.payload {
+                                                let req_id = payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                let reject = serde_json::json!({"type": "ApprovalResponse", "request_id": req_id, "approved": false, "reason": "Plan gate: 'approval' feature not available."});
+                                                if let Ok(json) = serde_json::to_string(&reject) {
+                                                    let _ = tx.send(AxumMsg::Text(json.into())).await;
+                                                }
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                }
                                 // Store in approval queue
                                 if let Some(ref payload) = msg.payload {
                                     let req_id = payload.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1834,12 +1881,14 @@ struct CreatePlanBody {
     period: String,
     currency: String,
     limits: Option<serde_json::Value>,
-    features: Option<Vec<String>>,
+    features: Option<serde_json::Value>,
     #[serde(default = "default_true")]
     is_active: bool,
     sort_order: i32,
     #[serde(default)]
     trial_days: i32,
+    #[serde(default)]
+    annual_discount_percent: Option<i32>,
 }
 
 fn default_true() -> bool { true }
@@ -1853,7 +1902,10 @@ async fn admin_create_plan(State(state): State<AppState>, Json(body): Json<Creat
         .as_ref()
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-    let features = body.features.unwrap_or_default();
+    let features: flowlink_db::plans::PlanFeatures = body.features
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
     let plan = flowlink_db::plans::DbPlan {
         id: body.id,
         name: body.name,
@@ -1868,11 +1920,16 @@ async fn admin_create_plan(State(state): State<AppState>, Json(body): Json<Creat
         is_active: body.is_active,
         sort_order: body.sort_order,
         trial_days: body.trial_days,
+        annual_discount_percent: body.annual_discount_percent.unwrap_or(0),
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     };
     match flowlink_db::plans::DbPlan::upsert(db.pool(), &plan).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true, "id": plan.id}))).into_response(),
+        Ok(()) => {
+            // Notify all subscribers (bot, middleware, SSE) to reload plans
+            state.eventbus.publish("plans:updated", &serde_json::json!({"action": "create", "id": &plan.id}).to_string());
+            (StatusCode::OK, Json(serde_json::json!({"ok": true, "id": plan.id}))).into_response()
+        }
         Err(e) => {
             log::error!("Admin create plan: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
@@ -1912,7 +1969,10 @@ async fn admin_update_plan(State(state): State<AppState>, Path(id): Path<String>
     if let Some(sort) = body.get("sort_order").and_then(|v| v.as_i64()) { plan.sort_order = sort as i32; }
     if let Some(trial) = body.get("trial_days").and_then(|v| v.as_i64()) { plan.trial_days = trial as i32; }
     match flowlink_db::plans::DbPlan::upsert(db.pool(), &plan).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response(),
+        Ok(()) => {
+            state.eventbus.publish("plans:updated", &serde_json::json!({"action": "update", "id": &id}).to_string());
+            (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response()
+        }
         Err(e) => {
             log::error!("Admin update plan: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "DB error"}))).into_response()
@@ -1926,7 +1986,10 @@ async fn admin_delete_plan(State(state): State<AppState>, Path(id): Path<String>
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({"error": "No database"}))).into_response(),
     };
     match flowlink_db::plans::DbPlan::set_active(db.pool(), &id, false).await {
-        Ok(true) => (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response(),
+        Ok(true) => {
+            state.eventbus.publish("plans:updated", &serde_json::json!({"action": "delete", "id": &id}).to_string());
+            (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response()
+        }
         Ok(false) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Plan not found"}))).into_response(),
         Err(e) => {
             log::error!("Admin delete plan: {}", e);
@@ -2110,6 +2173,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/billing", axum::routing::get(crate::billing_api::get_billing_info))
         .route("/api/billing/usage", axum::routing::get(crate::billing_api::get_usage))
         .route("/api/billing/plans", axum::routing::get(crate::billing_api::list_plans))
+        .route("/api/billing/my-plan", axum::routing::get(crate::billing_api::my_plan))
+        .route("/api/billing/check-feature", axum::routing::get(crate::billing_api::check_feature))
         .route("/api/billing/change-plan", axum::routing::post(crate::billing_api::change_plan))
         .route("/api/billing/invoices", axum::routing::get(crate::billing_api::list_invoices))
         .route("/api/billing/invoices/{id}", axum::routing::get(crate::billing_api::get_invoice))
@@ -2177,9 +2242,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/sessions", axum::routing::get(crate::auth_oauth::list_sessions))
         .route("/api/auth/sessions", axum::routing::delete(crate::auth_oauth::revoke_other_sessions))
         .route("/api/auth/sessions/{id}", axum::routing::delete(crate::auth_oauth::revoke_session))
-        // Apply JWT auth + rate limiting to protected routes
-        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth))
-        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::billing_middleware::billing_enforcement_middleware));
+        // Apply JWT auth + plan enforcement + rate limiting to protected routes
+        // Layers execute in reverse order: last .layer() runs first
+        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::plan_enforcement::plan_enforcement_middleware))
+        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::billing_middleware::billing_enforcement_middleware))
+        .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
     // ── Admin routes (require JWT auth + admin RBAC permission) ──
     let admin_routes = Router::new()

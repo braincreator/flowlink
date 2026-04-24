@@ -158,6 +158,15 @@ pub struct CreateSubscriptionRequest {
     /// Customer email for 54-FZ receipt
     #[serde(default)]
     pub customer_email: Option<String>,
+    /// Customer phone for 54-FZ receipt (alternative to email)
+    #[serde(default)]
+    pub customer_phone: Option<String>,
+    /// Return URL after successful payment (overrides config default)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_url: Option<String>,
+    /// Fail URL after failed payment (overrides config default)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fail_url: Option<String>,
 }
 
 /// Payment method for subscription
@@ -548,13 +557,14 @@ impl TochkaClient {
                 "amount": req.amount as f64 / 100.0, // kopecks to rubles
                 "purpose": &req.description,
                 "paymentMode": ["sbp", "card"],
-                "redirectUrl": &self.config.success_url,
-                "failRedirectUrl": &self.config.fail_url,
+                "redirectUrl": req.return_url.as_deref().unwrap_or(&self.config.success_url),
+                "failRedirectUrl": req.fail_url.as_deref().unwrap_or(&self.config.fail_url),
                 "saveCard": true,
                 "recurring": true,
                 "paymentLinkId": &req.plan_id, // our internal plan/order ID
                 "Client": {
                     "Email": req.customer_email.as_deref().unwrap_or(""),
+                    "phone": req.customer_phone.as_deref().unwrap_or(""),
                 },
                 "Items": [{
                     "name": &req.description,
@@ -995,6 +1005,9 @@ mod tests {
             start_date: None,
             trial_days: 0,
             customer_email: Some("test@example.com".into()),
+            customer_phone: None,
+            return_url: None,
+            fail_url: None,
         };
         let sub = c.create_subscription(&req).await.unwrap();
         assert_eq!(sub.subscription_id, "sub_abc123");

@@ -233,8 +233,22 @@ pub struct CreateRuleRequest {
 pub async fn create_policy(
     State(state): State<AppState>,
     axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    plan: Option<axum::extract::Extension<flowlink_billing::plans::Plan>>,
     Json(body): Json<CreatePolicyRequest>,
 ) -> impl IntoResponse {
+    // Plan gate: check max_policies limit
+    if let Some(axum::extract::Extension(ref p)) = plan {
+        if let Some(ref db) = state.db {
+            let org_filter = body.org_id.as_deref().or(claims.org_id.as_deref()).unwrap_or("");
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM policies WHERE org_id = $1")
+                .bind(org_filter).fetch_one(db.write_pool()).await.unwrap_or(0);
+            if let Err(_e) = crate::plan_gate::check_limit(&Some(p.clone()), "max_policies", (count + 1) as u64, None) {
+                    return crate::plan_gate::PlanGateError::limit_exceeded(
+                        "max_policies", (count + 1) as u64, p.limits.max_policies as u64, None
+                    ).into_response();
+            }
+        }
+    }
     // Verify org ownership
     if let Some(ref user_org) = claims.org_id {
         if Some(user_org.as_str()) != body.org_id.as_deref() && !claims.is_admin {

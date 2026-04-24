@@ -894,4 +894,50 @@ mod tests {
         let hex_str = hmac_sha256_hex(b"key", b"data");
         assert_eq!(hex_str.len(), 64); // 32 bytes = 64 hex chars
     }
+
+    #[test]
+    fn test_sha256_large_input() {
+        // 1 MB of repeated 0xAB bytes
+        let data = vec![0xAB_u8; 1024 * 1024];
+        let hex_str = sha256_hex(&data);
+        assert_eq!(hex_str.len(), 64);
+        // Verify determinism by hashing again
+        let hex_str2 = sha256_hex(&data);
+        assert_eq!(hex_str, hex_str2);
+    }
+
+    #[test]
+    fn test_hmac_sha256_empty_key() {
+        // HMAC-SHA256 with an empty key is well-defined (B=64 zero-padded block)
+        let hex_str = hmac_sha256_hex(b"", b"test");
+        assert_eq!(hex_str.len(), 64);
+        // Known: HMAC-SHA256("", "test") from reference implementation
+        assert_eq!(
+            hex_str,
+            "43b0cef99265f9e34c10ea9d3501926d27b39f57c6d674561d8ba236e7a819fb"
+        );
+    }
+
+    #[test]
+    fn test_hmac_sha256_empty_data() {
+        // HMAC-SHA256 with empty data over key "key"
+        let hex_str = hmac_sha256_hex(b"key", b"");
+        assert_eq!(hex_str.len(), 64);
+        assert_eq!(
+            hex_str,
+            "5d5d139563c95b5967b9bd9a8c9b233a9dedb45072794cd232dc1b74832607d0"
+        );
+    }
+
+    #[test]
+    fn test_hmac_sha256_long_key() {
+        // HMAC spec: keys longer than B=64 bytes are hashed first to 32 bytes.
+        // 512 bytes = exactly the block size boundary
+        let long_key = vec![0u8; 512];
+        let hex_str = hmac_sha256_hex(&long_key, b"data");
+        assert_eq!(hex_str.len(), 64);
+        // Verify determinism
+        let hex_str2 = hmac_sha256_hex(&long_key, b"data");
+        assert_eq!(hex_str, hex_str2);
+    }
 }

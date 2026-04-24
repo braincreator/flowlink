@@ -22,3 +22,4 @@ dist/
 relay.test
 flowlink-relay-linux-*
 video/node_modules
+.ant-colony/

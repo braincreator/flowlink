@@ -126,8 +126,21 @@ pub async fn create_role(
     State(state): State<AppState>,
     AccountIdExtractor(account_id): AccountIdExtractor,
     Path(org_id): Path<Uuid>,
+    plan: Option<axum::extract::Extension<flowlink_billing::plans::Plan>>,
     Json(body): Json<CreateRoleRequest>,
 ) -> Result<(StatusCode, Json<CustomRole>), (StatusCode, String)> {
+    // Plan gate: check max_custom_rules limit (roles = custom rules)
+    if let Some(axum::extract::Extension(ref p)) = plan {
+        let pool = get_pool(&state).map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e.1))?;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM custom_roles WHERE org_id = $1")
+            .bind(org_id).fetch_one(pool).await.unwrap_or(0);
+        if crate::plan_gate::check_limit(&Some(p.clone()), "max_custom_rules", (count + 1) as u64, None).is_err() {
+            return Err((StatusCode::FORBIDDEN, format!(
+                "Limit 'max_custom_rules' exceeded ({} of {}). Upgrade your plan.",
+                count + 1, p.limits.max_custom_rules
+            )));
+        }
+    }
     let pool = get_pool(&state)?;
     require_org_admin(pool, &org_id, &account_id).await?;
 

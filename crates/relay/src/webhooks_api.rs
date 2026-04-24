@@ -145,8 +145,23 @@ pub async fn create_webhook(
     State(state): State<AppState>,
     AccountIdExtractor(account_id): AccountIdExtractor,
     Path(org_id): Path<Uuid>,
+    plan: Option<axum::extract::Extension<flowlink_billing::plans::Plan>>,
     Json(body): Json<CreateWebhookRequest>,
 ) -> impl IntoResponse {
+    // Plan gate: check max_webhooks limit
+    if let Some(axum::extract::Extension(ref p)) = plan {
+        let pool = match state.db.as_ref() {
+            Some(db) => db.pool(),
+            None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "database not configured"}))).into_response(),
+        };
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM webhooks WHERE org_id = $1")
+            .bind(org_id).fetch_one(pool).await.unwrap_or(0);
+        if crate::plan_gate::check_limit(&Some(p.clone()), "max_webhooks", (count + 1) as u64, None).is_err() {
+            return crate::plan_gate::PlanGateError::limit_exceeded(
+                "max_webhooks", (count + 1) as u64, p.limits.max_webhooks as u64, None
+            ).into_response();
+        }
+    }
     let pool = match state.db.as_ref() {
         Some(db) => db.pool(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "database not configured"}))).into_response(),

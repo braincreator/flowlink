@@ -568,4 +568,20 @@ impl KeyRateLimiter {
         let mut buckets = self.buckets.write().await;
         buckets.retain(|_, b| b.window_start.is_some_and(|ws| now.duration_since(ws) < window_dur));
     }
+
+    /// Check with a per-plan limit override. If plan_limit is 0, uses default.
+    pub async fn check_plan(&self, key_id: &str, plan_limit: u32) -> bool {
+        let effective_limit = if plan_limit > 0 { plan_limit as u64 } else { self.max_requests };
+        let now = std::time::Instant::now();
+        let window_dur = std::time::Duration::from_secs(self.window_secs);
+        let mut buckets = self.buckets.write().await;
+        let bucket = buckets.entry(key_id.to_string()).or_insert_with(KeyBucket::default);
+        let window_start = bucket.window_start.get_or_insert(now);
+        if now.duration_since(*window_start) > window_dur {
+            bucket.count = 0;
+            bucket.window_start = Some(now);
+        }
+        bucket.count += 1;
+        bucket.count <= effective_limit
+    }
 }

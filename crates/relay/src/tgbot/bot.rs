@@ -366,6 +366,9 @@ async fn handle_callback(
                                 start_date: None,
                                 trial_days: 0,
                                 customer_email: None,
+                                customer_phone: None,
+                                return_url: None,
+                                fail_url: None,
                             };
 
                             match tochka.create_subscription(&req).await {

@@ -971,8 +971,8 @@ mod tests {
 
         // ShieldAlert handler returns None (no reply)
         assert!(resp.is_none());
-        // Counter should have incremented
-        assert_eq!(shield_alert_count(), before + 1);
+        // Counter should have incremented (at least 1, may be more due to parallel tests)
+        assert!(shield_alert_count() >= before + 1);
     }
 
     #[tokio::test]

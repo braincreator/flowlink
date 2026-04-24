@@ -7,9 +7,10 @@
 //! - Subscriptions API (рекуррентные автосписания)
 //!
 //! # Plans
-//! - Trial: 1 host, pattern blocking (7 days)
-//! - Starter: 3 hosts, AST analysis
-//! - Pro: 20 hosts, eBPF
+//! - Starter (Free): 1 agent, basic shield, policy engine
+//! - Professional: 5 agents, approval, RBAC, webhooks
+//! - Scale: 25 agents, pattern learning, SIEM, priority support
+//! - Enterprise: unlimited, SSO, on-prem, dedicated support
 
 pub mod invoice;
 pub mod payment;
@@ -77,7 +78,7 @@ impl AccountBilling {
         let now = Utc::now();
         Self {
             account_id: account_id.to_string(),
-            plan_id: plans::PlanId::Trial.as_str().to_string(),
+            plan_id: plans::PlanId::Starter.as_str().to_string(),
             activated_at: now,
             expires_at: None,
             active: true,
@@ -105,8 +106,10 @@ pub struct BillingCheck {
 impl BillingEngine {
     /// Create a new billing engine (memory-only, no persistence)
     pub fn new(payments: payment::PaymentConfig) -> Self {
+        let plans = Arc::new(plans::PlanRegistry::new());
+        plans.seed_defaults();
         Self {
-            plans: Arc::new(plans::PlanRegistry::default()),
+            plans,
             usage: Arc::new(usage::UsageTracker::new()),
             invoices: Arc::new(invoice::InvoiceStore::new()),
             payments: Arc::new(payments),
@@ -121,8 +124,10 @@ impl BillingEngine {
         payments: payment::PaymentConfig,
         persist: Arc<dyn persist::BillingPersist>,
     ) -> Self {
+        let plans = Arc::new(plans::PlanRegistry::new());
+        plans.seed_defaults();
         Self {
-            plans: Arc::new(plans::PlanRegistry::default()),
+            plans,
             usage: Arc::new(usage::UsageTracker::new()),
             invoices: Arc::new(invoice::InvoiceStore::new()),
             payments: Arc::new(payments),
@@ -267,12 +272,12 @@ impl BillingEngine {
         // ApiRequest and Tokens are not limited per PRD
         match operation {
             usage::UsageOperation::AgentConnect => {
-                let limit = plan.limits.max_hosts;
+                let limit = plan.limits.max_agents;
                 let current_value = current.active_agents + 1;
                 if limit > 0 && current_value > limit {
                     return BillingCheck {
                         allowed: false,
-                        reason: Some(format!("Host limit exceeded: {}/{}", current_value, limit)),
+                        reason: Some(format!("Agent limit exceeded: {}/{}", current_value, limit)),
                         usage_after: None,
                     };
                 }
@@ -464,7 +469,7 @@ mod tests {
     #[test]
     fn test_account_billing_new() {
         let billing = AccountBilling::new("acc-1");
-        assert_eq!(billing.plan_id, "trial");
+        assert_eq!(billing.plan_id, "starter");
         assert!(billing.active);
         assert!(billing.payment_method.is_none());
         assert!(!billing.is_trial);
@@ -489,13 +494,13 @@ mod tests {
         let engine = test_engine();
         let billing = AccountBilling::new("acc-1");
 
-        // Free plan: 1 host (max_hosts = 1)
+        // Free plan: 1 agent (max_agents = 1)
         let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
         assert!(check.allowed);
 
         let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
         assert!(!check.allowed);
-        assert!(check.reason.unwrap().contains("Host limit exceeded"));
+        assert!(check.reason.unwrap().contains("Agent limit exceeded"));
     }
 
     #[test]
@@ -503,9 +508,9 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        // Upgrade from trial to starter — no trial flag on paid plan
-        engine.upgrade_plan(&mut billing, "starter").unwrap();
-        assert_eq!(billing.plan_id, "starter");
+        // Upgrade from starter to professional — no trial flag on paid plan
+        engine.upgrade_plan(&mut billing, "professional").unwrap();
+        assert_eq!(billing.plan_id, "professional");
         assert!(billing.expires_at.is_some());
         assert!(!billing.is_trial);
     }
@@ -515,10 +520,10 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "starter").unwrap();
-        let result = engine.upgrade_plan(&mut billing, "trial");
+        engine.upgrade_plan(&mut billing, "professional").unwrap();
+        let result = engine.upgrade_plan(&mut billing, "starter");
         assert!(result.is_err());
-        assert_eq!(billing.plan_id, "starter"); // unchanged
+        assert_eq!(billing.plan_id, "professional"); // unchanged
     }
 
     #[test]
@@ -526,9 +531,9 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "starter").unwrap();
-        engine.change_plan(&mut billing, "trial").unwrap();
-        assert_eq!(billing.plan_id, "trial");
+        engine.upgrade_plan(&mut billing, "professional").unwrap();
+        engine.change_plan(&mut billing, "starter").unwrap();
+        assert_eq!(billing.plan_id, "starter");
     }
 
     #[test]

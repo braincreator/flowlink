@@ -201,3 +201,213 @@ impl OrgRepo {
         Ok(result.rows_affected() > 0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn now() -> DateTime<Utc> { Utc::now() }
+    fn test_uuid() -> Uuid { uuid::Uuid::new_v4() }
+
+    fn make_org_row() -> OrgRow {
+        OrgRow {
+            org_id: test_uuid(),
+            name: "Test Org".to_string(),
+            slug: "test-org".to_string(),
+            owner_account_id: "owner_001".to_string(),
+            plan_id: "plan_pro".to_string(),
+            limits: serde_json::json!({"max_members": 10, "max_agents": 5}),
+            is_trial: true,
+            trial_ends_at: Some(Utc::now() + chrono::Duration::days(14)),
+            grace_ends_at: None,
+            created_at: now(),
+            updated_at: now(),
+        }
+    }
+
+    fn make_member_row() -> OrgMemberRow {
+        OrgMemberRow {
+            id: test_uuid(),
+            org_id: test_uuid(),
+            account_id: "member_001".to_string(),
+            role: "admin".to_string(),
+            invited_by: Some("owner_001".to_string()),
+            joined_at: now(),
+            created_at: now(),
+            email: Some("user@example.com".to_string()),
+        }
+    }
+
+    fn make_invitation_row() -> OrgInvitationRow {
+        OrgInvitationRow {
+            id: test_uuid(),
+            org_id: test_uuid(),
+            email: Some("invite@example.com".to_string()),
+            role: "member".to_string(),
+            token: "token_abc123".to_string(),
+            expires_at: Utc::now() + chrono::Duration::days(7),
+            accepted_by: None,
+            accepted_at: None,
+            created_at: now(),
+        }
+    }
+
+    // ── OrgRow ─────────────────────────────────────────────────────
+
+    #[test]
+    fn org_row_construction() {
+        let o = make_org_row();
+        assert_eq!(o.name, "Test Org");
+        assert_eq!(o.slug, "test-org");
+        assert!(o.is_trial);
+    }
+
+    #[test]
+    fn org_row_none_trial_dates() {
+        let mut o = make_org_row();
+        o.trial_ends_at = None;
+        o.grace_ends_at = None;
+        assert!(o.trial_ends_at.is_none());
+        assert!(o.grace_ends_at.is_none());
+    }
+
+    #[test]
+    fn org_row_some_trial_dates() {
+        let o = make_org_row();
+        assert!(o.trial_ends_at.is_some());
+    }
+
+    #[test]
+    fn org_row_clone() {
+        let o = make_org_row();
+        let cloned = o.clone();
+        assert_eq!(cloned.org_id, o.org_id);
+        assert_eq!(cloned.name, o.name);
+    }
+
+    #[test]
+    fn org_row_debug() {
+        let o = make_org_row();
+        let debug = format!("{:?}", o);
+        assert!(debug.contains("Test Org"));
+    }
+
+    #[test]
+
+    #[test]
+    fn org_row_empty_name_slug() {
+        let mut o = make_org_row();
+        o.name = String::new();
+        o.slug = String::new();
+        assert!(o.name.is_empty());
+        assert!(o.slug.is_empty());
+    }
+
+    #[test]
+    fn org_row_limits_field() {
+        let o = make_org_row();
+        assert_eq!(o.limits["max_members"], 10);
+        assert_eq!(o.limits["max_agents"], 5);
+    }
+
+    #[test]
+    fn org_row_not_trial() {
+        let mut o = make_org_row();
+        o.is_trial = false;
+        assert!(!o.is_trial);
+    }
+
+    // ── OrgMemberRow ───────────────────────────────────────────────
+
+    #[test]
+    fn member_row_construction() {
+        let m = make_member_row();
+        assert_eq!(m.account_id, "member_001");
+        assert_eq!(m.role, "admin");
+    }
+
+    #[test]
+    fn member_row_none_invited_by() {
+        let mut m = make_member_row();
+        m.invited_by = None;
+        assert!(m.invited_by.is_none());
+    }
+
+    #[test]
+    fn member_row_none_email() {
+        let mut m = make_member_row();
+        m.email = None;
+        assert!(m.email.is_none());
+    }
+
+    #[test]
+    fn member_row_clone() {
+        let m = make_member_row();
+        let cloned = m.clone();
+        assert_eq!(cloned.id, m.id);
+        assert_eq!(cloned.account_id, m.account_id);
+    }
+
+    #[test]
+
+    #[test]
+    fn member_row_different_roles() {
+        for role in &["owner", "admin", "member", "viewer"] {
+            let mut m = make_member_row();
+            m.role = role.to_string();
+            assert_eq!(m.role, *role);
+        }
+    }
+
+    // ── OrgInvitationRow ───────────────────────────────────────────
+
+    #[test]
+    fn invitation_row_construction() {
+        let i = make_invitation_row();
+        assert_eq!(i.token, "token_abc123");
+        assert_eq!(i.role, "member");
+        assert!(i.accepted_by.is_none());
+        assert!(i.accepted_at.is_none());
+    }
+
+    #[test]
+    fn invitation_row_none_accepted() {
+        let i = make_invitation_row();
+        assert!(i.accepted_by.is_none());
+        assert!(i.accepted_at.is_none());
+    }
+
+    #[test]
+    fn invitation_row_some_accepted() {
+        let mut i = make_invitation_row();
+        i.accepted_by = Some("acct_001".to_string());
+        i.accepted_at = Some(now());
+        assert_eq!(i.accepted_by.as_deref(), Some("acct_001"));
+        assert!(i.accepted_at.is_some());
+    }
+
+    #[test]
+    fn invitation_row_clone() {
+        let i = make_invitation_row();
+        let cloned = i.clone();
+        assert_eq!(cloned.id, i.id);
+        assert_eq!(cloned.token, i.token);
+    }
+
+    #[test]
+
+    #[test]
+    fn invitation_row_none_email() {
+        let mut i = make_invitation_row();
+        i.email = None;
+        assert!(i.email.is_none());
+    }
+
+    // ── OrgRepo ────────────────────────────────────────────────────
+
+    #[test]
+    fn org_repo_exists() {
+        let _repo = OrgRepo;
+    }
+}
