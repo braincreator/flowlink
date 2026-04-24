@@ -6,6 +6,14 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use chrono::{Duration, Utc};
+use jsonwebtoken::{encode, EncodingKey, Header};
+
+use crate::server::AppState;
+use crate::middleware::AccountIdExtractor;
+use flowlink_db::audit;
 
 /// Helper: wrap a JSON response with httpOnly auth cookies
 fn json_with_cookies(status: StatusCode, body: serde_json::Value, access_token: &str, refresh_token: &str) -> Response {
@@ -17,17 +25,6 @@ fn json_with_cookies(status: StatusCode, body: serde_json::Value, access_token: 
     if let Ok(v) = axum::http::HeaderValue::from_str(&rc) { hdrs.insert(axum::http::header::SET_COOKIE, v); }
     response
 }
-    http::StatusCode,
-    Json,
-};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header};
-
-use crate::server::AppState;
-use crate::middleware::AccountIdExtractor;
-use flowlink_db::audit;
 
 // ═══════════════════════════════════════════════
 // Request / Response types
