@@ -16,7 +16,7 @@ pub struct RateLimitTier {
 }
 
 pub const FREE_TIER: RateLimitTier = RateLimitTier {
-    api_requests_per_min: 60,
+    api_requests_per_min: 180,
     auth_attempts_per_5min: 10,
     auth_attempts_per_hour: 30,
     email_change_per_hour: 3,
@@ -24,7 +24,7 @@ pub const FREE_TIER: RateLimitTier = RateLimitTier {
 };
 
 pub const STARTER_TIER: RateLimitTier = RateLimitTier {
-    api_requests_per_min: 200,
+    api_requests_per_min: 500,
     auth_attempts_per_5min: 15,
     auth_attempts_per_hour: 60,
     email_change_per_hour: 5,
@@ -32,7 +32,7 @@ pub const STARTER_TIER: RateLimitTier = RateLimitTier {
 };
 
 pub const PRO_TIER: RateLimitTier = RateLimitTier {
-    api_requests_per_min: 1000,
+    api_requests_per_min: 2000,
     auth_attempts_per_5min: 30,
     auth_attempts_per_hour: 200,
     email_change_per_hour: 10,

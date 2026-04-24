@@ -304,7 +304,7 @@ async fn handle_callback(
             // TODO: store code + chat_id for verification callback
         }
         "notif:bind:slack" => {
-            bot.send_message(chat_id, "🔗 Привязка Slack\n\nОткройте: https://flowlink.flow-masters.ru/api/notifications/slack/install\n\n⏳ После OAuth вы получите подтверждение.".to_string()).await?;
+            bot.send_message(chat_id, format!("🔗 Привязка Slack\n\nОткройте: {}/api/notifications/slack/install\n\n⏳ После OAuth вы получите подтверждение.", crate::server_base_url())).await?;
         }
         "dismiss" => {
             let _ = bot.edit_message_reply_markup(chat_id, msg_id).await;

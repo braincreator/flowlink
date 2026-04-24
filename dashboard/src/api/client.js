@@ -1,5 +1,5 @@
 // ═══ API Client ═══
-const API_BASE = import.meta.env?.VITE_API_URL || 'http://localhost:8080';
+const API_BASE = import.meta.env?.VITE_API_URL || '';
 // Redirect URL — saved before login, restored after
 let _redirectAfterLogin = null;
 export function setRedirectAfterLogin(url) { _redirectAfterLogin = url; }
@@ -123,6 +123,15 @@ class ApiClient {
             }
             window.location.href = '/dashboard/login';
             throw new Error('Session expired');
+        }
+        // 401 with no refresh token — redirect immediately
+        if (res.status === 401 && !this.refreshToken) {
+            const currentPath = window.location.pathname + window.location.search;
+            if (currentPath !== '/dashboard/login' && currentPath !== '/login') {
+                setRedirectAfterLogin(currentPath);
+            }
+            window.location.href = '/dashboard/login';
+            throw new Error('Not authenticated');
         }
         if (!res.ok) {
             const error = await res.json().catch(() => ({ error: res.statusText }));

@@ -50,6 +50,12 @@ use tokio::sync::RwLock;
 use tokio_rustls::TlsAcceptor;
 use flowlink_core::config::RelayConfig;
 
+/// Returns the configured server base URL (from env or default).
+/// Use this in places where RelayConfig is not directly accessible.
+pub fn server_base_url() -> String {
+    std::env::var("SERVER_URL").unwrap_or_else(|_| "https://flowlink.flow-masters.ru".to_string())
+}
+
 use crate::approval::ApprovalQueue;
 use crate::auth::AuthManager;
 use crate::eventbus::EventBus;
@@ -214,9 +220,9 @@ impl Relay {
                             terminal_key: client_id.clone(),
                             secret_key: secret_key.clone(),
                             payment_type_id: "SBP".to_string(),
-                            callback_url: "https://flowlink.flow-masters.ru/api/billing/webhook/tochka".to_string(),
-                            success_url: "https://flowlink.flow-masters.ru/billing/success".to_string(),
-                            fail_url: "https://flowlink.flow-masters.ru/billing/fail".to_string(),
+                            callback_url: format!("{}/api/billing/webhook/tochka", server_base_url()),
+                            success_url: format!("{}/billing/success", server_base_url()),
+                            fail_url: format!("{}/billing/fail", server_base_url()),
                         });
                     }
                     pc
@@ -245,9 +251,9 @@ impl Relay {
                         terminal_key: customer_code.clone(), // customer_code for API
                         secret_key: jwt_token.clone(), // JWT token for auth
                         payment_type_id: merchant_id.clone(), // merchantId for acquiring
-                        callback_url: "https://flowlink.flow-masters.ru/api/billing/webhook/tochka".to_string(),
-                        success_url: "https://flowlink.flow-masters.ru/billing/success".to_string(),
-                        fail_url: "https://flowlink.flow-masters.ru/billing/fail".to_string(),
+                        callback_url: format!("{}/api/billing/webhook/tochka", server_base_url()),
+                        success_url: format!("{}/billing/success", server_base_url()),
+                        fail_url: format!("{}/billing/fail", server_base_url()),
                     },
                 )))
             } else {

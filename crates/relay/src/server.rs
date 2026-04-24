@@ -2254,10 +2254,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/admin/config/reload", axum::routing::post(config_reload))
         .route("/api/admin/shield/alerts", axum::routing::get(shield_list_alerts))
         .route("/api/admin/audit/query", axum::routing::get(audit_query))
+        .route("/api/audit/stats", axum::routing::get(audit_stats_handler))
         .route("/api/admin/audit/stats", axum::routing::get(audit_stats_handler))
         .route("/api/admin/audit/export", axum::routing::get(audit_export))
         .route("/api/admin/clients", axum::routing::get(list_clients))
         .route("/api/admin/shield/stats", axum::routing::get(shield_stats))
+        .route("/api/shield/stats", axum::routing::get(shield_stats))
         .route("/api/admin/llm/backends", axum::routing::get(llm_backends))
         .route("/api/admin/llm/health", axum::routing::get(llm_health))
         // Account management

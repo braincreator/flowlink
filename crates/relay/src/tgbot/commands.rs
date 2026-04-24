@@ -453,7 +453,7 @@ pub async fn cmd_subscribe(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
         return Ok(());
     }
 
-    let checkout_url = format!("https://flowlink.flow-masters.ru/checkout/{}", plan_id);
+    let checkout_url = format!("{}/checkout/{}", crate::server_base_url(), plan_id);
     let kb: InlineKeyboardMarkup = InlineKeyboardMarkup::new(vec![
         vec![InlineKeyboardButton::url(
             "💳 Оплатить",
@@ -768,7 +768,7 @@ pub async fn cmd_shield(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
                 let kb = InlineKeyboardMarkup::new(vec![
                     vec![InlineKeyboardButton::url(
                         format!("\u{1f680} Перейти на Professional"),
-                        reqwest::Url::parse("https://flowlink.flow-masters.ru/pricing?upgrade=professional").unwrap(),
+                        reqwest::Url::parse(&format!("{}/pricing?upgrade=professional", crate::server_base_url())).unwrap(),
                     )],
                 ]);
                 bot.send_message(msg.chat.id,
@@ -803,7 +803,7 @@ pub async fn cmd_logs(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult
                 let kb = InlineKeyboardMarkup::new(vec![
                     vec![InlineKeyboardButton::url(
                         format!("\u{1f680} Перейти на Professional"),
-                        reqwest::Url::parse("https://flowlink.flow-masters.ru/pricing?upgrade=professional").unwrap(),
+                        reqwest::Url::parse(&format!("{}/pricing?upgrade=professional", crate::server_base_url())).unwrap(),
                     )],
                 ]);
                 bot.send_message(msg.chat.id,
@@ -850,7 +850,7 @@ pub async fn cmd_approvals(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
                 let kb = InlineKeyboardMarkup::new(vec![
                     vec![InlineKeyboardButton::url(
                         format!("\u{1f680} Перейти на Professional"),
-                        reqwest::Url::parse("https://flowlink.flow-masters.ru/pricing?upgrade=professional").unwrap(),
+                        reqwest::Url::parse(&format!("{}/pricing?upgrade=professional", crate::server_base_url())).unwrap(),
                     )],
                 ]);
                 bot.send_message(msg.chat.id,

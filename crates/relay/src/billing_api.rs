@@ -577,8 +577,8 @@ pub async fn subscribe(
         trial_days: body.trial_days.unwrap_or(0),
         customer_email,
         customer_phone,
-        return_url: Some(format!("https://flowlink.flow-masters.ru/dashboard/billing?plan={}&status=success", body.plan_id)),
-        fail_url: Some(format!("https://flowlink.flow-masters.ru/checkout/{}?status=failed", body.plan_id)),
+        return_url: Some(format!("{}/dashboard/billing?plan={}&status=success", crate::server_base_url(), body.plan_id)),
+        fail_url: Some(format!("{}/checkout/{}?status=failed", crate::server_base_url(), body.plan_id)),
     };
 
     match tochka.create_subscription(&req).await {

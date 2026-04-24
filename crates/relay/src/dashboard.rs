@@ -24,9 +24,11 @@ pub async fn serve_dashboard(
     }
 }
 
-const DEPRECATION_BANNER: &str = r#"<div style="background:#2563eb;color:#fff;text-align:center;padding:10px 20px;font-family:system-ui,sans-serif;font-size:14px;">
-  ⚠️ Этот интерфейс устарел. Новый интерфейс доступен на <a href="https://flowlink.flow-masters.ru" style="color:#fff;text-decoration:underline;font-weight:bold;">flowlink.flow-masters.ru</a>
-</div>"#;
+fn deprecation_banner() -> String {
+    format!(r#"<div style="background:#2563eb;color:#fff;text-align:center;padding:10px 20px;font-family:system-ui,sans-serif;font-size:14px;">
+  ⚠️ Этот интерфейс устарел. Новый интерфейс доступен на <a href="{}" style="color:#fff;text-decoration:underline;font-weight:bold;">FlowLink</a>
+</div>"#, crate::server_base_url())
+}
 
 fn serve_file_with_banner(path: &str) -> Response {
     let dashboard_dir = std::path::Path::new("/opt/flowlink/dashboard");
@@ -34,7 +36,7 @@ fn serve_file_with_banner(path: &str) -> Response {
 
     if let Ok(content) = std::fs::read(&file_path) {
         let html = String::from_utf8_lossy(&content);
-        let modified = html.replacen("<body", &format!("<body\n{}\n", DEPRECATION_BANNER), 1);
+        let modified = html.replacen("<body", &format!("<body\n{}\n", deprecation_banner()), 1);
 
         let response = Response::builder()
             .status(StatusCode::OK)

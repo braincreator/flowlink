@@ -29,13 +29,14 @@ impl EmailService {
     }
 
     async fn send_email(&self, to: &str, subject: &str, html_body: &str, text_body: &str) -> Result<()> {
+        let base = std::env::var("SERVER_URL").unwrap_or_else(|_| "https://flowlink.flow-masters.ru".to_string());
         let email = Message::builder()
             .from(self.from.parse().context("Invalid FROM")?)
             .to(to.parse().context("Invalid TO")?)
             .subject(subject)
             .multipart(MultiPart::alternative()
-                .singlepart(lettre::message::SinglePart::builder().header(ContentType::TEXT_PLAIN).body(text_body.to_string()))
-                .singlepart(lettre::message::SinglePart::builder().header(ContentType::TEXT_HTML).body(html_body.to_string())),
+                .singlepart(lettre::message::SinglePart::builder().header(ContentType::TEXT_PLAIN).body(text_body.replace("__BASE_URL__", &base)))
+                .singlepart(lettre::message::SinglePart::builder().header(ContentType::TEXT_HTML).body(html_body.replace("__BASE_URL__", &base))),
             )?;
         self.transport.send(email).await.context("SMTP send failed")?;
         Ok(())
@@ -58,9 +59,9 @@ impl EmailService {
 
     pub async fn send_welcome_email1(&self, email: &str, name: &str, lang: &str) -> Result<()> {
         let (subject, text) = if lang == "en" {
-            ("Welcome to FlowLink", format!("Hi {name}!\n\nYour FlowLink account has been created.\n\n1. Connect the Telegram bot\n2. Configure your AI agents\n3. Choose a plan\n\nDocs: https://flowlink.flow-masters.ru/docs\nSupport: support@flow-masters.ru"))
+            ("Welcome to FlowLink", format!("Hi {name}!\n\nYour FlowLink account has been created.\n\n1. Connect the Telegram bot\n2. Configure your AI agents\n3. Choose a plan\n\nDocs: __BASE_URL__/docs\nSupport: support@flow-masters.ru"))
         } else {
-            ("Добро пожаловать в FlowLink", format!("Привет, {name}!\n\nВаш аккаунт FlowLink создан.\n\n1. Подключите Telegram бота\n2. Настройте AI-агентов\n3. Выберите тариф\n\nДокументация: https://flowlink.flow-masters.ru/docs\nПоддержка: support@flow-masters.ru"))
+            ("Добро пожаловать в FlowLink", format!("Привет, {name}!\n\nВаш аккаунт FlowLink создан.\n\n1. Подключите Telegram бота\n2. Настройте AI-агентов\n3. Выберите тариф\n\nДокументация: __BASE_URL__/docs\nПоддержка: support@flow-masters.ru"))
         };
         let html = format_welcome1_html(name, lang);
         self.send_email(email, subject, &html, &text).await
@@ -184,6 +185,10 @@ impl EmailService {
 // ═══════════════════════════════════════════════════════════════
 
 fn fmt_email(lang: &str, header_color: &str, sub: &str, body_html: &str) -> String {
+    fmt_email_with_base(lang, header_color, sub, body_html, "__BASE_URL__")
+}
+
+fn fmt_email_with_base(lang: &str, header_color: &str, sub: &str, body_html: &str, base_url: &str) -> String {
     let docs = if lang == "en" { "Documentation" } else { "Документация" };
     format!(r#"<!DOCTYPE html>
 <html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -197,17 +202,17 @@ fn fmt_email(lang: &str, header_color: &str, sub: &str, body_html: &str) -> Stri
 <tr><td style="padding:36px 32px;color:#ededed;">{body}</td></tr>
 <tr><td style="padding:20px 32px;border-top:1px solid #1a1a1a;text-align:center;">
 <p style="margin:0 0 10px;font-size:11px;color:#555;line-height:1.8;">
-<a href="https://flowlink.flow-masters.ru/docs" style="color:#0070f3;text-decoration:none;">{docs}</a>
+<a href="__BASE_URL__/docs" style="color:#0070f3;text-decoration:none;">{docs}</a>
 &nbsp;&middot;&nbsp;
 <a href="mailto:support@flow-masters.ru" style="color:#0070f3;text-decoration:none;">support@flow-masters.ru</a>
 &nbsp;&middot;&nbsp;
 <a href="https://t.me/flowlink_ai_sales_bot" style="color:#0070f3;text-decoration:none;">Telegram</a>
 </p>
-<p style="margin:0;font-size:10px;color:#333;">FlowLink &middot; AI Agent Security Gateway &middot; <a href="https://flowlink.flow-masters.ru" style="color:#333;text-decoration:none;">flow-masters.ru</a></p>
+<p style="margin:0;font-size:10px;color:#333;">FlowLink &middot; AI Agent Security Gateway &middot; <a href="__BASE_URL__" style="color:#333;text-decoration:none;">FlowLink</a></p>
 </td></tr>
 </table>
 </td></tr></table>
-</body></html>"#, hc = header_color, sub = sub, body = body_html, lang = lang, docs = docs)
+</body></html>"#, hc = header_color, sub = sub, body = body_html, lang = lang, docs = docs).replace("__BASE_URL__", base_url)
 }
 
 fn fmt_verification_standalone(code: &str, lang: &str, body_text: &str, footer_note: &str) -> String {
@@ -230,13 +235,13 @@ fn fmt_verification_standalone(code: &str, lang: &str, body_text: &str, footer_n
 </td></tr>
 <tr><td style="padding:20px 32px;border-top:1px solid #1a1a1a;text-align:center;">
 <p style="margin:0 0 10px;font-size:11px;color:#555;line-height:1.8;">
-<a href="https://flowlink.flow-masters.ru/docs" style="color:#0070f3;text-decoration:none;">{docs}</a>
+<a href="__BASE_URL__/docs" style="color:#0070f3;text-decoration:none;">{docs}</a>
 &nbsp;&middot;&nbsp;
 <a href="mailto:support@flow-masters.ru" style="color:#0070f3;text-decoration:none;">support@flow-masters.ru</a>
 &nbsp;&middot;&nbsp;
 <a href="https://t.me/flowlink_ai_sales_bot" style="color:#0070f3;text-decoration:none;">Telegram</a>
 </p>
-<p style="margin:0;font-size:10px;color:#333;">FlowLink &middot; AI Agent Security Gateway &middot; <a href="https://flowlink.flow-masters.ru" style="color:#333;text-decoration:none;">flow-masters.ru</a></p>
+<p style="margin:0;font-size:10px;color:#333;">FlowLink &middot; AI Agent Security Gateway &middot; <a href="__BASE_URL__" style="color:#333;text-decoration:none;">flow-masters.ru</a></p>
 </td></tr>
 </table>
 </td></tr></table>
@@ -271,7 +276,7 @@ fn format_welcome1_html(name: &str, lang: &str) -> String {
 </td></tr>
 </table>
 <div style="background:#0070f3/8;border:1px solid #0070f3/20;border-radius:10px;padding:16px;text-align:center;">
-<a href="https://flowlink.flow-masters.ru/docs" style="color:#0070f3;font-size:14px;font-weight:600;text-decoration:none;">{cta_text} →</a>
+<a href="__BASE_URL__/docs" style="color:#0070f3;font-size:14px;font-weight:600;text-decoration:none;">{cta_text} →</a>
 </div>"#, greeting = greeting, desc = desc, s1 = s1, s2 = s2, s3 = s3, cta_text = cta_text);
     fmt_email(lang, "#6366f1,#8b5cf6", sub, &body)
 }
@@ -295,7 +300,7 @@ fn format_welcome2_html(name: &str, lang: &str) -> String {
 <tr><td style="padding:6px 0;color:#ededed;font-size:14px;"><span style="color:#0070f3;font-weight:700;margin-right:8px;">03</span>{st3}</td></tr>
 </table>
 </div>
-<p style="margin:0;color:#888;font-size:14px;"><a href="https://flowlink.flow-masters.ru/docs/getting-started/" style="color:#0070f3;text-decoration:none;font-weight:500;">{cta_text} →</a></p>"#, greeting = greeting, desc = desc, st1 = st1, st2 = st2, st3 = st3, cta_text = cta_text);
+<p style="margin:0;color:#888;font-size:14px;"><a href="__BASE_URL__/docs/getting-started/" style="color:#0070f3;text-decoration:none;font-weight:500;">{cta_text} →</a></p>"#, greeting = greeting, desc = desc, st1 = st1, st2 = st2, st3 = st3, cta_text = cta_text);
     fmt_email(lang, "#3b82f6,#6366f1", sub, &body)
 }
 
@@ -316,7 +321,7 @@ fn format_welcome3_html(name: &str, lang: &str) -> String {
 <div style="background:#f59e0b/8;border:1px solid #f59e0b/20;border-radius:10px;padding:16px 20px;margin-bottom:24px;">
 <p style="margin:0;color:#f59e0b;font-size:14px;font-weight:500;">{note}</p>
 </div>
-<p style="margin:0;color:#888;font-size:14px;"><a href="https://flowlink.flow-masters.ru/pricing" style="color:#0070f3;text-decoration:none;font-weight:500;">{cta_text} →</a></p>"#, title = title, desc = desc, note = note, cta_text = cta_text);
+<p style="margin:0;color:#888;font-size:14px;"><a href="__BASE_URL__/pricing" style="color:#0070f3;text-decoration:none;font-weight:500;">{cta_text} →</a></p>"#, title = title, desc = desc, note = note, cta_text = cta_text);
     fmt_email(lang, "#f59e0b,#d97706", sub, &body)
 }
 
@@ -355,7 +360,7 @@ fn format_payment_failed_html(name: &str, plan_name: &str, lang: &str) -> String
 <div style="background:#ef4444/8;border-left:3px solid #ef4444;border-radius:0 10px 10px 0;padding:16px;margin-bottom:24px;">
 <p style="margin:0;color:#fca5a5;font-size:14px;line-height:1.7;">{alert}</p>
 </div>
-<p style="margin:0;color:#888;font-size:14px;"><a href="https://flowlink.flow-masters.ru/dashboard/billing" style="color:#0070f3;text-decoration:none;font-weight:500;">{cta_text} →</a></p>"#, greeting = greeting, alert = alert, cta_text = cta_text);
+<p style="margin:0;color:#888;font-size:14px;"><a href="__BASE_URL__/dashboard/billing" style="color:#0070f3;text-decoration:none;font-weight:500;">{cta_text} →</a></p>"#, greeting = greeting, alert = alert, cta_text = cta_text);
     fmt_email(lang, "#ef4444,#dc2626", sub, &body)
 }
 
@@ -380,10 +385,10 @@ fn format_renewal_reminder_html(name: &str, plan_name: &str, renewal_date: &str,
 fn format_subscription_cancelled_html(name: &str, access_until: &str, lang: &str) -> String {
     let (sub, greeting, desc, access_text, restore_text) = if lang == "en" {
         ("Subscription cancelled", "Hi, {name}!", "Your FlowLink subscription has been cancelled.",
-         "Access is preserved until: <strong style=\"color:#fff;\">{until}</strong>", "You can reactivate anytime from your <a href=\"https://flowlink.flow-masters.ru/dashboard/billing\" style=\"color:#0070f3;text-decoration:none;font-weight:500;\">dashboard</a>.")
+         "Access is preserved until: <strong style=\"color:#fff;\">{until}</strong>", "You can reactivate anytime from your <a href=\"__BASE_URL__/dashboard/billing\" style=\"color:#0070f3;text-decoration:none;font-weight:500;\">dashboard</a>.")
     } else {
         ("Подписка отменена", "Привет, {name}!", "Подписка на FlowLink отменена по вашему запросу.",
-         "Доступ к сервису сохранён до: <strong style=\"color:#fff;\">{until}</strong>", "Возобновить подписку можно в любой момент из <a href=\"https://flowlink.flow-masters.ru/dashboard/billing\" style=\"color:#0070f3;text-decoration:none;font-weight:500;\">личного кабинета</a>.")
+         "Доступ к сервису сохранён до: <strong style=\"color:#fff;\">{until}</strong>", "Возобновить подписку можно в любой момент из <a href=\"__BASE_URL__/dashboard/billing\" style=\"color:#0070f3;text-decoration:none;font-weight:500;\">личного кабинета</a>.")
     };
     let greeting = greeting.replace("{name}", name);
     let until_display = if access_until.is_empty() { if lang == "en" { "end of current period" } else { "окончания текущего периода" } } else { access_until };

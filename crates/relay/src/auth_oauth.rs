@@ -112,7 +112,7 @@ async fn exchange_vk_token(code: &str, config: &RelayConfig, state: &str) -> Res
             ("code", code),
             ("client_id", &config.oauth.vk.app_id),
             ("redirect_uri", &format!("{}/api/auth/vk/callback",
-                config.dashboard_url.as_deref().unwrap_or("https://flowlink.flow-masters.ru")
+                config.dashboard_url_or_public()
             )),
             ("code_verifier", &code_verifier),
         ])

@@ -338,12 +338,28 @@ pub struct RelayConfig {
     /// OAuth providers configuration
     #[serde(default)]
     pub oauth: OAuthConfig,
-    /// Public URL for dashboard (used in OAuth redirects). Defaults to http://{http_addr}
+    /// Public URL for dashboard (used in OAuth redirects). Defaults to server_url.
     #[serde(default)]
     pub dashboard_url: Option<String>,
+    /// Public base URL of the server (e.g. "https://flowlink.flow-masters.ru").
+    /// Used for OAuth redirects, email links, install scripts, CORS, etc.
+    #[serde(default)]
+    pub server_url: Option<String>,
     /// CORS allowed origins. Empty or ["*"] = allow all.
     #[serde(default)]
     pub cors_allowed_origins: Vec<String>,
+}
+
+impl RelayConfig {
+    /// Returns the public server URL, defaulting to https://flowlink.flow-masters.ru
+    pub fn public_url(&self) -> &str {
+        self.server_url.as_deref().unwrap_or("https://flowlink.flow-masters.ru")
+    }
+
+    /// Returns the dashboard URL, falling back to server_url
+    pub fn dashboard_url_or_public(&self) -> &str {
+        self.dashboard_url.as_deref().unwrap_or_else(|| self.public_url())
+    }
 }
 
 /// SMTP configuration for transactional emails
@@ -891,6 +907,7 @@ mod tests {
             auth: AuthConfig::default(),
             oauth: OAuthConfig::default(),
             dashboard_url: None,
+            server_url: None,
             cors_allowed_origins: vec![],
         };
         let json = serde_json::to_string(&cfg).unwrap();
