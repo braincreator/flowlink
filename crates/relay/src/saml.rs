@@ -301,7 +301,7 @@ pub async fn saml_acs(
 
     // Generate JWT
     let tokens = match &state.auth_engine {
-        Some(engine) => engine.create_tokens(&account_id, &account_id, Some(&email), Some(&name), is_admin, None),
+        Some(engine) => engine.create_tokens(&account_id, &account_id, Some(&email), Some(&name), None, is_admin, None),
         None => unreachable!(),
     };
 

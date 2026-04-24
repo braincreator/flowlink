@@ -157,6 +157,8 @@ pub struct Claims {
     pub email: Option<String>,
     /// Name
     pub name: Option<String>,
+    /// Avatar URL from OAuth provider
+    pub avatar_url: Option<String>,
     /// Is admin
     pub is_admin: bool,
     pub org_id: Option<String>,
@@ -253,7 +255,7 @@ impl AuthEngine {
 
     /// Generate JWT access + refresh token pair.
     /// If is_admin is None, queries the DB.
-    pub fn create_tokens(&self, user_id: &str, account_id: &str, email: Option<&str>, name: Option<&str>, is_admin: bool, org_id: Option<&str>) -> Result<TokenPair> {
+    pub fn create_tokens(&self, user_id: &str, account_id: &str, email: Option<&str>, name: Option<&str>, avatar_url: Option<&str>, is_admin: bool, org_id: Option<&str>) -> Result<TokenPair> {
         let now = Utc::now();
         let access_exp = now + Duration::minutes(self.config.access_token_ttl_min);
         let refresh_exp = now + Duration::days(self.config.refresh_token_ttl_days);
@@ -263,6 +265,7 @@ impl AuthEngine {
             account_id: account_id.to_string(),
             email: email.map(|s| s.to_string()),
             name: name.map(|s| s.to_string()),
+            avatar_url: avatar_url.map(|s| s.to_string()),
             is_admin,
             org_id: org_id.map(|s| s.to_string()),
             iat: now.timestamp(),
@@ -280,6 +283,7 @@ impl AuthEngine {
             account_id: account_id.to_string(),
             email: None,
             name: None,
+            avatar_url: None,
             is_admin,
             org_id: org_id.map(|s| s.to_string()),
             iat: now.timestamp(),
@@ -302,8 +306,8 @@ impl AuthEngine {
     }
 
     /// Generate JWT token pair scoped to an organization.
-    pub fn create_org_tokens(&self, user_id: &str, account_id: &str, email: Option<&str>, name: Option<&str>, is_admin: bool, org_id: &str, _role: &str) -> Result<TokenPair> {
-        self.create_tokens(user_id, account_id, email, name, is_admin, Some(org_id))
+    pub fn create_org_tokens(&self, user_id: &str, account_id: &str, email: Option<&str>, name: Option<&str>, avatar_url: Option<&str>, is_admin: bool, org_id: &str, _role: &str) -> Result<TokenPair> {
+        self.create_tokens(user_id, account_id, email, name, avatar_url, is_admin, Some(org_id))
     }
 
     /// Validate access token (with blacklist check)

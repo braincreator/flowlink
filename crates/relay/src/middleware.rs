@@ -63,7 +63,8 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ClaimsExtractor {
         let claims = parts.extensions.get::<crate::auth::Claims>().cloned()
             .unwrap_or_else(|| crate::auth::Claims {
                 sub: "".into(), account_id: "".into(),
-                email: None, name: None, is_admin: false, org_id: None,
+                email: None, name: None, avatar_url: None,
+                is_admin: false, org_id: None,
                 iat: 0, exp: 0,
             });
         std::future::ready(Ok(ClaimsExtractor(claims)))
@@ -99,6 +100,7 @@ pub async fn jwt_auth(
                                     account_id: identity.account_id.clone(),
                                     email: None,
                                     name: Some(identity.name.clone()),
+                                    avatar_url: None,
                                     is_admin,
                                     org_id: Some(identity.org_id.to_string()),
                                     iat: 0,
@@ -130,7 +132,7 @@ pub async fn jwt_auth(
             // Insert default Claims for unauthenticated dev mode
             let default_claims = crate::auth::Claims {
                 sub: "dev".into(), account_id: "dev".into(),
-                email: None, name: Some("Dev User".into()),
+                email: None, name: Some("Dev User".into()), avatar_url: None,
                 is_admin: true, org_id: None, iat: 0, exp: 0,
             };
             req.extensions_mut().insert(AccountId("dev".into()));
@@ -176,6 +178,7 @@ pub async fn jwt_auth(
                                 account_id: identity.account_id.clone(),
                                 email: None,
                                 name: Some(identity.name.clone()),
+                                avatar_url: None,
                                 is_admin,
                                 org_id: Some(identity.org_id.to_string()),
                                 iat: 0,

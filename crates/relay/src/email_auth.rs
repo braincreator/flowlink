@@ -339,7 +339,7 @@ pub async fn change_email_confirm(
         let is_admin = flowlink_db::accounts::AccountRepo::get(pool, &account_id)
             .await.ok().flatten().map(|a| a.is_admin).unwrap_or(false);
 
-        match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin, None) {
+        match engine.create_tokens(&account_id, &account_id, Some(&email), None, None, is_admin, None) {
             Ok(tokens) => {
                 log::info!("✅ Email changed for {account_id} → {email}");
                 let _ = audit::log_event(pool, None, &account_id, "auth.email_changed", Some("account"), Some(&account_id), json!({"new_email": &email}), None).await;
@@ -461,7 +461,7 @@ pub async fn verify_code(
             admin
         } else { false };
 
-        match engine.create_tokens(&account_id, &account_id, Some(&email), None, is_admin, None) {
+        match engine.create_tokens(&account_id, &account_id, Some(&email), None, None, is_admin, None) {
             Ok(tokens) => {
                 log::info!("✅ Email auth success: {email} → {account_id}");
                 let _ = audit::log_event(pool, None, &account_id, "auth.login", Some("account"), Some(&account_id), json!({"email": &email, "ip": &client_ip}), Some(&client_ip)).await;

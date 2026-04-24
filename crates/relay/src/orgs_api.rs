@@ -315,7 +315,7 @@ pub async fn switch_org(State(state): State<AppState>, AccountIdExtractor(accoun
     // We'll create a minimal token — need user_id from account
     let user_id = &member.account_id; // fallback
 
-    match engine.create_org_tokens(user_id, &account_id, None, None, false, &org_id.to_string(), &member.role) {
+    match engine.create_org_tokens(user_id, &account_id, None, None, None, false, &org_id.to_string(), &member.role) {
         Ok(tokens) => Json(json!({
             "access_token": tokens.access_token,
             "refresh_token": tokens.refresh_token,
@@ -484,7 +484,7 @@ pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_i
 
     let _ = OrgRepo::add_member(pool, org.org_id, &account_id, "owner", None).await;
 
-    match engine.create_org_tokens(&account_id, &account_id, None, None, false, &org.org_id.to_string(), "owner") {
+    match engine.create_org_tokens(&account_id, &account_id, None, None, None, false, &org.org_id.to_string(), "owner") {
         Ok(tokens) => Json(json!({
             "org": json_row(&org),
             "access_token": tokens.access_token,

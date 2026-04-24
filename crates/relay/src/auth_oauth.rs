@@ -363,6 +363,7 @@ async fn issue_tokens_or_2fa(
     account_id: &str,
     email: Option<&str>,
     name: Option<&str>,
+    avatar_url: Option<&str>,
 ) -> Option<axum::response::Response> {
     let engine = state.auth_engine.as_ref()?;
 
@@ -389,7 +390,7 @@ async fn issue_tokens_or_2fa(
         admin
     } else { false };
 
-    match engine.create_tokens(user_id, account_id, email, name, is_admin, None) {
+    match engine.create_tokens(user_id, account_id, email, name, avatar_url, is_admin, None) {
         Ok(tokens) => {
             let config = state.config_reloader.as_ref()?.get_config().await;
             Some(dashboard_redirect(&config, &tokens.access_token, &tokens.refresh_token).into_response())
@@ -441,7 +442,7 @@ pub async fn vk_callback(
     };
 
     // Fetch user profile
-    let (vk_id, name, _avatar) = match fetch_vk_user(&access_token).await {
+    let (vk_id, name, avatar) = match fetch_vk_user(&access_token).await {
         Ok(u) => u,
         Err(e) => {
             warn!("VK user fetch failed (non-fatal): {}", e);
@@ -458,7 +459,7 @@ pub async fn vk_callback(
     }
 
     // Issue JWT (with 2FA check)
-    if let Some(response) = issue_tokens_or_2fa(&state, &vk_id, &vk_id, None, Some(&name)).await {
+    if let Some(response) = issue_tokens_or_2fa(&state, &vk_id, &vk_id, None, Some(&name), avatar.as_deref()).await {
         info!("VK OAuth success: user={}", name);
         return response;
     }
@@ -486,7 +487,7 @@ pub async fn yandex_callback(
         }
     };
 
-    let (yandex_id, name, _avatar) = match fetch_yandex_user(&access_token).await {
+    let (yandex_id, name, avatar) = match fetch_yandex_user(&access_token).await {
         Ok(u) => u,
         Err(e) => {
             warn!("Yandex user fetch failed (non-fatal): {}", e);
@@ -502,7 +503,7 @@ pub async fn yandex_callback(
         }
     }
 
-    if let Some(response) = issue_tokens_or_2fa(&state, &yandex_id, &yandex_id, None, Some(&name)).await {
+    if let Some(response) = issue_tokens_or_2fa(&state, &yandex_id, &yandex_id, None, Some(&name), avatar.as_deref()).await {
         info!("Yandex OAuth success: user={}", name);
         return response;
     }
@@ -530,7 +531,7 @@ pub async fn github_callback(
         }
     };
 
-    let (gh_id, name, _avatar) = match fetch_github_user(&access_token).await {
+    let (gh_id, name, avatar) = match fetch_github_user(&access_token).await {
         Ok(u) => u,
         Err(e) => {
             warn!("GitHub user fetch failed (non-fatal): {}", e);
@@ -546,7 +547,7 @@ pub async fn github_callback(
         }
     }
 
-    if let Some(response) = issue_tokens_or_2fa(&state, &gh_id, &gh_id, None, Some(&name)).await {
+    if let Some(response) = issue_tokens_or_2fa(&state, &gh_id, &gh_id, None, Some(&name), avatar.as_deref()).await {
         info!("GitHub OAuth success: user={}", name);
         return response;
     }
@@ -568,7 +569,7 @@ pub async fn refresh_token(
         Ok(claims) => {
             // Blacklist old refresh token to prevent replay
             engine.blacklist_token(&req.refresh_token);
-            match engine.create_tokens(&claims.sub, &claims.account_id, claims.email.as_deref(), claims.name.as_deref(), claims.is_admin, claims.org_id.as_deref()) {
+            match engine.create_tokens(&claims.sub, &claims.account_id, claims.email.as_deref(), claims.name.as_deref(), claims.avatar_url.as_deref(), claims.is_admin, claims.org_id.as_deref()) {
                 Ok(tokens) => (StatusCode::OK, Json(json!({
                     "access_token": tokens.access_token,
                     "refresh_token": tokens.refresh_token,
@@ -609,6 +610,7 @@ pub async fn auth_me(
                 "account_id": claims.account_id,
                 "email": claims.email,
                 "name": claims.name,
+                "avatar_url": claims.avatar_url,
                 "sub": claims.sub,
                 "exp": claims.exp,
                 "active": true
