@@ -359,8 +359,8 @@ impl PlanRegistry {
                 name: "Starter".to_string(),
                 description: "For individuals and small projects".to_string(),
                 tier: 0,
-                price_kopecks: 49_900,
-                annual_price_kopecks: Some(499_000),
+                price_kopecks: 499_000,
+                annual_price_kopecks: Some(4_990_000),
                 annual_discount_percent: 17,
                 features: PlanFeatures {
                     shield: true,
@@ -392,8 +392,8 @@ impl PlanRegistry {
                 name: "Pro".to_string(),
                 description: "For growing teams".to_string(),
                 tier: 1,
-                price_kopecks: 399_900,
-                annual_price_kopecks: Some(3_839_040),
+                price_kopecks: 3_999_000,
+                annual_price_kopecks: Some(38_390_400),
                 annual_discount_percent: 20,
                 features: PlanFeatures {
                     shield: true,
@@ -430,8 +430,8 @@ impl PlanRegistry {
                 name: "Business".to_string(),
                 description: "For agencies and multi-cluster setups".to_string(),
                 tier: 2,
-                price_kopecks: 799_900,
-                annual_price_kopecks: Some(7_199_100),
+                price_kopecks: 7_999_000,
+                annual_price_kopecks: Some(71_991_000),
                 annual_discount_percent: 25,
                 features: PlanFeatures {
                     shield: true,
@@ -740,9 +740,9 @@ mod tests {
 
     #[test]
     fn test_format_price() {
-        assert_eq!(Plan::format_price(399_900), "3999 ₽");
+        assert_eq!(Plan::format_price(499_000), "4990 ₽");
         assert_eq!(Plan::format_price(0), "0 ₽");
-        assert_eq!(Plan::format_price(799_900), "7999 ₽");
+        assert_eq!(Plan::format_price(3_999_000), "39990 ₽");
     }
 
     #[test]
@@ -778,8 +778,8 @@ mod tests {
         let annual = pro.annual_price_kopecks.unwrap();
         let monthly_x12 = pro.price_kopecks * 12;
         assert!(annual < monthly_x12, "Annual should be cheaper than 12 months");
-        assert_eq!(annual, 3_839_040);
-        assert_eq!(monthly_x12, 4_798_800);
+        assert_eq!(annual, 38_390_400);
+        assert_eq!(monthly_x12, 47_988_000);
         assert_eq!(pro.annual_discount_percent, 20);
     }
 
@@ -787,8 +787,8 @@ mod tests {
     fn test_format_monthly() {
         let starter = make_registry().get("starter").unwrap();
         let pro = make_registry().get("professional").unwrap();
-        assert_eq!(starter.format_monthly(), "499 ₽");
-        assert_eq!(pro.format_monthly(), "3999 ₽");
+        assert_eq!(starter.format_monthly(), "4990 ₽");
+        assert_eq!(pro.format_monthly(), "39990 ₽");
     }
 
     #[test]
