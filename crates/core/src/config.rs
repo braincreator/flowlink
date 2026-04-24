@@ -431,7 +431,7 @@ pub struct OAuthProviderConfig {
 }
 
 fn default_access_ttl() -> i64 {
-    15
+    60
 }
 fn default_refresh_ttl() -> i64 {
     30
