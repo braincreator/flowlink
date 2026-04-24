@@ -12,18 +12,35 @@ use sqlx::PgPool;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct PlanLimits {
+    #[serde(default)]
     pub max_agents: u64,
+    #[serde(default)]
     pub max_users: u64,
+    #[serde(default)]
     pub audit_retention_days: u64,
+    #[serde(default)]
     pub api_rate_limit: u32,
+    #[serde(default)]
     pub api_rate_window_secs: u32,
+    #[serde(default)]
     pub max_custom_rules: u64,
+    #[serde(default)]
     pub max_policies: u64,
+    #[serde(default, deserialize_with = "deserialize_null_u64")]
     pub max_webhooks: u64,
+    #[serde(default)]
     pub approval_channels: Vec<String>,
+    #[serde(default)]
     pub siem_formats: Vec<String>,
+    #[serde(default)]
     pub allowed_shield_levels: Vec<String>,
+    #[serde(default)]
     pub support_tier: String,
+}
+
+fn deserialize_null_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    let opt: Option<u64> = serde::Deserialize::deserialize(d)?;
+    Ok(opt.unwrap_or_default())
 }
 
 /// Plan features stored as JSONB (object with boolean/string fields)
