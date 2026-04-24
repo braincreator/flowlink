@@ -535,6 +535,13 @@ pub async fn subscribe(
         }))).into_response(),
     };
 
+    // Enterprise plan requires manual setup — no self-service checkout
+    if plan.id == "enterprise" {
+        return (StatusCode::BAD_REQUEST, Json(json!({
+            "error": "Enterprise plan requires manual setup. Please contact admin@flow-masters.ru for custom pricing and onboarding."
+        }))).into_response();
+    }
+
     // 54-ФЗ: require email or phone for receipt
     let customer_email = body.customer_email.clone().or({
         // Try to get email from account DB
