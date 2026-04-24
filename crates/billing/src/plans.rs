@@ -127,10 +127,10 @@ static FEATURE_MIN_TIER: &[(&str, &str, u32)] = &[
     ("audit_log", "Starter", 0),
     ("approval", "Professional", 1),
     ("rbac", "Professional", 1),
-    ("webhooks", "Professional", 1),
+    ("webhooks", "Starter", 0),
     ("siem_export", "Professional", 1),
-    ("pattern_learning", "Scale", 2),
-    ("sso", "Enterprise", 3),
+    ("pattern_learning", "Pro", 1),
+    ("sso", "Business", 2),
     ("on_premise", "Enterprise", 3),
 ];
 
@@ -357,11 +357,11 @@ impl PlanRegistry {
             plans.insert(PlanId::Starter.as_str().to_string(), Plan {
                 id: PlanId::Starter.as_str().to_string(),
                 name: "Starter".to_string(),
-                description: "Free forever for 1 agent".to_string(),
+                description: "For individuals and small projects".to_string(),
                 tier: 0,
-                price_kopecks: 0,
-                annual_price_kopecks: None,
-                annual_discount_percent: 0,
+                price_kopecks: 49_900,
+                annual_price_kopecks: Some(499_000),
+                annual_discount_percent: 17,
                 features: PlanFeatures {
                     shield: true,
                     shield_level: "basic".to_string(),
@@ -369,74 +369,35 @@ impl PlanRegistry {
                     policy_engine: true,
                     e2ee: true,
                     audit_log: true,
+                    webhooks: true,
                     ..Default::default()
                 },
                 limits: PlanLimits {
-                    max_agents: 1,
-                    max_users: 1,
-                    audit_retention_days: 30,
-                    api_rate_limit: 100,
+                    max_agents: 2,
+                    max_users: 2,
+                    audit_retention_days: 14,
+                    api_rate_limit: 180,
                     api_rate_window_secs: 60,
-                    max_custom_rules: 3,
-                    max_policies: 1,
+                    approval_channels: vec!["telegram".to_string()],
                     support_tier: "community".to_string(),
                     ..Default::default()
                 },
                 available: true,
                 legacy: false,
-                trial_days: None,
+                trial_days: Some(14),
                 billing_period: "month".to_string(),
             });
             plans.insert(PlanId::Professional.as_str().to_string(), Plan {
                 id: PlanId::Professional.as_str().to_string(),
-                name: "Professional".to_string(),
-                description: "For small SaaS teams".to_string(),
+                name: "Pro".to_string(),
+                description: "For growing teams".to_string(),
                 tier: 1,
-                price_kopecks: 199_000,
-                annual_price_kopecks: Some(1_910_400),
+                price_kopecks: 399_900,
+                annual_price_kopecks: Some(3_839_040),
                 annual_discount_percent: 20,
                 features: PlanFeatures {
                     shield: true,
                     shield_level: "advanced".to_string(),
-                    mcp_gateway: true,
-                    policy_engine: true,
-                    approval: true,
-                    rbac: true,
-                    e2ee: true,
-                    audit_log: true,
-                    webhooks: true,
-                    siem_export: true,
-                    ..Default::default()
-                },
-                limits: PlanLimits {
-                    max_agents: 5,
-                    max_users: 5,
-                    audit_retention_days: 60,
-                    api_rate_limit: 500,
-                    api_rate_window_secs: 60,
-                    max_custom_rules: 50,
-                    max_policies: 5,
-                    approval_channels: vec!["telegram".to_string()],
-                    siem_formats: vec!["json".to_string()],
-                    support_tier: "email".to_string(),
-                    ..Default::default()
-                },
-                available: true,
-                legacy: false,
-                trial_days: None,
-                billing_period: "month".to_string(),
-            });
-            plans.insert(PlanId::Scale.as_str().to_string(), Plan {
-                id: PlanId::Scale.as_str().to_string(),
-                name: "Scale".to_string(),
-                description: "For agencies and multi-cluster setups".to_string(),
-                tier: 2,
-                price_kopecks: 499_000,
-                annual_price_kopecks: Some(4_790_400),
-                annual_discount_percent: 20,
-                features: PlanFeatures {
-                    shield: true,
-                    shield_level: "full".to_string(),
                     mcp_gateway: true,
                     policy_engine: true,
                     approval: true,
@@ -449,9 +410,48 @@ impl PlanRegistry {
                     ..Default::default()
                 },
                 limits: PlanLimits {
-                    max_agents: 25,
+                    max_agents: 10,
                     max_users: 10,
                     audit_retention_days: 90,
+                    api_rate_limit: 500,
+                    api_rate_window_secs: 60,
+                    approval_channels: vec!["telegram".to_string(), "email".to_string()],
+                    siem_formats: vec!["json".to_string()],
+                    support_tier: "email".to_string(),
+                    ..Default::default()
+                },
+                available: true,
+                legacy: false,
+                trial_days: Some(14),
+                billing_period: "month".to_string(),
+            });
+            plans.insert(PlanId::Scale.as_str().to_string(), Plan {
+                id: PlanId::Scale.as_str().to_string(),
+                name: "Business".to_string(),
+                description: "For agencies and multi-cluster setups".to_string(),
+                tier: 2,
+                price_kopecks: 799_900,
+                annual_price_kopecks: Some(7_199_100),
+                annual_discount_percent: 25,
+                features: PlanFeatures {
+                    shield: true,
+                    shield_level: "full".to_string(),
+                    mcp_gateway: true,
+                    policy_engine: true,
+                    approval: true,
+                    rbac: true,
+                    pattern_learning: true,
+                    e2ee: true,
+                    audit_log: true,
+                    webhooks: true,
+                    siem_export: true,
+                    sso: true,
+                    ..Default::default()
+                },
+                limits: PlanLimits {
+                    max_agents: 50,
+                    max_users: 50,
+                    audit_retention_days: 365,
                     api_rate_limit: 2000,
                     api_rate_window_secs: 60,
                     approval_channels: vec!["telegram".to_string(), "email".to_string(), "slack".to_string()],
@@ -566,7 +566,7 @@ mod tests {
         assert!(!starter.features.approval);
         assert!(!starter.features.rbac);
         assert!(!starter.features.pattern_learning);
-        assert!(!starter.features.webhooks);
+        assert!(starter.features.webhooks);
         assert!(!starter.features.sso);
     }
 
@@ -577,7 +577,7 @@ mod tests {
         assert!(pro.features.rbac);
         assert!(pro.features.webhooks);
         assert!(pro.features.siem_export);
-        assert!(!pro.features.pattern_learning);
+        assert!(pro.features.pattern_learning);
         assert!(!pro.features.sso);
     }
 
@@ -585,7 +585,7 @@ mod tests {
     fn test_scale_features() {
         let scale = make_registry().get("scale").unwrap();
         assert!(scale.features.pattern_learning);
-        assert!(!scale.features.sso);
+        assert!(scale.features.sso);
         assert!(!scale.features.on_premise);
     }
 
@@ -595,15 +595,16 @@ mod tests {
         assert!(ent.features.sso);
         assert!(ent.features.on_premise);
         assert!(ent.features.pattern_learning);
+        assert!(ent.features.webhooks);
     }
 
     #[test]
     fn test_starter_limits() {
         let starter = make_registry().get("starter").unwrap();
-        assert_eq!(starter.limits.max_agents, 1);
-        assert_eq!(starter.limits.max_users, 1);
-        assert_eq!(starter.limits.max_custom_rules, 3);
-        assert_eq!(starter.limits.max_policies, 1);
+        assert_eq!(starter.limits.max_agents, 2);
+        assert_eq!(starter.limits.max_users, 2);
+        assert_eq!(starter.limits.max_custom_rules, 0);
+        assert_eq!(starter.limits.max_policies, 0);
         assert_eq!(starter.limits.max_webhooks, 0);
         assert_eq!(starter.limits.support_tier, "community");
     }
@@ -611,9 +612,9 @@ mod tests {
     #[test]
     fn test_professional_limits() {
         let pro = make_registry().get("professional").unwrap();
-        assert_eq!(pro.limits.max_agents, 5);
-        assert_eq!(pro.limits.max_users, 5);
-        assert_eq!(pro.limits.max_webhooks, 3);
+        assert_eq!(pro.limits.max_agents, 10);
+        assert_eq!(pro.limits.max_users, 10);
+        assert_eq!(pro.limits.max_webhooks, 0);
         assert_eq!(pro.limits.support_tier, "email");
     }
 
@@ -654,12 +655,12 @@ mod tests {
     #[test]
     fn test_check_limit_exceeded() {
         let starter = make_registry().get("starter").unwrap();
-        let err = starter.check_limit("max_agents", 1).unwrap_err();
+        let err = starter.check_limit("max_agents", 2).unwrap_err();
         match err {
             PlanGateError::LimitExceeded { limit, current, max } => {
                 assert_eq!(limit, "max_agents");
-                assert_eq!(current, 1);
-                assert_eq!(max, 1);
+                assert_eq!(current, 2);
+                assert_eq!(max, 2);
             }
             _ => panic!("Wrong error type"),
         }
@@ -692,8 +693,8 @@ mod tests {
 
         // Features are NOT identical — that's the whole point
         assert_ne!(starter.features.approval, pro.features.approval);
-        assert_ne!(pro.features.pattern_learning, scale.features.pattern_learning);
-        assert_ne!(scale.features.sso, ent.features.sso);
+        assert_ne!(starter.features.pattern_learning, pro.features.pattern_learning);
+        assert_ne!(scale.features.on_premise, ent.features.on_premise);
     }
 
     #[test]
@@ -739,9 +740,9 @@ mod tests {
 
     #[test]
     fn test_format_price() {
-        assert_eq!(Plan::format_price(199_000), "1990 ₽");
+        assert_eq!(Plan::format_price(399_900), "3999 ₽");
         assert_eq!(Plan::format_price(0), "0 ₽");
-        assert_eq!(Plan::format_price(499_000), "4990 ₽");
+        assert_eq!(Plan::format_price(799_900), "7999 ₽");
     }
 
     #[test]
@@ -777,6 +778,8 @@ mod tests {
         let annual = pro.annual_price_kopecks.unwrap();
         let monthly_x12 = pro.price_kopecks * 12;
         assert!(annual < monthly_x12, "Annual should be cheaper than 12 months");
+        assert_eq!(annual, 3_839_040);
+        assert_eq!(monthly_x12, 4_798_800);
         assert_eq!(pro.annual_discount_percent, 20);
     }
 
@@ -784,8 +787,8 @@ mod tests {
     fn test_format_monthly() {
         let starter = make_registry().get("starter").unwrap();
         let pro = make_registry().get("professional").unwrap();
-        assert_eq!(starter.format_monthly(), "0 ₽");
-        assert_eq!(pro.format_monthly(), "1990 ₽");
+        assert_eq!(starter.format_monthly(), "499 ₽");
+        assert_eq!(pro.format_monthly(), "3999 ₽");
     }
 
     #[test]
