@@ -40,6 +40,8 @@ pub struct ConfigReloader {
     metrics: Arc<Metrics>,
     /// Reload count for this session.
     reload_count: Arc<std::sync::atomic::AtomicU64>,
+    /// Rate limits config (hot-reloadable tier overrides).
+    rate_limits_config: Arc<std::sync::RwLock<crate::rate_limiter::RateLimitsConfig>>,
 }
 
 /// Response returned by reload operations.
@@ -69,6 +71,7 @@ impl ConfigReloader {
         config: Arc<RwLock<RelayConfig>>,
         handler: Arc<RelayHandler>,
         metrics: Arc<Metrics>,
+        rate_limits_config: Arc<std::sync::RwLock<crate::rate_limiter::RateLimitsConfig>>,
     ) -> Self {
         Self {
             config_path,
@@ -76,6 +79,7 @@ impl ConfigReloader {
             handler,
             metrics,
             reload_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            rate_limits_config,
         }
     }
 
@@ -164,6 +168,14 @@ impl ConfigReloader {
         {
             let mut cfg = self.config.write().await;
             *cfg = new_config.clone();
+        }
+
+        // Update rate limits from config overrides
+        {
+            let new_rate_limits = crate::rate_limiter::RateLimitsConfig::from_map(&new_config.rate_limits);
+            if let Ok(mut rl) = self.rate_limits_config.write() {
+                *rl = new_rate_limits;
+            }
         }
 
         // Update metrics

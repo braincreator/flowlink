@@ -170,6 +170,7 @@ impl Relay {
 
         // Config hot-reload (optional — requires config path)
         let metrics = Arc::new(metrics::Metrics::new());
+        let rate_limits_config = Arc::new(std::sync::RwLock::new(crate::rate_limiter::RateLimitsConfig::default()));
         let config_reloader = if let Some(config_path) = &self.config_path {
             if config_path.exists() {
                 let shared_config = Arc::new(RwLock::new(self.config.clone()));
@@ -178,6 +179,7 @@ impl Relay {
                     shared_config,
                     handler.clone(),
                     metrics.clone(),
+                    rate_limits_config.clone(),
                 ));
                 // Start file watcher in background
                 match reloader.clone().start_watcher() {
@@ -289,6 +291,7 @@ impl Relay {
             rbac: Arc::new(crate::rbac_manager::RbacManager::new()),
             auth_rate_limiter: Arc::new(crate::auth_rate_limiter::AuthRateLimiter::new()),
             tiered_rate_limiter: Arc::new(crate::rate_limiter::TieredRateLimiter::new()),
+            rate_limits_config: rate_limits_config.clone(),
             key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)), // 100 req/min per key
             saml_config: None,
             rusiem_config: None,

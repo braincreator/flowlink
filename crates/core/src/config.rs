@@ -348,6 +348,11 @@ pub struct RelayConfig {
     /// CORS allowed origins. Empty or ["*"] = allow all.
     #[serde(default)]
     pub cors_allowed_origins: Vec<String>,
+    /// Rate limit overrides. Keys like "free_api_rpm", "pro_auth_5m", etc.
+    /// All optional — missing values use built-in tier defaults.
+    /// Hot-reloadable via config file.
+    #[serde(default)]
+    pub rate_limits: std::collections::HashMap<String, u32>,
 }
 
 impl RelayConfig {

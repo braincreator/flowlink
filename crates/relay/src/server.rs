@@ -68,6 +68,8 @@ pub struct AppState {
     pub rbac: Arc<crate::rbac_manager::RbacManager>,
     pub auth_rate_limiter: Arc<crate::auth_rate_limiter::AuthRateLimiter>,
     pub tiered_rate_limiter: Arc<crate::rate_limiter::TieredRateLimiter>,
+    /// Hot-reloadable rate limit tier overrides.
+    pub rate_limits_config: Arc<std::sync::RwLock<crate::rate_limiter::RateLimitsConfig>>,
     pub key_rate_limiter: Arc<crate::api_keys::KeyRateLimiter>,
     pub saml_config: Option<Arc<tokio::sync::Mutex<crate::saml::SamlConfig>>>,
     pub rusiem_config: Option<Arc<tokio::sync::RwLock<crate::rusiem::RusiemConfig>>>,

@@ -2,6 +2,7 @@
 // Replaces the old AuthRateLimiter with a comprehensive sliding-window system.
 
 use dashmap::DashMap;
+use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -38,6 +39,108 @@ pub const PRO_TIER: RateLimitTier = RateLimitTier {
     email_change_per_hour: 10,
     invite_per_hour: 100,
 };
+
+pub const ENTERPRISE_TIER: RateLimitTier = RateLimitTier {
+    api_requests_per_min: 5000,
+    auth_attempts_per_5min: 60,
+    auth_attempts_per_hour: 500,
+    email_change_per_hour: 20,
+    invite_per_hour: 500,
+};
+
+/// Config-file overrides for rate limits per plan tier.
+/// All fields optional — missing values use built-in tier defaults.
+/// Hot-reloadable: changes take effect on config reload.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RateLimitsConfig {
+    /// Free plan: API requests per minute (default: 180)
+    pub free_api_rpm: Option<u32>,
+    /// Free plan: auth attempts per 5 min (default: 10)
+    pub free_auth_5m: Option<u32>,
+    /// Free plan: auth attempts per hour (default: 30)
+    pub free_auth_1h: Option<u32>,
+    /// Starter plan: API requests per minute (default: 500)
+    pub starter_api_rpm: Option<u32>,
+    /// Starter plan: auth attempts per 5 min (default: 15)
+    pub starter_auth_5m: Option<u32>,
+    /// Starter plan: auth attempts per hour (default: 60)
+    pub starter_auth_1h: Option<u32>,
+    /// Pro plan: API requests per minute (default: 2000)
+    pub pro_api_rpm: Option<u32>,
+    /// Pro plan: auth attempts per 5 min (default: 30)
+    pub pro_auth_5m: Option<u32>,
+    /// Pro plan: auth attempts per hour (default: 200)
+    pub pro_auth_1h: Option<u32>,
+    /// Enterprise plan: API requests per minute (default: 5000)
+    pub enterprise_api_rpm: Option<u32>,
+    /// Enterprise plan: auth attempts per 5 min (default: 60)
+    pub enterprise_auth_5m: Option<u32>,
+    /// Enterprise plan: auth attempts per hour (default: 500)
+    pub enterprise_auth_1h: Option<u32>,
+    /// Email change limit per hour — applied to all tiers (default: 3)
+    pub email_change_per_hour: Option<u32>,
+    /// Org invite limit per hour — applied to all tiers (default: 5)
+    pub invite_per_hour: Option<u32>,
+}
+
+impl RateLimitsConfig {
+    /// Build from a generic HashMap (as stored in RelayConfig.rate_limits).
+    pub fn from_map(map: &std::collections::HashMap<String, u32>) -> Self {
+        Self {
+            free_api_rpm: map.get("free_api_rpm").copied(),
+            free_auth_5m: map.get("free_auth_5m").copied(),
+            free_auth_1h: map.get("free_auth_1h").copied(),
+            starter_api_rpm: map.get("starter_api_rpm").copied(),
+            starter_auth_5m: map.get("starter_auth_5m").copied(),
+            starter_auth_1h: map.get("starter_auth_1h").copied(),
+            pro_api_rpm: map.get("pro_api_rpm").copied(),
+            pro_auth_5m: map.get("pro_auth_5m").copied(),
+            pro_auth_1h: map.get("pro_auth_1h").copied(),
+            enterprise_api_rpm: map.get("enterprise_api_rpm").copied(),
+            enterprise_auth_5m: map.get("enterprise_auth_5m").copied(),
+            enterprise_auth_1h: map.get("enterprise_auth_1h").copied(),
+            email_change_per_hour: map.get("email_change_per_hour").copied(),
+            invite_per_hour: map.get("invite_per_hour").copied(),
+        }
+    }
+    /// Build tiers from config overrides, falling back to built-in defaults.
+    pub fn free_tier(&self) -> RateLimitTier {
+        RateLimitTier {
+            api_requests_per_min: self.free_api_rpm.unwrap_or(FREE_TIER.api_requests_per_min),
+            auth_attempts_per_5min: self.free_auth_5m.unwrap_or(FREE_TIER.auth_attempts_per_5min),
+            auth_attempts_per_hour: self.free_auth_1h.unwrap_or(FREE_TIER.auth_attempts_per_hour),
+            email_change_per_hour: self.email_change_per_hour.unwrap_or(FREE_TIER.email_change_per_hour),
+            invite_per_hour: self.invite_per_hour.unwrap_or(FREE_TIER.invite_per_hour),
+        }
+    }
+    pub fn starter_tier(&self) -> RateLimitTier {
+        RateLimitTier {
+            api_requests_per_min: self.starter_api_rpm.unwrap_or(STARTER_TIER.api_requests_per_min),
+            auth_attempts_per_5min: self.starter_auth_5m.unwrap_or(STARTER_TIER.auth_attempts_per_5min),
+            auth_attempts_per_hour: self.starter_auth_1h.unwrap_or(STARTER_TIER.auth_attempts_per_hour),
+            email_change_per_hour: self.email_change_per_hour.unwrap_or(STARTER_TIER.email_change_per_hour),
+            invite_per_hour: self.invite_per_hour.unwrap_or(STARTER_TIER.invite_per_hour),
+        }
+    }
+    pub fn pro_tier(&self) -> RateLimitTier {
+        RateLimitTier {
+            api_requests_per_min: self.pro_api_rpm.unwrap_or(PRO_TIER.api_requests_per_min),
+            auth_attempts_per_5min: self.pro_auth_5m.unwrap_or(PRO_TIER.auth_attempts_per_5min),
+            auth_attempts_per_hour: self.pro_auth_1h.unwrap_or(PRO_TIER.auth_attempts_per_hour),
+            email_change_per_hour: self.email_change_per_hour.unwrap_or(PRO_TIER.email_change_per_hour),
+            invite_per_hour: self.invite_per_hour.unwrap_or(PRO_TIER.invite_per_hour),
+        }
+    }
+    pub fn enterprise_tier(&self) -> RateLimitTier {
+        RateLimitTier {
+            api_requests_per_min: self.enterprise_api_rpm.unwrap_or(ENTERPRISE_TIER.api_requests_per_min),
+            auth_attempts_per_5min: self.enterprise_auth_5m.unwrap_or(ENTERPRISE_TIER.auth_attempts_per_5min),
+            auth_attempts_per_hour: self.enterprise_auth_1h.unwrap_or(ENTERPRISE_TIER.auth_attempts_per_hour),
+            email_change_per_hour: self.email_change_per_hour.unwrap_or(ENTERPRISE_TIER.email_change_per_hour),
+            invite_per_hour: self.invite_per_hour.unwrap_or(ENTERPRISE_TIER.invite_per_hour),
+        }
+    }
+}
 
 /// Category of rate-limited operation.
 #[derive(Debug, Clone, Copy)]

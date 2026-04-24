@@ -232,7 +232,15 @@ pub async fn signup(
     let now = Utc::now();
     let trial_ends = now + chrono::Duration::days(14);
 
-    let relay_url = "wss://relay.flow-masters.ru:9093".to_string();
+    let relay_url = std::env::var("AGENT_RELAY_URL")
+        .unwrap_or_else(|_| {
+            let base = crate::server_base_url();
+            // Derive relay URL from server URL: https://flowlink.domain → wss://relay.domain:9093
+            base.replace("https://", "wss://")
+                .replace("http://", "ws://")
+                .replace("flowlink.", "relay.")
+        });
+    let relay_url = if relay_url.contains(':') { relay_url } else { format!("{}:9093", relay_url) };
 
     (
         StatusCode::OK,
