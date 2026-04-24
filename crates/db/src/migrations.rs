@@ -796,6 +796,27 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             UPDATE organizations SET plan_id = 'professional' WHERE plan_id = 'pro';
             "#,
         ),
+        (
+            "045_secret_mappings",
+            r#"
+            CREATE TABLE IF NOT EXISTS secret_mappings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                org_id UUID NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+                secret_id UUID NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
+                env_var TEXT NOT NULL,
+                server_tags TEXT[] DEFAULT '{}',
+                command_pattern TEXT,
+                approval_required BOOLEAN NOT NULL DEFAULT false,
+                enabled BOOLEAN NOT NULL DEFAULT true,
+                created_by TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(org_id, secret_id, env_var)
+            );
+            CREATE INDEX IF NOT EXISTS idx_secret_mappings_org ON secret_mappings(org_id);
+            CREATE INDEX IF NOT EXISTS idx_secret_mappings_secret ON secret_mappings(secret_id);
+            "#,
+        ),
     ]
 }
 
@@ -806,7 +827,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 44);
+        assert_eq!(migrations.len(), 45);
     }
 
     #[test]
@@ -857,6 +878,7 @@ mod tests {
             "042_compliance_reports",
             "043_plans_features_enhanced",
             "044_plans_seed_v2",
+            "045_secret_mappings",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(

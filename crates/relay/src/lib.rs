@@ -629,5 +629,6 @@ pub mod agent_health_api;
 pub mod webhook_delivery;
 pub mod sessions_api;
 pub mod secrets_api;
+pub mod secret_mappings_api;
 pub mod compliance_api;
 pub mod fstek;

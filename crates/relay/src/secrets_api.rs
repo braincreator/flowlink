@@ -12,7 +12,7 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use crate::server::AppState;
 use flowlink_core::rbac::Permission;
 
-fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
+pub fn gp(state: &AppState) -> Result<&sqlx::PgPool, (StatusCode, String)> {
     state.db.as_ref().map(|db| db.pool()).ok_or((StatusCode::SERVICE_UNAVAILABLE, "Database not configured".to_string()))
 }
 
@@ -98,7 +98,7 @@ fn encrypt(plaintext: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
     Ok((encrypted, nonce_bytes.to_vec()))
 }
 
-fn decrypt(encrypted: &[u8], nonce: &[u8]) -> Result<String, String> {
+pub fn decrypt(encrypted: &[u8], nonce: &[u8]) -> Result<String, String> {
     let key = get_encryption_key()?;
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Cipher init: {}", e))?;
     let nonce = Nonce::from_slice(nonce);

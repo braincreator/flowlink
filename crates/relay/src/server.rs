@@ -2319,6 +2319,10 @@ pub fn build_router(state: AppState) -> Router {
         // Secrets Vault
         .route("/api/v1/secrets", axum::routing::get(crate::secrets_api::list_secrets).post(crate::secrets_api::create_secret))
         .route("/api/v1/secrets/{id}", axum::routing::get(crate::secrets_api::get_secret_value).delete(crate::secrets_api::delete_secret).patch(crate::secrets_api::update_secret))
+        // Secret Mappings
+        .route("/api/v1/secret-mappings", axum::routing::get(crate::secret_mappings_api::list_mappings).post(crate::secret_mappings_api::create_mapping))
+        .route("/api/v1/secret-mappings/{id}", axum::routing::patch(crate::secret_mappings_api::update_mapping).delete(crate::secret_mappings_api::delete_mapping))
+        .route("/api/v1/secrets/inject", axum::routing::post(crate::secret_mappings_api::inject_secrets))
         // Compliance Reports
         .route("/api/v1/compliance/reports", axum::routing::get(crate::compliance_api::list_reports).post(crate::compliance_api::generate_report))
         .route("/api/v1/compliance/reports/{id}", axum::routing::get(crate::compliance_api::get_report).delete(crate::compliance_api::delete_report))

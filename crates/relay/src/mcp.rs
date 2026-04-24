@@ -447,12 +447,31 @@ async fn mcp_exec(state: &AppState, id: Option<Value>, args: &Value, identity: O
     let timeout = timeout.clamp(1, 600); // max 10 minutes
     let workdir = args.get("workdir").and_then(|v| v.as_str()).map(String::from);
 
+    // Secret injection: check mappings and inject env vars before sending to agent
+    let (injected_env, secrets_injected, _requires_approval, resolved_command) =
+        if let (Some(db), Some(ident)) = (&state.db, identity) {
+            let agent_labels = state.pool.get(&resolved).map(|a| a.labels).unwrap_or_default();
+            crate::secret_mappings_api::inject_for_exec(
+                db.pool(),
+                Some(&ident.org_id),
+                &command,
+                &agent_labels,
+                &resolved,
+            ).await
+        } else {
+            (std::collections::HashMap::new(), vec![], vec![], command.clone())
+        };
+
+    if !secrets_injected.is_empty() {
+        log::info!("🔐 Secret injection: {} secrets for agent {}", secrets_injected.len(), resolved);
+    }
+
     let msg = flowlink_core::Message::new(flowlink_core::MessageType::ExecRequest)
         .with_agent_id(&resolved)
         .with_payload(flowlink_core::ExecRequestPayload {
-            command,
+            command: resolved_command,
             shell: None,
-            env: None,
+            env: if injected_env.is_empty() { None } else { Some(injected_env) },
             dir: workdir,
             timeout_sec: timeout,
             request_id: flowlink_core::request_id(),
