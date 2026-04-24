@@ -203,7 +203,7 @@ export function Layout() {
         {/* Main area */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Header */}
-          <header className="flex h-16 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)]/50 backdrop-blur-md px-6 lg:pl-6 pl-14">
+          <header className="flex h-16 shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6 lg:pl-6 pl-14">
             <h1 className="text-lg font-semibold">{title}</h1>
             <div className="flex items-center gap-3">
               <LanguageToggle />
@@ -222,7 +222,7 @@ export function Layout() {
           </header>
 
           {/* Content */}
-          <main className="flex-1 overflow-y-auto p-6">
+          <main className="flex-1 overflow-y-auto p-6 pt-20">
             <Outlet />
           </main>
         </div>

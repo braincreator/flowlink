@@ -65,7 +65,7 @@ export default function App() {
   return (
     <NotificationProvider>
     <ToastProvider>
-    <BrowserRouter>
+    <BrowserRouter basename="/dashboard">
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route element={<Layout />}>

@@ -19,6 +19,7 @@ interface ApiPlan {
     max_hosts: number;
     max_users: number;
     retention_days: number;
+    backup_storage_mb?: number;
   };
 }
 
@@ -43,9 +44,11 @@ function mapPlan(p: ApiPlan, index: number): Plan {
     if (p.limits?.backup_storage_mb === 0) {
       displayFeatures.push("Безлимитное облако для бэкапов");
     } else if (p.limits?.backup_storage_mb && p.limits.backup_storage_mb > 1024) {
-      displayFeatures.push(`${p.limits.backup_storage_mb / 1024} ГБ облако для бэкапов`);
+      const gbLabel = [p.limits.backup_storage_mb / 1024, ' ГБ облако для бэкапов'].join('');
+      displayFeatures.push(gbLabel);
     } else if (p.limits?.backup_storage_mb && p.limits.backup_storage_mb > 0) {
-      displayFeatures.push(`${p.limits.backup_storage_mb} МБ облако для бэкапов`);
+      const mbLabel = [p.limits.backup_storage_mb, ' МБ облако для бэкапов'].join('');
+      displayFeatures.push(mbLabel);
     }
   }
   // Add tech features (now identical across plans)
