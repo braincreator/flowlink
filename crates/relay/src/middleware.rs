@@ -13,6 +13,32 @@ use std::time::Instant;
 
 use crate::auth::AuthManager;
 use crate::server::AppState;
+
+/// Extract JWT token from request: cookie (fl_access_token) or Authorization: Bearer header
+fn extract_token_from_request(req: &Request) -> Option<String> {
+    // 1. Try cookie first (httpOnly, most secure)
+    if let Some(cookie_header) = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()) {
+        for cookie in cookie_header.split(';') {
+            let cookie = cookie.trim();
+            if cookie.starts_with("fl_access_token=") {
+                let token = cookie.strip_prefix("fl_access_token=")?.trim().to_string();
+                if !token.is_empty() {
+                    return Some(token);
+                }
+            }
+        }
+    }
+    // 2. Fallback: Authorization: Bearer header (for API keys, programmatic access, mobile apps)
+    if let Some(auth_header) = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
+        if let Some(token) = auth_header.strip_prefix("Bearer ") {
+            let token = token.trim().to_string();
+            if !token.is_empty() {
+                return Some(token);
+            }
+        }
+    }
+    None
+}
 use crate::ratelimit::RateLimiter;
 use crate::rbac_manager::RbacManager;
 
@@ -142,16 +168,12 @@ pub async fn jwt_auth(
         }
     };
 
-    let auth_header = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok());
-    let token = match auth_header {
-        None => return json_error(StatusCode::UNAUTHORIZED, "token_missing", "Missing Authorization header"),
-        Some(h) => match h.strip_prefix("Bearer ") {
-            Some(t) => t,
-            None => return json_error(StatusCode::UNAUTHORIZED, "token_invalid", "Invalid Authorization format"),
-        },
+    let token = match extract_token_from_request(&req) {
+        Some(t) => t,
+        None => return json_error(StatusCode::UNAUTHORIZED, "token_missing", "Missing Authorization header or cookie"),
     };
 
-    match auth_engine.validate_access_token(token) {
+    match auth_engine.validate_access_token(&token) {
         Ok(claims) => {
             req.extensions_mut().insert(AccountId(claims.account_id.clone()));
             req.extensions_mut().insert(claims.clone());
@@ -169,7 +191,7 @@ pub async fn jwt_auth(
             if token.starts_with("flk_") {
                 if let Some(ref db_opt) = state.db {
                     let pool = db_opt.pool();
-                    match crate::api_keys::ApiKeyRepo::validate(pool, token).await {
+                    match crate::api_keys::ApiKeyRepo::validate(pool, &token).await {
                         Ok(Some(identity)) => {
                             // Create synthetic Claims from API key identity
                             let is_admin = matches!(identity.role, crate::api_keys::ApiKeyRole::Admin);

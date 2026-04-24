@@ -316,13 +316,21 @@ pub async fn switch_org(State(state): State<AppState>, AccountIdExtractor(accoun
     let user_id = &member.account_id; // fallback
 
     match engine.create_org_tokens(user_id, &account_id, None, None, None, false, &org_id.to_string(), &member.role) {
-        Ok(tokens) => Json(json!({
-            "access_token": tokens.access_token,
-            "refresh_token": tokens.refresh_token,
-            "expires_in": tokens.expires_in,
-            "token_type": "Bearer",
-            "org_id": org_id,
-        })).into_response(),
+        Ok(tokens) => {
+            let mut response = Json(json!({
+                "ok": true,
+                "expires_in": tokens.expires_in,
+                "org_id": org_id,
+            })).into_response();
+            let hdrs = response.headers_mut();
+            if let Ok(v) = axum::http::HeaderValue::from_str(&format!("fl_access_token={}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600", tokens.access_token)) {
+                hdrs.insert(axum::http::header::SET_COOKIE, v);
+            }
+            if let Ok(v) = axum::http::HeaderValue::from_str(&format!("fl_refresh_token={}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000", tokens.refresh_token)) {
+                hdrs.insert(axum::http::header::SET_COOKIE, v);
+            }
+            response
+        }
         Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }
@@ -489,12 +497,20 @@ pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_i
 
     // Issue new tokens with org_id
     match engine.create_org_tokens(&account_id, &account_id, None, None, None, false, &org.org_id.to_string(), "owner") {
-        Ok(tokens) => Json(json!({
-            "org": json_row(&org),
-            "access_token": tokens.access_token,
-            "refresh_token": tokens.refresh_token,
-            "expires_in": tokens.expires_in,
-        })).into_response(),
+        Ok(tokens) => {
+            let mut response = Json(json!({
+                "org": json_row(&org),
+                "expires_in": tokens.expires_in,
+            })).into_response();
+            let hdrs = response.headers_mut();
+            if let Ok(v) = axum::http::HeaderValue::from_str(&format!("fl_access_token={}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600", tokens.access_token)) {
+                hdrs.insert(axum::http::header::SET_COOKIE, v);
+            }
+            if let Ok(v) = axum::http::HeaderValue::from_str(&format!("fl_refresh_token={}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000", tokens.refresh_token)) {
+                hdrs.insert(axum::http::header::SET_COOKIE, v);
+            }
+            response
+        }
         Err(_e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
     }
 }

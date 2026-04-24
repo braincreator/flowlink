@@ -2,7 +2,21 @@
 
 use axum::{
     extract::State,
-    response::IntoResponse,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+
+/// Helper: wrap a JSON response with httpOnly auth cookies
+fn json_with_cookies(status: StatusCode, body: serde_json::Value, access_token: &str, refresh_token: &str) -> Response {
+    let mut response = (status, Json(body)).into_response();
+    let hdrs = response.headers_mut();
+    let ac = format!("fl_access_token={}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600", access_token);
+    let rc = format!("fl_refresh_token={}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000", refresh_token);
+    if let Ok(v) = axum::http::HeaderValue::from_str(&ac) { hdrs.insert(axum::http::header::SET_COOKIE, v); }
+    if let Ok(v) = axum::http::HeaderValue::from_str(&rc) { hdrs.insert(axum::http::header::SET_COOKIE, v); }
+    response
+}
     http::StatusCode,
     Json,
 };
@@ -344,17 +358,14 @@ pub async fn change_email_confirm(
             Ok(tokens) => {
                 log::info!("✅ Email changed for {account_id} → {email}");
                 let _ = audit::log_event(pool, None, &account_id, "auth.email_changed", Some("account"), Some(&account_id), json!({"new_email": &email}), None).await;
-                return (StatusCode::OK, Json(json!({
+                return json_with_cookies(StatusCode::OK, json!({
                     "ok": true,
-                    "access_token": tokens.access_token,
-                    "refresh_token": tokens.refresh_token,
                     "expires_in": tokens.expires_in,
-                    "token_type": "Bearer",
                     "user": {
                         "account_id": account_id,
                         "email": email,
                     }
-                }))).into_response();
+                }), &tokens.access_token, &tokens.refresh_token);
             }
             Err(e) => {
                 log::warn!("JWT generation failed: {e}");
@@ -498,16 +509,14 @@ pub async fn verify_code(
                     }
                 }
 
-                return (StatusCode::OK, Json(json!({
-                    "access_token": tokens.access_token,
-                    "refresh_token": tokens.refresh_token,
+                return json_with_cookies(StatusCode::OK, json!({
+                    "ok": true,
                     "expires_in": tokens.expires_in,
-                    "token_type": "Bearer",
                     "user": {
                         "account_id": account_id,
                         "email": email,
                     }
-                }))).into_response();
+                }), &tokens.access_token, &tokens.refresh_token);
             }
             Err(e) => {
                 log::warn!("JWT generation failed: {e}");

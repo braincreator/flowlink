@@ -248,13 +248,48 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-fn dashboard_redirect(config: &RelayConfig, access_token: &str, refresh_token: &str) -> Redirect {
+/// Extract token from cookie (fl_access_token) or Authorization header
+fn extract_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    if let Some(cookie_header) = headers.get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok()) {
+        for cookie in cookie_header.split(';') {
+            let c = cookie.trim();
+            if let Some(t) = c.strip_prefix("fl_access_token=") {
+                let token = t.trim().to_string();
+                if !token.is_empty() { return Some(token); }
+            }
+        }
+    }
+    extract_bearer_token(headers).map(|t| t.to_string())
+}
+
+/// Build cookie-based auth response: Set-Cookie headers + redirect to dashboard
+fn auth_cookie_redirect(config: &RelayConfig, access_token: &str, refresh_token: &str) -> axum::response::Response {
+    use axum::http::header::{SET_COOKIE, LOCATION};
+    use axum::http::HeaderValue;
     let base = config.dashboard_url_or_public().to_string();
-    // Use fragment (#) to prevent token leakage in browser history, referrer, access logs
-    Redirect::temporary(&format!(
-        "{}/auth/callback#access_token={}&refresh_token={}",
-        base, access_token, refresh_token
-    ))
+    let is_https = base.starts_with("https://");
+    let secure_flag = if is_https { "; Secure" } else { "" };
+    let same_site = "; SameSite=Lax";
+    let path = "; Path=/";
+    // Access token: shorter max-age, HttpOnly prevents JS access
+    let access_cookie = format!(
+        "fl_access_token={}; HttpOnly{}{}{}; Max-Age=3600",
+        access_token, secure_flag, same_site, path
+    );
+    // Refresh token: longer max-age, HttpOnly
+    let refresh_cookie = format!(
+        "fl_refresh_token={}; HttpOnly{}{}{}; Max-Age=2592000",
+        refresh_token, secure_flag, same_site, path
+    );
+    let mut response = axum::response::Redirect::temporary(&format!("{}/auth/callback", base)).into_response();
+    let resp_headers = response.headers_mut();
+    if let Ok(val) = axum::http::HeaderValue::from_str(&access_cookie) {
+        resp_headers.insert(SET_COOKIE, val);
+    }
+    if let Ok(val) = axum::http::HeaderValue::from_str(&refresh_cookie) {
+        resp_headers.insert(SET_COOKIE, val);
+    }
+    response
 }
 
 // --------------------------------------------------------------------------- //
@@ -429,7 +464,7 @@ async fn issue_tokens_or_2fa(
     match engine.create_tokens(user_id, account_id, email, name, avatar_url, is_admin, org_id.as_deref()) {
         Ok(tokens) => {
             let config = state.config_reloader.as_ref()?.get_config().await;
-            Some(dashboard_redirect(&config, &tokens.access_token, &tokens.refresh_token).into_response())
+            Some(auth_cookie_redirect(&config, &tokens.access_token, &tokens.refresh_token))
         }
         Err(e) => {
             log::error!("JWT creation failed: {e}");
@@ -502,7 +537,7 @@ pub async fn vk_callback(
 
     // Fallback: redirect with provider access token
     info!("VK OAuth success (no AuthEngine, raw token)");
-    dashboard_redirect(&config, &access_token, "").into_response()
+    auth_cookie_redirect(&config, &access_token, "")
 }
 
 pub async fn yandex_callback(
@@ -545,7 +580,7 @@ pub async fn yandex_callback(
     }
 
     info!("Yandex OAuth success (no AuthEngine, raw token)");
-    dashboard_redirect(&config, &access_token, "").into_response()
+    auth_cookie_redirect(&config, &access_token, "")
 }
 
 pub async fn github_callback(
@@ -589,11 +624,12 @@ pub async fn github_callback(
     }
 
     info!("GitHub OAuth success (no AuthEngine, raw token)");
-    dashboard_redirect(&config, &access_token, "").into_response()
+    auth_cookie_redirect(&config, &access_token, "")
 }
 
 pub async fn refresh_token(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<RefreshTokenRequest>,
 ) -> impl IntoResponse {
     let engine = match &state.auth_engine {
@@ -601,17 +637,52 @@ pub async fn refresh_token(
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "auth not configured"}))).into_response(),
     };
 
-    match engine.validate_refresh_token(&req.refresh_token) {
+    // Extract refresh token from cookie or request body
+    let refresh_token = if !req.refresh_token.is_empty() {
+        req.refresh_token
+    } else if let Some(cookie_header) = headers.get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok()) {
+        cookie_header.split(';')
+            .find_map(|c| c.trim().strip_prefix("fl_refresh_token=").map(|t| t.trim().to_string()))
+            .unwrap_or_default()
+    } else {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "missing refresh token"}))).into_response();
+    };
+
+    if refresh_token.is_empty() {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "missing refresh token"}))).into_response();
+    }
+
+    match engine.validate_refresh_token(&refresh_token) {
         Ok(claims) => {
             // Blacklist old refresh token to prevent replay
-            engine.blacklist_token(&req.refresh_token);
+            engine.blacklist_token(&refresh_token);
             match engine.create_tokens(&claims.sub, &claims.account_id, claims.email.as_deref(), claims.name.as_deref(), claims.avatar_url.as_deref(), claims.is_admin, claims.org_id.as_deref()) {
-                Ok(tokens) => (StatusCode::OK, Json(json!({
-                    "access_token": tokens.access_token,
-                    "refresh_token": tokens.refresh_token,
-                    "expires_in": tokens.expires_in,
-                    "token_type": "Bearer"
-                }))).into_response(),
+                Ok(tokens) => {
+                    // Set new cookies
+                    let is_https = true; // production always HTTPS
+                    let secure_flag = if is_https { "; Secure" } else { "" };
+                    let access_cookie = format!(
+                        "fl_access_token={}; HttpOnly{}; SameSite=Lax; Path=/; Max-Age=3600",
+                        tokens.access_token, secure_flag
+                    );
+                    let refresh_cookie = format!(
+                        "fl_refresh_token={}; HttpOnly{}; SameSite=Lax; Path=/; Max-Age=2592000",
+                        tokens.refresh_token, secure_flag
+                    );
+                    let mut response = (StatusCode::OK, Json(json!({
+                        "ok": true,
+                        "expires_in": tokens.expires_in,
+                        "token_type": "cookie"
+                    }))).into_response();
+                    let hdrs = response.headers_mut();
+                    if let Ok(val) = axum::http::HeaderValue::from_str(&access_cookie) {
+                        hdrs.insert(axum::http::header::SET_COOKIE, val);
+                    }
+                    if let Ok(val) = axum::http::HeaderValue::from_str(&refresh_cookie) {
+                        hdrs.insert(axum::http::header::SET_COOKIE, val);
+                    }
+                    response
+                }
                 Err(e) => {
                     error!("Token refresh failed: {}", e);
                     (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "token creation failed"}))).into_response()
@@ -629,7 +700,7 @@ pub async fn auth_me(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let token = match extract_bearer_token(&headers) {
+    let token = match extract_token_from_headers(&headers) {
         Some(t) => t,
         None => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "missing authorization header"}))).into_response(),
     };
@@ -639,7 +710,7 @@ pub async fn auth_me(
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "auth not configured"}))).into_response(),
     };
 
-    match engine.validate_access_token(token) {
+    match engine.validate_access_token(&token) {
         Ok(mut claims) => {
             // If JWT has no org_id but user has an org, fill it from DB
             if claims.org_id.is_none() {
@@ -660,6 +731,7 @@ pub async fn auth_me(
                     "avatar_url": claims.avatar_url,
                     "sub": claims.sub,
                     "org_id": claims.org_id,
+                    "is_admin": claims.is_admin,
                     "exp": claims.exp,
                     "active": true
                 }
@@ -682,18 +754,32 @@ pub async fn logout(
         None => return (StatusCode::OK, Json(json!({"message": "Logged out"}))).into_response(),
     };
 
-    // Blacklist access token
-    if let Some(token) = extract_bearer_token(&headers) {
-        engine.blacklist_token(token);
+    // Blacklist tokens from cookie or header
+    if let Some(cookie_header) = headers.get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok()) {
+        for cookie in cookie_header.split(';') {
+            let c = cookie.trim();
+            if let Some(t) = c.strip_prefix("fl_access_token=") {
+                engine.blacklist_token(t.trim());
+            }
+            if let Some(t) = c.strip_prefix("fl_refresh_token=") {
+                engine.blacklist_token(t.trim());
+            }
+        }
     }
-
-    // Blacklist refresh token if provided
+    if let Some(token) = extract_bearer_token(&headers) {
+        engine.blacklist_token(&token);
+    }
     if let Some(refresh) = body.get("refresh_token") {
         engine.blacklist_token(refresh);
     }
 
     info!("User logged out");
-    (StatusCode::OK, Json(json!({"message": "Logged out successfully"}))).into_response()
+    // Clear cookies by setting Max-Age=0
+    let mut response = (StatusCode::OK, Json(json!({"message": "Logged out successfully"}))).into_response();
+    let hdrs = response.headers_mut();
+    hdrs.insert(axum::http::header::SET_COOKIE, axum::http::HeaderValue::from_static("fl_access_token=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"));
+    hdrs.insert(axum::http::header::SET_COOKIE, axum::http::HeaderValue::from_static("fl_refresh_token=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"));
+    response
 }
 
 /// DELETE /api/account - soft-delete (deactivate) account
@@ -701,7 +787,7 @@ pub async fn delete_account(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
-    let token = match extract_bearer_token(&headers) {
+    let token = match extract_token_from_headers(&headers) {
         Some(t) => t,
         None => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Missing auth"}))).into_response(),
     };
@@ -711,13 +797,13 @@ pub async fn delete_account(
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "Auth not configured"}))).into_response(),
     };
 
-    let claims = match engine.validate_access_token(token) {
+    let claims = match engine.validate_access_token(&token) {
         Ok(c) => c,
         Err(_) => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid token"}))).into_response(),
     };
 
     // Blacklist all tokens
-    engine.blacklist_token(token);
+    engine.blacklist_token(&token);
 
     let db = match &state.db {
         Some(db) => db,
@@ -752,12 +838,12 @@ pub async fn link_email(
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "Auth not configured"}))).into_response(),
     };
 
-    let token = match extract_bearer_token(&headers) {
+    let token = match extract_token_from_headers(&headers) {
         Some(t) => t,
         None => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Missing auth"}))).into_response(),
     };
 
-    let claims = match engine.validate_access_token(token) {
+    let claims = match engine.validate_access_token(&token) {
         Ok(c) => c,
         Err(_) => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid token"}))).into_response(),
     };
@@ -791,11 +877,11 @@ pub async fn list_sessions(
         Some(e) => e,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "Auth not configured"}))).into_response(),
     };
-    let token = match extract_bearer_token(&headers) {
+    let token = match extract_token_from_headers(&headers) {
         Some(t) => t,
         None => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Missing auth"}))).into_response(),
     };
-    let claims = match engine.validate_access_token(token) {
+    let claims = match engine.validate_access_token(&token) {
         Ok(c) => c,
         Err(_) => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid token"}))).into_response(),
     };
@@ -813,11 +899,11 @@ pub async fn revoke_session(
         Some(e) => e,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "Auth not configured"}))).into_response(),
     };
-    let token = match extract_bearer_token(&headers) {
+    let token = match extract_token_from_headers(&headers) {
         Some(t) => t,
         None => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Missing auth"}))).into_response(),
     };
-    let claims = match engine.validate_access_token(token) {
+    let claims = match engine.validate_access_token(&token) {
         Ok(c) => c,
         Err(_) => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid token"}))).into_response(),
     };
@@ -837,11 +923,11 @@ pub async fn revoke_other_sessions(
         Some(e) => e,
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "Auth not configured"}))).into_response(),
     };
-    let token = match extract_bearer_token(&headers) {
+    let token = match extract_token_from_headers(&headers) {
         Some(t) => t,
         None => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Missing auth"}))).into_response(),
     };
-    let claims = match engine.validate_access_token(token) {
+    let claims = match engine.validate_access_token(&token) {
         Ok(c) => c,
         Err(_) => return (StatusCode::UNAUTHORIZED, Json(json!({"error": "Invalid token"}))).into_response(),
     };
