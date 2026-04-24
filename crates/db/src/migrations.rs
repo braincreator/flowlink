@@ -769,22 +769,22 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
 
             INSERT INTO plans (id, name, description, tier, price_kopecks, annual_price_kopecks, period, currency, limits, features, is_active, sort_order, trial_days, annual_discount_percent) VALUES
             ('starter', 'Starter', 'Free forever for 1 agent', 0, 0, NULL, 'month', 'RUB',
-             '{"max_agents":1,"max_users":1,"audit_retention_days":30,"api_rate_limit":100,"api_rate_window_secs":60,"max_custom_rules":3,"max_policies":1,"max_webhooks":0,"approval_channels":[],"siem_formats":[],"allowed_shield_levels":["basic"],"support_tier":"community"}',
+             '{"max_agents":1,"max_users":1,"audit_retention_days":30,"api_rate_limit":100,"api_rate_window_secs":60,"max_custom_rules":3,"max_policies":1,"approval_channels":[],"siem_formats":[],"allowed_shield_levels":["basic"],"support_tier":"community"}',
              '{"shield":true,"shield_level":"basic","mcp_gateway":true,"policy_engine":true,"e2ee":true,"audit_log":true}',
              true, 0, 0, 0),
 
             ('professional', 'Professional', 'For small SaaS teams', 1, 199000, 1910400, 'month', 'RUB',
-             '{"max_agents":5,"max_users":5,"audit_retention_days":60,"api_rate_limit":500,"api_rate_window_secs":60,"max_custom_rules":50,"max_policies":5,"max_webhooks":3,"approval_channels":["telegram"],"siem_formats":["json"],"allowed_shield_levels":["basic","advanced"],"support_tier":"email"}',
+             '{"max_agents":5,"max_users":5,"audit_retention_days":60,"api_rate_limit":500,"api_rate_window_secs":60,"max_custom_rules":50,"max_policies":5,"approval_channels":["telegram"],"siem_formats":["json"],"allowed_shield_levels":["basic","advanced"],"support_tier":"email"}',
              '{"shield":true,"shield_level":"advanced","mcp_gateway":true,"policy_engine":true,"approval":true,"rbac":true,"e2ee":true,"audit_log":true,"webhooks":true,"siem_export":true}',
              true, 1, 0, 20),
 
             ('scale', 'Scale', 'For agencies and multi-cluster setups', 2, 499000, 4790400, 'month', 'RUB',
-             '{"max_agents":25,"max_users":10,"audit_retention_days":90,"api_rate_limit":2000,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"max_webhooks":20,"approval_channels":["telegram","email","slack"],"siem_formats":["json","cef","leef"],"allowed_shield_levels":["basic","advanced","full"],"support_tier":"priority"}',
+             '{"max_agents":25,"max_users":10,"audit_retention_days":90,"api_rate_limit":2000,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"approval_channels":["telegram","email","slack"],"siem_formats":["json","cef","leef"],"allowed_shield_levels":["basic","advanced","full"],"support_tier":"priority"}',
              '{"shield":true,"shield_level":"full","mcp_gateway":true,"policy_engine":true,"approval":true,"rbac":true,"pattern_learning":true,"e2ee":true,"audit_log":true,"webhooks":true,"siem_export":true}',
              true, 2, 0, 20),
 
             ('enterprise', 'Enterprise', 'For large orgs with dedicated support', 3, 0, NULL, 'month', 'RUB',
-             '{"max_agents":0,"max_users":0,"audit_retention_days":365,"api_rate_limit":0,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"max_webhooks":0,"approval_channels":["telegram","email","slack","webhook"],"siem_formats":["json","cef","leef","syslog"],"allowed_shield_levels":["basic","advanced","full","ebpf"],"support_tier":"dedicated"}',
+             '{"max_agents":0,"max_users":0,"audit_retention_days":365,"api_rate_limit":0,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"approval_channels":["telegram","email","slack","webhook"],"siem_formats":["json","cef","leef","syslog"],"allowed_shield_levels":["basic","advanced","full","ebpf"],"support_tier":"dedicated"}',
              '{"shield":true,"shield_level":"full","mcp_gateway":true,"policy_engine":true,"approval":true,"rbac":true,"pattern_learning":true,"e2ee":true,"audit_log":true,"webhooks":true,"siem_export":true,"sso":true,"on_premise":true}',
              true, 3, 0, 0)
             ON CONFLICT (id) DO NOTHING;

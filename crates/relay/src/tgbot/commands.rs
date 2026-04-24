@@ -381,7 +381,6 @@ pub async fn cmd_myplan(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
         ("API rate limit", plan.limits.api_rate_limit as u64, "зап./мин."),
         ("Кастомных правил", plan.limits.max_custom_rules, "шт."),
         ("Политик", plan.limits.max_policies, "шт."),
-        ("Вебхуков", plan.limits.max_webhooks, "шт."),
     ];
     for (name, val, unit) in &limits {
         let display = if *val == 0 { "\u{221e}".to_string() } else { val.to_string() };
@@ -727,9 +726,6 @@ pub async fn cmd_usage(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResul
         }
         if limits.max_policies > 0 {
             text.push_str(&format!("\n   \u{1f6e1} Политик: /{}", limits.max_policies));
-        }
-        if limits.max_webhooks > 0 {
-            text.push_str(&format!("\n   \u{1f517} Вебхуков: /{}", limits.max_webhooks));
         }
         text.push_str(&format!("\n\n\u{1f6e0} Поддержка: {}", limits.support_tier));
     }
