@@ -801,7 +801,7 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             r#"
             CREATE TABLE IF NOT EXISTS secret_mappings (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                org_id UUID NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+                org_id UUID NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
                 secret_id UUID NOT NULL REFERENCES secrets(id) ON DELETE CASCADE,
                 env_var TEXT NOT NULL,
                 server_tags TEXT[] DEFAULT '{}',
