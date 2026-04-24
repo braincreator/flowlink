@@ -4,11 +4,15 @@
 
 **AI-native webhook gateway for managing AI agents and LLM operations**
 
+[![CI](https://img.shields.io/github/actions/workflow/status/braincreator/flowlink/ci.yml?branch=main&logo=github&label=CI)](https://github.com/braincreator/flowlink/actions)
+[![Security](https://img.shields.io/github/actions/workflow/status/braincreator/flowlink/semgrep.yml?branch=main&logo=github&label=SAST)](https://github.com/braincreator/flowlink/actions)
+[![Licenses](https://img.shields.io/github/actions/workflow/status/braincreator/flowlink/deny.yml?branch=main&logo=github&label=licenses)](https://github.com/braincreator/flowlink/actions)
+[![Audit](https://img.shields.io/github/actions/workflow/status/braincreator/flowlink/ci.yml?branch=main&logo=github&label=audit)](https://github.com/braincreator/flowlink/actions/workflows/ci.yml)
+[![Dependabot](https://img.shields.io/github/dependabot/braincreator/flowlink?logo=dependabot)](https://github.com/braincreator/flowlink/security/dependabot)
+[![Coverage](https://img.shields.io/codecov/c/github/braincreator/flowlink?logo=codecov&label=coverage)](https://app.codecov.io/gh/braincreator/flowlink)
+[![Clippy](https://img.shields.io/badge/clippy-passing-green?logo=rust)](https://github.com/braincreator/flowlink/actions)
 [![Rust](https://img.shields.io/badge/rust-1.80+-orange?logo=rust)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-1187 passing-green)]()
-[![Crates](https://img.shields.io/badge/crates-10-blue)]()
-[![SaaS](https://img.shields.io/badge/type-Cloud_SaaS-blue)](https://flowlink.flow-masters.ru)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)]()
+[![License](https://img.shields.io/badge/license-proprietary-red)]()
 
 *WebSocket relay · E2EE · RBAC · Shield · K8s operator · Billing*
 
