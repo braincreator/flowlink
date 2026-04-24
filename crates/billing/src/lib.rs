@@ -490,11 +490,14 @@ mod tests {
     }
 
     #[test]
-    fn test_check_agent_connect_free() {
+    fn test_check_agent_connect_starter() {
         let engine = test_engine();
         let billing = AccountBilling::new("acc-1");
 
-        // Free plan: 1 agent (max_agents = 1)
+        // Starter plan: 2 agents (max_agents = 2)
+        let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
+        assert!(check.allowed);
+
         let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
         assert!(check.allowed);
 
@@ -508,11 +511,13 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        // Upgrade from starter to professional — no trial flag on paid plan
+        // Upgrade from starter to professional — Pro has 14-day trial
         engine.upgrade_plan(&mut billing, "professional").unwrap();
         assert_eq!(billing.plan_id, "professional");
         assert!(billing.expires_at.is_some());
-        assert!(!billing.is_trial);
+        assert!(billing.is_trial);
+        assert!(billing.trial_start.is_some());
+        assert!(billing.trial_end.is_some());
     }
 
     #[test]
