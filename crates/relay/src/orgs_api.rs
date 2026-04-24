@@ -130,7 +130,7 @@ fn json_invitation(row: &OrgInvitationRow) -> Value {
     })
 }
 
-fn slugify(name: &str) -> String {
+pub fn slugify(name: &str) -> String {
     name.to_lowercase()
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else if c.is_whitespace() { '-' } else { '\0' })
@@ -433,7 +433,7 @@ pub async fn remove_member(State(state): State<AppState>, AccountIdExtractor(acc
     }
 }
 
-/// POST /api/orgs/onboard — create first org with JWT tokens
+/// POST /api/orgs/onboard — configure first org (auto-created on first login)
 pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_id): AccountIdExtractor, Json(body): Json<OnboardRequest>) -> impl IntoResponse {
     let pool = match get_db(&state) {
         Ok(p) => p,
@@ -445,45 +445,49 @@ pub async fn onboard(State(state): State<AppState>, AccountIdExtractor(account_i
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "auth not configured"}))).into_response(),
     };
 
-    // Generate slug
-    let slug = if let Some(s) = &body.slug {
-        s.clone()
-    } else {
-        let base = slugify(&body.org_name);
-        match OrgRepo::get_by_slug(pool, &base).await {
-            Ok(None) => base,
-            _ => {
-                let suffix: String = Uuid::new_v4().to_string()[..4].to_string();
-                format!("{}-{}", base, suffix)
+    // Find existing org for this user (auto-created on first login)
+    let existing_orgs = OrgRepo::list_by_account(pool, &account_id).await.unwrap_or_default();
+    let org = match existing_orgs.first() {
+        Some(o) => {
+            // Update org name and slug from onboarding form
+            let new_slug = if let Some(s) = &body.slug {
+                s.clone()
+            } else {
+                let base = slugify(&body.org_name);
+                match OrgRepo::get_by_slug(pool, &base).await {
+                    Ok(None) => base,
+                    _ => format!("{}-{}", base, &Uuid::new_v4().to_string()[..4]),
+                }
+            };
+            // Check slug conflict (exclude current org)
+            if let Ok(Some(existing)) = OrgRepo::get_by_slug(pool, &new_slug).await {
+                if existing.org_id != o.org_id {
+                    return (StatusCode::CONFLICT, Json(json!({"error": "slug already exists"}))).into_response();
+                }
             }
+            let _ = OrgRepo::update(pool, o.org_id, Some(&body.org_name), Some(&new_slug)).await;
+            OrgRepo::get(pool, o.org_id).await.unwrap_or(Some(o.clone())).unwrap()
+        }
+        None => {
+            // Fallback: create org (shouldn't happen with auto-create on login)
+            let base = slugify(&body.org_name);
+            let slug = match OrgRepo::get_by_slug(pool, &base).await {
+                Ok(None) => base,
+                _ => format!("{}-{}", base, &Uuid::new_v4().to_string()[..4]),
+            };
+            let new_org = match OrgRepo::create(pool, &body.org_name, &slug, &account_id, "trial").await {
+                Ok(o) => o,
+                Err(_e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
+            };
+            let trial_ends = Utc::now() + chrono::Duration::days(7);
+            let _ = sqlx::query("UPDATE organizations SET is_trial = true, trial_ends_at = $2 WHERE org_id = $1")
+                .bind(new_org.org_id).bind(trial_ends).execute(pool).await;
+            let _ = OrgRepo::add_member(pool, new_org.org_id, &account_id, "owner", None).await;
+            OrgRepo::get(pool, new_org.org_id).await.unwrap_or(Some(new_org)).unwrap()
         }
     };
 
-    if let Ok(Some(_)) = OrgRepo::get_by_slug(pool, &slug).await {
-        return (StatusCode::CONFLICT, Json(json!({"error": "slug already exists"}))).into_response();
-    }
-
-    let org = match OrgRepo::create(pool, &body.org_name, &slug, &account_id, "trial").await {
-        Ok(o) => o,
-        Err(_e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Internal error"}))).into_response(),
-    };
-
-    // Enable trial: 7 days
-    let trial_ends = Utc::now() + chrono::Duration::days(7);
-    if let Err(e) = sqlx::query("UPDATE organizations SET is_trial = true, trial_ends_at = $2 WHERE org_id = $1")
-        .bind(org.org_id)
-        .bind(trial_ends)
-        .execute(pool)
-        .await
-    {
-        log::warn!("Failed to set trial for org {}: {e}", org.org_id);
-    }
-
-    // Refetch to include trial fields
-    let org = OrgRepo::get(pool, org.org_id).await.unwrap_or(Some(org)).unwrap();
-
-    let _ = OrgRepo::add_member(pool, org.org_id, &account_id, "owner", None).await;
-
+    // Issue new tokens with org_id
     match engine.create_org_tokens(&account_id, &account_id, None, None, None, false, &org.org_id.to_string(), "owner") {
         Ok(tokens) => Json(json!({
             "org": json_row(&org),

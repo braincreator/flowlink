@@ -357,6 +357,37 @@ fn verify_state(state_param: &Option<String>, jwt_secret: &str) -> bool {
 
 /// Issue JWT tokens, checking 2FA if enabled.
 /// Returns either full tokens or a 2FA required response.
+/// Auto-create personal org for user if they have none.
+/// Returns org_id string if found/created, None on failure.
+pub async fn ensure_user_org(pool: &sqlx::PgPool, account_id: &str, name: Option<&str>) -> Option<String> {
+    use flowlink_db::orgs::OrgRepo;
+    let existing = OrgRepo::list_by_account(pool, account_id).await.unwrap_or_default();
+    if existing.is_empty() {
+        let org_name = name.unwrap_or("Personal").to_string();
+        let base_slug = crate::orgs_api::slugify(&org_name);
+        let slug = match OrgRepo::get_by_slug(pool, &base_slug).await {
+            Ok(None) => base_slug,
+            _ => format!("{}-{}", base_slug, &uuid::Uuid::new_v4().to_string()[..4]),
+        };
+        match OrgRepo::create(pool, &org_name, &slug, account_id, "trial").await {
+            Ok(org) => {
+                let trial_ends = chrono::Utc::now() + chrono::Duration::days(7);
+                let _ = sqlx::query("UPDATE organizations SET is_trial = true, trial_ends_at = $2 WHERE org_id = $1")
+                    .bind(org.org_id).bind(trial_ends).execute(pool).await;
+                let _ = OrgRepo::add_member(pool, org.org_id, account_id, "owner", None).await;
+                log::info!("🏢 Auto-created personal org '{}' for user {}", org_name, account_id);
+                Some(org.org_id.to_string())
+            }
+            Err(e) => {
+                log::error!("Failed to auto-create org for {}: {}", account_id, e);
+                None
+            }
+        }
+    } else {
+        existing.first().map(|o| o.org_id.to_string())
+    }
+}
+
 async fn issue_tokens_or_2fa(
     state: &AppState,
     user_id: &str,
@@ -390,7 +421,12 @@ async fn issue_tokens_or_2fa(
         admin
     } else { false };
 
-    match engine.create_tokens(user_id, account_id, email, name, avatar_url, is_admin, None) {
+    // Auto-create personal org if user has none
+    let org_id = if let Some(ref db) = state.db {
+        ensure_user_org(db.pool(), account_id, name).await
+    } else { None };
+
+    match engine.create_tokens(user_id, account_id, email, name, avatar_url, is_admin, org_id.as_deref()) {
         Ok(tokens) => {
             let config = state.config_reloader.as_ref()?.get_config().await;
             Some(dashboard_redirect(&config, &tokens.access_token, &tokens.refresh_token).into_response())
@@ -604,18 +640,31 @@ pub async fn auth_me(
     };
 
     match engine.validate_access_token(token) {
-        Ok(claims) => (StatusCode::OK, Json(json!({
-            "user": {
-                "id": claims.account_id,
-                "account_id": claims.account_id,
-                "email": claims.email,
-                "name": claims.name,
-                "avatar_url": claims.avatar_url,
-                "sub": claims.sub,
-                "exp": claims.exp,
-                "active": true
+        Ok(mut claims) => {
+            // If JWT has no org_id but user has an org, fill it from DB
+            if claims.org_id.is_none() {
+                if let Some(ref db) = state.db {
+                    let pool = db.pool();
+                    let orgs = flowlink_db::orgs::OrgRepo::list_by_account(pool, &claims.account_id).await.unwrap_or_default();
+                    if let Some(org) = orgs.first() {
+                        claims.org_id = Some(org.org_id.to_string());
+                    }
+                }
             }
-        }))).into_response(),
+            (StatusCode::OK, Json(json!({
+                "user": {
+                    "id": claims.account_id,
+                    "account_id": claims.account_id,
+                    "email": claims.email,
+                    "name": claims.name,
+                    "avatar_url": claims.avatar_url,
+                    "sub": claims.sub,
+                    "org_id": claims.org_id,
+                    "exp": claims.exp,
+                    "active": true
+                }
+            }))).into_response()
+        }
         Err(e) => {
             warn!("Invalid access token: {}", e);
             (StatusCode::UNAUTHORIZED, Json(json!({"error": "invalid or expired token"}))).into_response()
