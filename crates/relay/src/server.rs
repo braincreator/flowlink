@@ -2339,6 +2339,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/discovery/start", axum::routing::post(crate::discovery_api::start_discovery))
         .route("/api/orgs/{org_id}/discovery/results", axum::routing::get(crate::discovery_api::list_discovery_results))
         .route("/api/orgs/{org_id}/discovery/{scan_id}/approve", axum::routing::post(crate::discovery_api::approve_discovery))
+        .route("/api/orgs/{org_id}/discovery/submit", axum::routing::post(crate::discovery_api::submit_discovery_result))
         // Vault health (org admin)
         .route("/api/orgs/{org_id}/vault/health", axum::routing::get(crate::discovery_api::vault_health))
         // Zero-Trust Secret Configuration (org owner/admin)

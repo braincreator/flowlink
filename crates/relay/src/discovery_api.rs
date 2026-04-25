@@ -509,3 +509,238 @@ pub async fn vault_health(
         }))).into_response(),
     }
 }
+
+/// Write discovery results to the Infrastructure Map
+/// Called when agent reports scan results back to relay
+pub async fn write_discovery_to_infra_map(
+    pool: &sqlx::PgPool,
+    org_id: uuid::Uuid,
+    agent_id: &str,
+    host_name: &str,
+    services: &[serde_json::Value],
+    secrets: &[serde_json::Value],
+) -> anyhow::Result<()> {
+    let host_id = format!("host-{}", agent_id.replace('.', "-").replace('_', "-"));
+
+    // Upsert host node
+    let _ = sqlx::query(
+        r#"INSERT INTO infra_map_nodes (id, org_id, node_type, data, name, discovered_by, discovered_at, updated_at)
+           VALUES ($1, $2, 'host', $3, $4, $5, NOW(), NOW())
+           ON CONFLICT (id) DO UPDATE SET data = $3, name = $4, updated_at = NOW()"#
+    )
+    .bind(&host_id)
+    .bind(org_id)
+    .bind(serde_json::json!({"hostname": host_name, "agent_id": agent_id}).to_string())
+    .bind(host_name)
+    .bind(agent_id)
+    .execute(pool)
+    .await;
+
+    // Upsert service nodes + edges
+    for svc in services {
+        let svc_type = svc.get("service_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let svc_name = svc.get("name").and_then(|v| v.as_str()).unwrap_or(svc_type);
+        let svc_id = format!("svc-{}-{}", host_id, svc_type);
+        let env = svc.get("environment").and_then(|v| v.as_str());
+        let criticality = svc.get("criticality").and_then(|v| v.as_str());
+        let owner = svc.get("owner").and_then(|v| v.as_str());
+
+        let _ = sqlx::query(
+            r#"INSERT INTO infra_map_nodes (id, org_id, node_type, data, name, environment, criticality, owner, discovered_by, discovered_at, updated_at)
+               VALUES ($1, $2, 'service', $3, $4, $5, $6, $7, $8, NOW(), NOW())
+               ON CONFLICT (id) DO UPDATE SET data = $3, name = $4, environment = $5, criticality = $6, owner = $7, updated_at = NOW()"#
+        )
+        .bind(&svc_id)
+        .bind(org_id)
+        .bind(svc.to_string())
+        .bind(svc_name)
+        .bind(env)
+        .bind(criticality)
+        .bind(owner)
+        .bind(agent_id)
+        .execute(pool)
+        .await;
+
+        // Edge: HOST → SERVICE
+        let edge_id = format!("edge-{}-{}", host_id, svc_id);
+        let _ = sqlx::query(
+            r#"INSERT INTO infra_map_edges (id, org_id, from_id, to_id, rel_type, discovered_by, discovered_at, updated_at)
+               VALUES ($1, $2, $3, $4, 'HOSTS_SERVICE', $5, NOW(), NOW())
+               ON CONFLICT (id) DO UPDATE SET updated_at = NOW()"#
+        )
+        .bind(&edge_id)
+        .bind(org_id)
+        .bind(&host_id)
+        .bind(&svc_id)
+        .bind(agent_id)
+        .execute(pool)
+        .await;
+
+        // Check for DB connections from service config
+        if let Some(configs) = svc.get("config_paths").and_then(|v| v.as_array()) {
+            for _cfg in configs {
+                // TODO: parse config files to extract DB/queue connections
+                // For now, services with type like "postgres" auto-create a DB node
+                if ["postgres", "mysql", "redis", "mongodb", "cassandra", "clickhouse", "influxdb", "neo4j", "couchdb"].contains(&svc_type) {
+                    let db_id = format!("db-{}-{}", host_id, svc_type);
+                    let db_name = format!("{}-db", svc_type);
+                    let _ = sqlx::query(
+                        r#"INSERT INTO infra_map_nodes (id, org_id, node_type, data, name, discovered_by, discovered_at, updated_at)
+                           VALUES ($1, $2, 'database', $3, $4, $5, NOW(), NOW())
+                           ON CONFLICT (id) DO UPDATE SET data = $3, name = $4, updated_at = NOW()"#
+                    )
+                    .bind(&db_id)
+                    .bind(org_id)
+                    .bind(serde_json::json!({"db_type": svc_type}).to_string())
+                    .bind(&db_name)
+                    .bind(agent_id)
+                    .execute(pool)
+                    .await;
+
+                    let db_edge_id = format!("edge-{}-{}", svc_id, db_id);
+                    let _ = sqlx::query(
+                        r#"INSERT INTO infra_map_edges (id, org_id, from_id, to_id, rel_type, discovered_by, discovered_at, updated_at)
+                           VALUES ($1, $2, $3, $4, 'SERVICE_USES_DB', $5, NOW(), NOW())
+                           ON CONFLICT (id) DO UPDATE SET updated_at = NOW()"#
+                    )
+                    .bind(&db_edge_id)
+                    .bind(org_id)
+                    .bind(&svc_id)
+                    .bind(&db_id)
+                    .bind(agent_id)
+                    .execute(pool)
+                    .await;
+                }
+            }
+        }
+    }
+
+    // Upsert secret_ref nodes + edges
+    for secret in secrets {
+        let key_name = secret.get("key_name").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let key_type = secret.get("key_type").and_then(|v| v.as_str()).unwrap_or("generic");
+        let svc_type = secret.get("service_type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let src_path = secret.get("source_path").and_then(|v| v.as_str()).unwrap_or("");
+
+        let secret_id = format!("secret-{}-{}", host_id, key_name.to_lowercase().replace('_', "-"));
+        let svc_id = format!("svc-{}-{}", host_id, svc_type);
+
+        let _ = sqlx::query(
+            r#"INSERT INTO infra_map_nodes (id, org_id, node_type, data, name, discovered_by, discovered_at, updated_at)
+               VALUES ($1, $2, 'secret_ref', $3, $4, $5, NOW(), NOW())
+               ON CONFLICT (id) DO UPDATE SET data = $3, name = $4, updated_at = NOW()"#
+        )
+        .bind(&secret_id)
+        .bind(org_id)
+        .bind(serde_json::json!({"key_name": key_name, "secret_type": key_type, "source_path": src_path}).to_string())
+        .bind(key_name)
+        .bind(agent_id)
+        .execute(pool)
+        .await;
+
+        // Edge: SERVICE → SECRET_REF
+        let edge_id = format!("edge-{}-{}", svc_id, secret_id);
+        let _ = sqlx::query(
+            r#"INSERT INTO infra_map_edges (id, org_id, from_id, to_id, rel_type, discovered_by, discovered_at, updated_at)
+               VALUES ($1, $2, $3, $4, 'SERVICE_HAS_SECRET', $5, NOW(), NOW())
+               ON CONFLICT (id) DO UPDATE SET updated_at = NOW()"#
+        )
+        .bind(&edge_id)
+        .bind(org_id)
+        .bind(&svc_id)
+        .bind(&secret_id)
+        .bind(agent_id)
+        .execute(pool)
+        .await;
+    }
+
+    log::info!(
+        "🗺️ Infrastructure Map updated: org={} host={} services={} secrets={}",
+        org_id, host_name, services.len(), secrets.len()
+    );
+
+    Ok(())
+}
+
+/// POST /api/orgs/{org_id}/discovery/submit
+/// Agent submits discovery scan results.
+/// This writes services/secrets to the Infrastructure Map automatically.
+#[derive(Debug, Deserialize)]
+pub struct DiscoverySubmitRequest {
+    pub scan_id: String,
+    pub agent_id: String,
+    pub host_name: String,
+    pub services: Vec<serde_json::Value>,
+    pub secrets: Vec<serde_json::Value>,
+    pub encrypted_payload: Option<serde_json::Value>,
+}
+
+pub async fn submit_discovery_result(
+    State(state): State<AppState>,
+    Path(org_id): Path<Uuid>,
+    Extension(claims): Extension<Claims>,
+    Json(req): Json<DiscoverySubmitRequest>,
+) -> impl IntoResponse {
+    let pool = match get_pool(&state) {
+        Ok(p) => p,
+        Err(r) => return r.into_response(),
+    };
+
+    // Verify org membership
+    let role = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM org_members WHERE org_id = $1 AND account_id = $2"
+    )
+    .bind(org_id)
+    .bind(&claims.account_id)
+    .fetch_optional(pool)
+    .await;
+
+    match role {
+        Ok(Some(_)) => {},
+        _ => {
+            return (StatusCode::FORBIDDEN, Json(serde_json::json!({
+                "ok": false, "error": "Not authorized"
+            }))).into_response();
+        }
+    }
+
+    // Store results in discovery_scans
+    let metadata = serde_json::json!({
+        "host": req.host_name,
+        "services_count": req.services.len(),
+        "secrets_count": req.secrets.len(),
+        "services": req.services,
+        "secrets": req.secrets.iter().map(|s| serde_json::json!({
+            "key_name": s.get("key_name"),
+            "key_type": s.get("key_type"),
+            "service_type": s.get("service_type"),
+            "source_path": s.get("source_path"),
+        })).collect::<Vec<_>>(),
+    });
+
+    let _ = sqlx::query(
+        "UPDATE discovery_scans SET status = 'completed', result_metadata = $1, updated_at = NOW() WHERE scan_id = $2 AND org_id = $3"
+    )
+    .bind(metadata.to_string())
+    .bind(&req.scan_id)
+    .bind(org_id)
+    .execute(pool)
+    .await;
+
+    // Write to Infrastructure Map
+    if let Err(e) = write_discovery_to_infra_map(
+        pool, org_id, &req.agent_id, &req.host_name, &req.services, &req.secrets,
+    ).await {
+        log::warn!("Failed to write discovery to infra map: {e}");
+    }
+
+    log::info!(
+        "📋 Discovery results submitted: scan={} org={} agent={} services={} secrets={}",
+        req.scan_id, org_id, req.agent_id, req.services.len(), req.secrets.len()
+    );
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "ok": true,
+        "message": format!("Discovery results recorded: {} services, {} secrets mapped", req.services.len(), req.secrets.len()),
+    }))).into_response()
+}
