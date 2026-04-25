@@ -2,3 +2,4 @@
 
 pub mod service_catalog;
 pub mod change_management;
+pub mod ops_assistant;

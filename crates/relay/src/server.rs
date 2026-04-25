@@ -2411,6 +2411,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/changes", axum::routing::get(crate::business::change_management::list_changes).post(crate::business::change_management::create_change))
         .route("/api/v1/changes/{change_id}/approve", axum::routing::post(crate::business::change_management::approve_change))
         .route("/api/v1/changes/{change_id}/rollback", axum::routing::post(crate::business::change_management::rollback_change))
+
+        // ── Business: AI Ops Assistant ──
+        .route("/api/v1/ops/ask", axum::routing::get(crate::business::ops_assistant::ask))
         // Health Monitoring
         .route("/api/orgs/{org_id}/health", axum::routing::get(crate::health_monitor_api::health_snapshot))
         // External Alert Ingestion (no auth — webhook from Alertmanager/Zabbix)
