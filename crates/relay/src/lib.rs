@@ -295,6 +295,7 @@ impl Relay {
             key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)), // 100 req/min per key
             saml_config: None,
             rusiem_config: None,
+            vault: None,
             http_client: reqwest::Client::new(),
             cors_origins: self.config.cors_allowed_origins.clone(),
         };
@@ -636,3 +637,4 @@ pub mod secret_mappings_api;
 pub mod compliance_api;
 pub mod fstek;
 pub mod discovery_api;
+pub mod vault_client;

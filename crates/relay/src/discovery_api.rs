@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::auth::Claims;
 use crate::server::AppState;
+use anyhow::Context as _;
 use flowlink_core::channels::{AuditEvent, AuditEventType};
 
 /// Scope — what to scan (mirrors flowlink_agent::discovery::DiscoveryScope)
@@ -327,6 +328,19 @@ pub async fn approve_discovery(
         scan_id, claims.sub, role, req.secret_ids.len(), org_id
     );
 
+    // Write approved secrets to Vault if configured
+    let vault_status = if let Some(vault) = &state.vault {
+        match write_approved_to_vault(vault, pool, org_id, &scan_id, &req.secret_ids, &claims.sub).await {
+            Ok(count) => format!("{count} secrets written to Vault"),
+            Err(e) => {
+                log::error!("Failed to write secrets to Vault: {e}");
+                format!("Vault write failed: {e}")
+            }
+        }
+    } else {
+        "Vault not configured — secrets stored in encrypted DB only".into()
+    };
+
     // Record audit event (immutable)
     let _ = state.audit_store.record(AuditEvent {
         id: uuid::Uuid::new_v4().to_string(),
@@ -353,5 +367,145 @@ pub async fn approve_discovery(
     (StatusCode::OK, Json(serde_json::json!({
         "ok": true,
         "message": format!("{} секретов одобрено для записи в Vault", req.secret_ids.len()),
+        "vault_status": vault_status,
     }))).into_response()
+}
+
+/// Write approved discovery secrets to Vault
+async fn write_approved_to_vault(
+    vault: &crate::vault_client::VaultClient,
+    pool: &sqlx::PgPool,
+    org_id: uuid::Uuid,
+    scan_id: &str,
+    secret_ids: &[String],
+    approved_by: &str,
+) -> anyhow::Result<usize> {
+    use crate::vault_client::VaultSecret;
+
+    // Fetch scan result from DB
+    let result_row = sqlx::query_as::<_, (Option<Vec<u8>>, Option<serde_json::Value>)>(
+        "SELECT result_encrypted, result_metadata FROM discovery_scans WHERE scan_id = $1"
+    )
+    .bind(scan_id)
+    .fetch_optional(pool)
+    .await?
+    .context("Scan not found")?;
+
+    // If we have metadata with secrets grouped by service, write them
+    let mut written = 0;
+    if let Some(metadata) = result_row.1 {
+        if let Some(services) = metadata.get("services").and_then(|v| v.as_array()) {
+            for svc in services {
+                let service_type = svc.get("service_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let host = metadata.get("host")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+
+                // Build Vault path: secret/data/{org_id}/{host}/{service}
+                let vault_path = format!("{}/{host}/{service_type}", org_id);
+
+                // Collect secrets for this service
+                let mut data = std::collections::HashMap::new();
+                if let Some(secrets) = metadata.get("secrets").and_then(|v| v.as_array()) {
+                    for secret in secrets {
+                        let key_name = secret.get("key_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let value = secret.get("value")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if !key_name.is_empty() && !value.is_empty() {
+                            data.insert(key_name.to_string(), value.to_string());
+                        }
+                    }
+                }
+
+                if !data.is_empty() {
+                    let vault_secret = VaultSecret {
+                        path: vault_path,
+                        data,
+                        metadata: {
+                            let mut m = std::collections::HashMap::new();
+                            m.insert("source".into(), "discovery".into());
+                            m.insert("scan_id".into(), scan_id.to_string());
+                            m.insert("approved_by".into(), approved_by.to_string());
+                            m
+                        },
+                    };
+
+                    match vault.write_secret(&vault_secret).await {
+                        Ok(version) => {
+                            log::info!("Vault write OK: {} v{}", vault_secret.path, version);
+                            written += 1;
+                        }
+                        Err(e) => {
+                            log::warn!("Vault write failed for {}: {e}", vault_secret.path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Update scan status
+    let _ = sqlx::query(
+        "UPDATE discovery_scans SET status = 'vault_written', updated_at = NOW() WHERE scan_id = $1"
+    )
+    .bind(scan_id)
+    .execute(pool)
+    .await;
+
+    Ok(written)
+}
+
+/// GET /api/orgs/{org_id}/vault/health
+/// Check HashiCorp Vault connectivity (org owner/admin only)
+pub async fn vault_health(
+    State(state): State<AppState>,
+    Path(org_id): Path<Uuid>,
+    Extension(claims): Extension<Claims>,
+) -> impl IntoResponse {
+    // Verify org admin
+    let pool = match get_pool(&state) {
+        Ok(p) => p,
+        Err(resp) => return resp.into_response(),
+    };
+
+    let role = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM org_members WHERE org_id = $1 AND account_id = $2"
+    )
+    .bind(org_id)
+    .bind(&claims.account_id)
+    .fetch_optional(pool)
+    .await;
+
+    let role = match role {
+        Ok(Some(r)) if r == "owner" || r == "admin" => r,
+        _ => {
+            return (StatusCode::FORBIDDEN, Json(serde_json::json!({
+                "ok": false, "error": "Not authorized"
+            }))).into_response();
+        }
+    };
+
+    match &state.vault {
+        Some(vault) => {
+            match vault.health().await {
+                Ok(health) => (StatusCode::OK, Json(serde_json::json!({
+                    "ok": true,
+                    "vault": health,
+                }))).into_response(),
+                Err(e) => (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+                    "ok": false,
+                    "error": format!("Vault health check failed: {e}"),
+                }))).into_response(),
+            }
+        }
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({
+            "ok": false,
+            "error": "Vault not configured for this relay",
+        }))).into_response(),
+    }
 }

@@ -73,6 +73,8 @@ pub struct AppState {
     pub key_rate_limiter: Arc<crate::api_keys::KeyRateLimiter>,
     pub saml_config: Option<Arc<tokio::sync::Mutex<crate::saml::SamlConfig>>>,
     pub rusiem_config: Option<Arc<tokio::sync::RwLock<crate::rusiem::RusiemConfig>>>,
+    /// HashiCorp Vault client for secret storage
+    pub vault: Option<Arc<crate::vault_client::VaultClient>>,
     /// Shared HTTP client with connection pooling for OAuth, webhooks, etc.
     pub http_client: reqwest::Client,
     /// CORS allowed origins (empty = wildcard)
@@ -2337,6 +2339,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/discovery/start", axum::routing::post(crate::discovery_api::start_discovery))
         .route("/api/orgs/{org_id}/discovery/results", axum::routing::get(crate::discovery_api::list_discovery_results))
         .route("/api/orgs/{org_id}/discovery/{scan_id}/approve", axum::routing::post(crate::discovery_api::approve_discovery))
+        // Vault health (org admin)
+        .route("/api/orgs/{org_id}/vault/health", axum::routing::get(crate::discovery_api::vault_health))
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
     let api_routes = Router::new()
@@ -2443,6 +2447,7 @@ mod tests {
             key_rate_limiter: Arc::new(crate::api_keys::KeyRateLimiter::new(100, 60)),
             saml_config: None,
             rusiem_config: None,
+            vault: None,
             http_client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .pool_max_idle_per_host(4)
