@@ -642,3 +642,4 @@ pub mod zero_trust_secrets;
 pub mod zero_trust_api;
 pub mod infra_map;
 pub mod infra_map_api;
+pub mod health_monitor;
