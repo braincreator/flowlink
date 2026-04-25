@@ -639,3 +639,4 @@ pub mod fstek;
 pub mod discovery_api;
 pub mod vault_client;
 pub mod zero_trust_secrets;
+pub mod zero_trust_api;

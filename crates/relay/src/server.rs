@@ -2341,6 +2341,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/discovery/{scan_id}/approve", axum::routing::post(crate::discovery_api::approve_discovery))
         // Vault health (org admin)
         .route("/api/orgs/{org_id}/vault/health", axum::routing::get(crate::discovery_api::vault_health))
+        // Zero-Trust Secret Configuration (org owner/admin)
+        .route("/api/orgs/{org_id}/secrets/config", axum::routing::get(crate::zero_trust_api::get_secret_config))
+        .route("/api/orgs/{org_id}/secrets/config/key-setup", axum::routing::post(crate::zero_trust_api::setup_org_key))
+        .route("/api/orgs/{org_id}/secrets/config/vault-setup", axum::routing::post(crate::zero_trust_api::setup_external_vault))
+        .route("/api/orgs/{org_id}/secrets/config/vault", axum::routing::delete(crate::zero_trust_api::remove_external_vault))
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
     let api_routes = Router::new()
