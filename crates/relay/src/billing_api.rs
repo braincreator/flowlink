@@ -123,7 +123,6 @@ pub fn check_trial_status(org: &OrgRow) -> TrialStatus {
 // ═══════════════════════════════════════════════
 
 /// GET /api/billing — get billing info for the authenticated account
-
 #[allow(dead_code)]
 fn require_org(claims: &crate::auth::Claims) -> Result<uuid::Uuid, (StatusCode, axum::Json<serde_json::Value>)> {
     match &claims.org_id {

@@ -2,6 +2,8 @@
 // Endpoints for org key setup, external vault config, verification
 // All endpoints require org owner/admin role
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -78,7 +80,7 @@ pub async fn setup_org_key(
     }
 
     // Validate public key format (should be base64-encoded X25519 public key = 32 bytes)
-    let key_bytes = match base64::decode(&req.org_public_key) {
+    let key_bytes = match STANDARD.decode(&req.org_public_key) {
         Ok(bytes) if bytes.len() == 32 => bytes,
         _ => {
             return (

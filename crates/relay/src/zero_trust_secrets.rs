@@ -214,6 +214,7 @@ impl OrgSecretConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flowlink_crypto::KeyPair;
 
     #[test]
     fn test_org_config_embedded() {
