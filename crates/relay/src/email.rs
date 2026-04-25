@@ -20,16 +20,26 @@ pub struct EmailService {
 impl EmailService {
     pub fn new(host: &str, port: u16, username: &str, password: &str, from: &str) -> Result<Self> {
         let creds = Credentials::new(username.to_string(), password.to_string());
-        let transport = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
-            .map_err(|e| anyhow::anyhow!("SMTP relay error: {e}"))?
-            .port(port)
-            .credentials(creds)
-            .build();
+        // Use unencrypted SMTP for local Postal (no STARTTLS on localhost)
+        // For external SMTP servers, use starttls instead
+        let transport = if host == "127.0.0.1" || host == "localhost" {
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host)
+                .port(port)
+                .credentials(creds)
+                .build()
+        } else {
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
+                .map_err(|e| anyhow::anyhow!("SMTP relay error: {e}"))?
+                .port(port)
+                .credentials(creds)
+                .build()
+        };
         Ok(Self { transport: Arc::new(transport), from: from.to_string() })
     }
 
     async fn send_email(&self, to: &str, subject: &str, html_body: &str, text_body: &str) -> Result<()> {
         let base = std::env::var("SERVER_URL").unwrap_or_else(|_| "https://flowlink.flow-masters.ru".to_string());
+        log::info!("SMTP: building email from={} to={}", self.from, to);
         let email = Message::builder()
             .from(self.from.parse().context("Invalid FROM")?)
             .to(to.parse().context("Invalid TO")?)
@@ -38,8 +48,15 @@ impl EmailService {
                 .singlepart(lettre::message::SinglePart::builder().header(ContentType::TEXT_PLAIN).body(text_body.replace("__BASE_URL__", &base)))
                 .singlepart(lettre::message::SinglePart::builder().header(ContentType::TEXT_HTML).body(html_body.replace("__BASE_URL__", &base))),
             )?;
-        self.transport.send(email).await.context("SMTP send failed")?;
-        Ok(())
+        log::info!("SMTP: sending via transport...");
+        let result = self.transport.send(email).await;
+        match result {
+            Ok(_) => { log::info!("SMTP: sent successfully"); Ok(()) }
+            Err(e) => {
+                log::error!("SMTP transport error: {e:?}");
+                Err(anyhow::anyhow!("SMTP send failed: {e:?}"))
+            }
+        }
     }
 
     pub async fn send_verification_code(&self, email: &str, code: &str, lang: &str) -> Result<()> {
