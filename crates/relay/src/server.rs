@@ -2346,6 +2346,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/secrets/config/key-setup", axum::routing::post(crate::zero_trust_api::setup_org_key))
         .route("/api/orgs/{org_id}/secrets/config/vault-setup", axum::routing::post(crate::zero_trust_api::setup_external_vault))
         .route("/api/orgs/{org_id}/secrets/config/vault", axum::routing::delete(crate::zero_trust_api::remove_external_vault))
+        // Infrastructure Map — semantic GPS for agents (org members)
+        .route("/api/orgs/{org_id}/map/summary", axum::routing::get(crate::infra_map_api::map_summary))
+        .route("/api/orgs/{org_id}/map/services", axum::routing::get(crate::infra_map_api::find_services))
+        .route("/api/orgs/{org_id}/map/service/{service_id}/topology", axum::routing::get(crate::infra_map_api::service_topology))
+        .route("/api/orgs/{org_id}/map/service/{service_id}/secrets", axum::routing::get(crate::infra_map_api::service_secrets))
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
     let api_routes = Router::new()
