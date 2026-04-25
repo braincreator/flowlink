@@ -62,6 +62,15 @@ enum Commands {
     },
     /// Version info
     Version,
+    /// Run secret discovery scan on this host
+    Discover {
+        /// Scope JSON file (uses defaults if omitted)
+        #[arg(short, long)]
+        scope: Option<String>,
+        /// Output format (json or text)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+    },
     /// Run diagnostics — check config, connectivity, dependencies
     Doctor {
         #[arg(short, long, default_value = "flowlink.json")]
@@ -261,6 +270,24 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Version => {
             println!("flowlink {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        Commands::Discover { scope, format } => {
+            use flowlink_agent::discovery::{DiscoveryScanner, DiscoveryScope};
+            let s: DiscoveryScope = match scope {
+                Some(path) => serde_json::from_str(&std::fs::read_to_string(path)?)?,
+                None => DiscoveryScope::default(),
+            };
+            eprintln!("🔍 Scanning...");
+            let rt = tokio::runtime::Runtime::new()?;
+            let result = rt.block_on(async { DiscoveryScanner::new(s).scan().await })?;
+            match format.as_str() {
+                "json" => println!("{}", serde_json::to_string_pretty(&result)?),
+                _ => {
+                    eprintln!("✅ {} services, {} secrets in {}ms", result.services.len(), result.secrets.len(), result.scan_duration_ms);
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                },
+            }
             Ok(())
         }
         Commands::Doctor { config } => cmd_doctor(&config),
