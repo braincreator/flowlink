@@ -2333,6 +2333,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/webhooks", axum::routing::get(crate::webhooks_api::list_webhooks).post(crate::webhooks_api::create_webhook))
         .route("/api/orgs/{org_id}/webhooks/{id}", axum::routing::delete(crate::webhooks_api::delete_webhook))
         .route("/api/orgs/{org_id}/webhooks/{id}/test", axum::routing::post(crate::webhooks_api::test_webhook))
+        // Secret Discovery (org owner/admin only)
+        .route("/api/orgs/{org_id}/discovery/start", axum::routing::post(crate::discovery_api::start_discovery))
+        .route("/api/orgs/{org_id}/discovery/results", axum::routing::get(crate::discovery_api::list_discovery_results))
+        .route("/api/orgs/{org_id}/discovery/{scan_id}/approve", axum::routing::post(crate::discovery_api::approve_discovery))
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
     let api_routes = Router::new()

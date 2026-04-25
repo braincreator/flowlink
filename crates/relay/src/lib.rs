@@ -635,3 +635,4 @@ pub mod secrets_api;
 pub mod secret_mappings_api;
 pub mod compliance_api;
 pub mod fstek;
+pub mod discovery_api;
