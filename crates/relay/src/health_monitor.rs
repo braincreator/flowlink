@@ -186,7 +186,7 @@ impl HealthTracker {
             });
 
             node.events_1h += 1;
-            node.last_event = Some(event.event_type_str().to_string());
+            node.last_event = Some(event.event_type.event_type_str().to_string());
             node.last_event_time = Some(event.timestamp.clone());
 
             match &event.severity {
@@ -279,9 +279,9 @@ impl HealthTracker {
     }
 }
 
-impl InfraEvent {
+impl InfraEventType {
     pub fn event_type_str(&self) -> &str {
-        match &self.event_type {
+        match self {
             InfraEventType::AgentConnected => "agent_connected",
             InfraEventType::AgentDisconnected => "agent_disconnected",
             InfraEventType::AgentHeartbeat => "agent_heartbeat",

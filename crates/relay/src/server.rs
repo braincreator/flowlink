@@ -2529,6 +2529,7 @@ mod tests {
                 .pool_max_idle_per_host(4)
                 .build().expect("Failed to create shared HTTP client"),
             cors_origins: vec!["*".to_string()], // test: wildcard
+            rate_limits_config: Arc::new(std::sync::RwLock::new(crate::rate_limiter::RateLimitsConfig::default())),
         }
     }
 
@@ -2811,6 +2812,7 @@ mod tests {
         let metrics = Arc::new(Metrics::new());
         let reloader = Arc::new(crate::config_reload::ConfigReloader::new(
             config_path, shared_config, handler, metrics,
+            Arc::new(std::sync::RwLock::new(crate::rate_limiter::RateLimitsConfig::default())),
         ));
 
         let mut state = test_state();

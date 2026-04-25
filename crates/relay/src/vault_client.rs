@@ -334,7 +334,7 @@ impl VaultClient {
                     standby: status == 429,
                 })
             }
-            Err(e) => Ok(VaultHealth {
+            Err(_e) => Ok(VaultHealth {
                 reachable: false,
                 initialized: false,
                 sealed: true,

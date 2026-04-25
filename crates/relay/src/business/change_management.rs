@@ -176,7 +176,7 @@ pub async fn list_changes(
     let limit = params.limit.unwrap_or(50).min(200);
 
     // Query audit_log for change requests
-    let mut query = String::from(
+    let query = String::from(
         "SELECT id, timestamp, level, action, target, result, metadata, account_id FROM audit_log WHERE org_id = $1 AND action LIKE 'change_%' ORDER BY timestamp DESC LIMIT $2"
     );
 
@@ -185,7 +185,7 @@ pub async fn list_changes(
     ).bind(org_uuid).bind(limit)
     .fetch_all(pool).await.unwrap_or_default();
 
-    let changes: Vec<serde_json::Value> = rows.into_iter().map(|(id, ts, level, action, target, result, meta, acid)| {
+    let changes: Vec<serde_json::Value> = rows.into_iter().map(|(_id, ts, level, action, target, result, meta, acid)| {
         serde_json::json!({
             "id": target,
             "timestamp": ts,

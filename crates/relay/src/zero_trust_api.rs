@@ -8,7 +8,6 @@ use axum::{
     response::IntoResponse,
     Extension, Json,
 };
-use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::auth::Claims;

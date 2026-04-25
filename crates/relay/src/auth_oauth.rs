@@ -264,8 +264,8 @@ fn extract_token_from_headers(headers: &HeaderMap) -> Option<String> {
 
 /// Build cookie-based auth response: Set-Cookie headers + redirect to dashboard
 fn auth_cookie_redirect(config: &RelayConfig, access_token: &str, refresh_token: &str) -> axum::response::Response {
-    use axum::http::header::{SET_COOKIE, LOCATION};
-    use axum::http::HeaderValue;
+    use axum::http::header::SET_COOKIE;
+    
     let base = config.dashboard_url_or_public().to_string();
     let is_https = base.starts_with("https://");
     let secure_flag = if is_https { "; Secure" } else { "" };

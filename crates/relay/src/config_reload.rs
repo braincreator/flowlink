@@ -331,7 +331,7 @@ mod tests {
         ));
         let metrics = Arc::new(Metrics::new());
 
-        let reloader = Arc::new(ConfigReloader::new(config_path, config, handler, metrics));
+        let reloader = Arc::new(ConfigReloader::new(config_path, config, handler, metrics, Arc::new(std::sync::RwLock::new(crate::rate_limiter::RateLimitsConfig::default()))));
         (reloader, dir)
     }
 

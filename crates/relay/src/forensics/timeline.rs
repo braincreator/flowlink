@@ -170,7 +170,7 @@ pub async fn get_timeline(
                     "SELECT n.id, n.name, n.node_type, COALESCE(n.criticality, 'medium') FROM infra_map_nodes n WHERE n.org_id = $1 AND n.discovered_by = $2 LIMIT 20"
                 ).bind(org_uuid).bind(agent_id).fetch_all(pool).await {
                     entry.related_nodes = nodes.iter().map(|(id, _, _, _)| id.clone()).collect();
-                    for (id, name, ntype, crit) in nodes {
+                    for (id, _name, _ntype, _crit) in nodes {
                         if let Ok(edges) = sqlx::query_as::<_, (String, String, String, String)>(
                             "SELECT n.id, n.name, n.node_type, COALESCE(n.criticality, 'medium') FROM infra_map_edges e JOIN infra_map_nodes n ON (e.to_id = n.id OR e.from_id = n.id) WHERE e.org_id = $1 AND (e.from_id = $2 OR e.to_id = $2) AND n.id != $2 LIMIT 10"
                         ).bind(org_uuid).bind(&id).fetch_all(pool).await {
@@ -282,7 +282,7 @@ fn build_summary(entries: &[TimelineEntry], anomalies: &[AnomalyRecord], from: D
     let blocked = entries.iter().filter(|e| e.result == "blocked").count();
     let approved = entries.iter().filter(|e| e.result == "approved").count();
     let highest = entries.iter().map(|e| match e.risk_level.as_str() { "critical" => 4, "high" => 3, "medium" => 2, "low" => 1, _ => 0 }).max().map(|v| match v { 4 => "critical", 3 => "high", 2 => "medium", 1 => "low", _ => "info" }).unwrap_or("info").to_string();
-    let risk_score = std::cmp::min(100, (entries.len() as u8 / 2).min(50) + (blocked as u8 * 5).min(30) + (anomalies.len() as u8 * 10).min(20));
+    let risk_score = std::cmp::min(100u32, (entries.len() as u32 / 2).min(50) + (blocked as u32 * 5).min(30) + (anomalies.len() as u32 * 10).min(20)) as u8;
 
     let mut recs = Vec::new();
     if blocked > 0 { recs.push(format!("{} blocked — review shield rules", blocked)); }

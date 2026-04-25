@@ -1,7 +1,7 @@
 //! Context Snapshots — point-in-time state capture for audit/rollback.
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
     Extension, Json,

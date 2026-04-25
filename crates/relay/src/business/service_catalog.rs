@@ -1,7 +1,7 @@
 //! Service Catalog & Ownership — live service catalog for business users.
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
     Extension, Json,
@@ -80,7 +80,7 @@ pub struct CatalogQuery {
 pub async fn list_catalog(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
-    Query(params): Query<CatalogQuery>,
+    Query(_params): Query<CatalogQuery>,
 ) -> impl IntoResponse {
     let pool = match require_pool(&state) { Ok(p) => p, Err(e) => return e.into_response() };
     let (_org_str, org_uuid) = match require_org(&claims) { Ok(v) => v, Err(e) => return e.into_response() };

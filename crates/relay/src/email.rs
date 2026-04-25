@@ -188,7 +188,7 @@ impl EmailService {
 // ═══════════════════════════════════════════════════════════════
 
 fn fmt_email(lang: &str, header_color: &str, sub: &str, body_html: &str) -> String {
-    fmt_email_with_base(lang, header_color, sub, body_html, "__BASE_URL__")
+    fmt_email_with_base(lang, header_color, sub, body_html, "https://flowlink.flow-masters.ru")
 }
 
 fn fmt_email_with_base(lang: &str, header_color: &str, sub: &str, body_html: &str, base_url: &str) -> String {
@@ -252,7 +252,7 @@ fn fmt_verification_standalone(code: &str, lang: &str, body_text: &str, footer_n
 }
 
 fn format_verification_html(code: &str, lang: &str, body_text: &str, footer_note: &str) -> String {
-    fmt_verification_standalone(code, lang, body_text, footer_note)
+    fmt_verification_standalone(code, lang, body_text, footer_note).replace("__BASE_URL__", "https://flowlink.flow-masters.ru")
 }
 
 fn format_welcome1_html(name: &str, lang: &str) -> String {
@@ -453,7 +453,7 @@ fn format_password_changed_html(name: &str, lang: &str) -> String {
 }
 
 fn format_api_key_html(name: &str, key_name: &str, created: bool, lang: &str) -> String {
-    let (action, color, sub, greeting, desc, footnote) = if created {
+    let (_action, color, sub, greeting, desc, footnote) = if created {
         if lang == "en" {
             ("created", "#6366f1,#8b5cf6", "New API key",
              "Hi, {name}!", "API key <strong style=\"color:#fff;\">{key_name}</strong> created in your account.",

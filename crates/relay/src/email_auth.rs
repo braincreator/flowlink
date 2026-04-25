@@ -314,7 +314,7 @@ pub async fn change_email_confirm(
             }))).into_response();
         }
     };
-    let user_lang = current_account.preferred_language.as_deref().unwrap_or("ru");
+    let _user_lang = current_account.preferred_language.as_deref().unwrap_or("ru");
 
     // Verify and consume code
     match flowlink_db::email_verification::EmailVerificationRepo::verify_and_consume_code(

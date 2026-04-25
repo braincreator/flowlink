@@ -23,8 +23,7 @@
 // | Compromised agent                   | Agent-scoped keys + audit trail           |
 // | Insider (relay admin)               | Zero knowledge — relay не видит plaintext |
 
-use anyhow::{Context as _, Result};
-use flowlink_crypto::{EncryptedEnvelope, KeyPair};
+use flowlink_crypto::EncryptedEnvelope;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

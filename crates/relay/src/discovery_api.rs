@@ -377,7 +377,7 @@ async fn write_approved_to_vault(
     pool: &sqlx::PgPool,
     org_id: uuid::Uuid,
     scan_id: &str,
-    secret_ids: &[String],
+    _secret_ids: &[String],
     approved_by: &str,
 ) -> anyhow::Result<usize> {
     use crate::vault_client::VaultSecret;
@@ -481,7 +481,7 @@ pub async fn vault_health(
     .fetch_optional(pool)
     .await;
 
-    let role = match role {
+    let _role = match role {
         Ok(Some(r)) if r == "owner" || r == "admin" => r,
         _ => {
             return (StatusCode::FORBIDDEN, Json(serde_json::json!({

@@ -59,7 +59,7 @@ pub async fn alertmanager_webhook(
 
     for alert in &payload.alerts {
         let alert_name = alert.labels.get("alertname").cloned().unwrap_or_default();
-        let alert_name_ref = &alert_name;
+        let _alert_name_ref = &alert_name;
         let severity = alert.labels.get("severity").cloned()
             .or_else(|| alert.annotations.get("severity").cloned())
             .unwrap_or_else(|| "warning".into());
@@ -73,7 +73,7 @@ pub async fn alertmanager_webhook(
 
         if let Some(nid) = &node_id {
             // Update node health in DB
-            let status = match alert.status.as_str() {
+            let _status = match alert.status.as_str() {
                 "firing" => "alert",
                 "resolved" => "healthy",
                 _ => "degraded",

@@ -1,7 +1,7 @@
 //! Forensic Reports — auto-generated compliance and audit reports.
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::State,
     http::StatusCode,
     response::IntoResponse,
     Extension, Json,

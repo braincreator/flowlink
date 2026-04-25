@@ -81,8 +81,8 @@ pub async fn find_services(
     let mut query_str = String::from(
         "SELECT id, node_type, data, name, environment, criticality, owner FROM infra_map_nodes WHERE org_id = $1 AND node_type = 'service'"
     );
-    let mut param_idx = 2u32;
-    let mut param_values: Vec<(String, String)> = vec![];
+    let _param_idx = 2u32;
+    let _param_values: Vec<(String, String)> = vec![];
 
     if let Some(name) = &params.name {
         query_str.push_str(&format!(" AND name ILIKE '%{}%'", name.replace('\'', "''")));

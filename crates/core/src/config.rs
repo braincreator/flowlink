@@ -914,6 +914,7 @@ mod tests {
             dashboard_url: None,
             server_url: None,
             cors_allowed_origins: vec![],
+            rate_limits: Default::default(),
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: RelayConfig = serde_json::from_str(&json).unwrap();
