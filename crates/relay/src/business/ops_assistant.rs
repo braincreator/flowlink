@@ -55,24 +55,40 @@ pub async fn ask(
     let q = params.q.to_lowercase();
     let now = Utc::now();
 
-    // Route to appropriate query handler based on keywords
-    if q.contains("сервис") || q.contains("service") || q.contains("сервисы") {
-        handle_services_query(pool, org_uuid, &q, now).await
-    } else if q.contains("агент") || q.contains("agent") {
-        handle_agents_query(pool, org_uuid, &q, now).await
+    let query_type = classify_query(&q);
+
+    match query_type {
+        "services" => handle_services_query(pool, org_uuid, &q, now).await,
+        "agents" => handle_agents_query(pool, org_uuid, &q, now).await,
+        "risk" => handle_risk_query(pool, org_uuid, &q, now).await,
+        "incidents" => handle_incident_query(pool, org_uuid, &q, now).await,
+        "cost" => handle_cost_query(pool, org_uuid, &q, now).await,
+        "shield" => handle_shield_query(pool, org_uuid, &q, now).await,
+        "ownership" => handle_ownership_query(pool, org_uuid, &q, now).await,
+        _ => handle_overview(pool, org_uuid, &q, now).await,
+    }
+}
+
+/// Classify a natural language query into a query type.
+pub fn classify_query(q: &str) -> &'static str {
+    let q = q.to_lowercase();
+    // Order matters: more specific keywords first to avoid false matches
+    if q.contains("пад") || q.contains("down") || q.contains("crash") || q.contains("ошибк") || q.contains("error") || q.contains("incident") {
+        "incidents"
     } else if q.contains("риск") || q.contains("risk") || q.contains("опасн") || q.contains("угроз") {
-        handle_risk_query(pool, org_uuid, &q, now).await
-    } else if q.contains("пад") || q.contains("down") || q.contains("crash") || q.contains("ошибк") || q.contains("error") || q.contains("incident") {
-        handle_incident_query(pool, org_uuid, &q, now).await
-    } else if q.contains("стоимост") || q.contains("cost") || q.contains("эконом") || q.contains("save") || q.contains("time") {
-        handle_cost_query(pool, org_uuid, &q, now).await
+        "risk"
     } else if q.contains("блокир") || q.contains("block") || q.contains("shield") || q.contains("защит") {
-        handle_shield_query(pool, org_uuid, &q, now).await
+        "shield"
+    } else if q.contains("стоимост") || q.contains("cost") || q.contains("эконом") || q.contains("save") {
+        "cost"
     } else if q.contains("кто") || q.contains("who") || q.contains("owner") || q.contains("владе") {
-        handle_ownership_query(pool, org_uuid, &q, now).await
+        "ownership"
+    } else if q.contains("агент") || q.contains("agent") {
+        "agents"
+    } else if q.contains("сервис") || q.contains("service") || q.contains("сервисы") {
+        "services"
     } else {
-        // General overview
-        handle_overview(pool, org_uuid, &q, now).await
+        "overview"
     }
 }
 
@@ -274,4 +290,78 @@ async fn handle_overview(pool: &sqlx::PgPool, org_uuid: uuid::Uuid, _q: &str, no
         data: serde_json::json!({"services": services, "agents": agents, "commands_24h": cmds, "blocked_24h": blocked, "errors_1h": errors, "status": status}),
         query_type: "overview".into(), generated_at: now,
     }).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_services_ru() {
+        assert_eq!(classify_query("покажи все сервисы"), "services");
+        assert_eq!(classify_query("сколько сервисов"), "services");
+        assert_eq!(classify_query("service list"), "services");
+    }
+
+    #[test]
+    fn test_classify_agents() {
+        assert_eq!(classify_query("сколько агентов активно"), "agents");
+        assert_eq!(classify_query("show agents"), "agents");
+        assert_eq!(classify_query("агент упал"), "agents");
+    }
+
+    #[test]
+    fn test_classify_risk() {
+        assert_eq!(classify_query("какие риски"), "risk");
+        assert_eq!(classify_query("risk assessment"), "risk");
+        assert_eq!(classify_query("опасные сервисы"), "risk");
+        assert_eq!(classify_query("угрозы безопасности"), "risk");
+    }
+
+    #[test]
+    fn test_classify_incidents() {
+        assert_eq!(classify_query("что падает"), "incidents");
+        assert_eq!(classify_query("service is down"), "incidents");
+        assert_eq!(classify_query("crash report"), "incidents");
+        assert_eq!(classify_query("ошибки за час"), "incidents");
+    }
+
+    #[test]
+    fn test_classify_cost() {
+        assert_eq!(classify_query("сколько экономим"), "cost");
+        assert_eq!(classify_query("cost savings"), "cost");
+        assert_eq!(classify_query("стоимость агентов"), "cost");
+        assert_eq!(classify_query("how much we save"), "cost");
+        assert_eq!(classify_query("time saved"), "cost");
+    }
+
+    #[test]
+    fn test_classify_shield() {
+        assert_eq!(classify_query("что блокировал shield"), "shield");
+        assert_eq!(classify_query("blocked commands"), "shield");
+        assert_eq!(classify_query("защита"), "shield");
+    }
+
+    #[test]
+    fn test_classify_ownership() {
+        assert_eq!(classify_query("кто владеет сервисами"), "ownership");
+        assert_eq!(classify_query("who owns this"), "ownership");
+        assert_eq!(classify_query("owner of database"), "ownership");
+    }
+
+    #[test]
+    fn test_classify_overview_fallback() {
+        assert_eq!(classify_query("обзор"), "overview");
+        assert_eq!(classify_query("hello"), "overview");
+        assert_eq!(classify_query("status"), "overview");
+        assert_eq!(classify_query("что происходит"), "overview");
+        assert_eq!(classify_query("overall status"), "overview");
+    }
+
+    #[test]
+    fn test_classify_case_insensitive() {
+        assert_eq!(classify_query("SHOW SERVICES"), "services");
+        assert_eq!(classify_query("AGENT STATUS"), "agents");
+        assert_eq!(classify_query("Risk Analysis"), "risk");
+    }
 }

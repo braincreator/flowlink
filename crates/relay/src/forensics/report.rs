@@ -90,8 +90,9 @@ pub async fn generate_forensic_report(
 
     let risk_trend = if blocked_actions < prev_blocked { "improving" } else if blocked_actions > prev_blocked { "degrading" } else { "stable" };
 
+    let overall_score = compute_compliance_score(total_commands, blocked_actions, anomalies, approval_rate);
     let compliance_score = serde_json::json!({
-        "overall": std::cmp::min(100, 80 + (approval_rate - 80.0).max(0.0).min(15.0) as i64 - (anomalies as f64 * 0.5).min(20.0) as i64),
+        "overall": overall_score,
         "access_control": if approval_rate > 95.0 { 95.0 } else { approval_rate },
         "audit_trail": if total_commands > 0 { 100.0 } else { 50.0 },
         "policy_enforcement": if total_commands > 0 { approval_rate } else { 100.0 },
@@ -149,4 +150,55 @@ pub async fn generate_forensic_report(
     };
 
     Json(report).into_response()
+}
+
+
+fn compute_compliance_score(commands: i64, blocked: i64, anomalies: i64, approval_rate: f64) -> f64 {
+    let base = if commands == 0 { return 100.0; } else { 80.0 };
+    let approval_bonus = (approval_rate - 80.0).max(0.0).min(15.0);
+    let anomaly_penalty = (anomalies as f64 * 0.5).min(20.0);
+    let block_bonus = if blocked > 0 { 0.0 } else { 5.0 };
+    (base + approval_bonus + block_bonus - anomaly_penalty).clamp(0.0, 100.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compliance_score_perfect() {
+        let score = compute_compliance_score(0, 0, 0, 100.0);
+        assert_eq!(score, 100.0);
+    }
+
+    #[test]
+    fn test_compliance_score_high_approval() {
+        let score = compute_compliance_score(100, 0, 0, 99.0);
+        assert!(score >= 90.0, "high approval rate should give high score: {}", score);
+    }
+
+    #[test]
+    fn test_compliance_score_many_anomalies() {
+        let good = compute_compliance_score(100, 0, 0, 95.0);
+        let bad = compute_compliance_score(100, 0, 40, 95.0);
+        assert!(good > bad, "anomalies should reduce score: {} vs {}", good, bad);
+    }
+
+    #[test]
+    fn test_compliance_score_low_approval() {
+        let score = compute_compliance_score(100, 5, 0, 60.0);
+        assert!(score <= 80.0, "low approval should not get bonus: {}", score);
+    }
+
+    #[test]
+    fn test_compliance_score_capped_at_100() {
+        let score = compute_compliance_score(0, 0, 0, 100.0);
+        assert!(score <= 100.0);
+    }
+
+    #[test]
+    fn test_compliance_score_never_below_0() {
+        let score = compute_compliance_score(100, 50, 100, 10.0);
+        assert!(score >= 0.0, "score should not go negative: {}", score);
+    }
 }

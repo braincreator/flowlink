@@ -244,3 +244,38 @@ fn compute_service_risk(deps: f64, dependents: f64, criticality: &str, agent_hit
     let crit_mult = match criticality { "critical" => 3.0, "high" => 2.0, "medium" => 1.0, _ => 0.5 };
     (deps + dependents) * crit_mult + (agent_hits as f64 * 0.1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_service_risk_critical_high_deps() {
+        let risk = compute_service_risk(10.0, 5.0, "critical", 20);
+        assert!(risk > 40.0, "critical with many deps should be high risk");
+    }
+
+    #[test]
+    fn test_service_risk_low() {
+        let risk = compute_service_risk(0.0, 0.0, "low", 0);
+        assert!(risk < 1.0, "isolated low-criticality service should have near-zero risk");
+    }
+
+    #[test]
+    fn test_service_risk_scales_with_agents() {
+        let r1 = compute_service_risk(5.0, 5.0, "medium", 0);
+        let r2 = compute_service_risk(5.0, 5.0, "medium", 100);
+        assert!(r2 > r1, "more agent interactions should increase risk");
+    }
+
+    #[test]
+    fn test_service_risk_criticality_multiplier() {
+        let r_low = compute_service_risk(5.0, 5.0, "low", 0);
+        let r_med = compute_service_risk(5.0, 5.0, "medium", 0);
+        let r_high = compute_service_risk(5.0, 5.0, "high", 0);
+        let r_crit = compute_service_risk(5.0, 5.0, "critical", 0);
+        assert!(r_low < r_med);
+        assert!(r_med < r_high);
+        assert!(r_high < r_crit);
+    }
+}
