@@ -2406,6 +2406,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/catalog/services", axum::routing::get(crate::business::service_catalog::list_catalog))
         .route("/api/v1/catalog/summary", axum::routing::get(crate::business::service_catalog::catalog_summary))
         .route("/api/v1/catalog/efficiency", axum::routing::get(crate::business::service_catalog::efficiency_insights))
+
+        // ── Business: Change Management ──
+        .route("/api/v1/changes", axum::routing::get(crate::business::change_management::list_changes).post(crate::business::change_management::create_change))
+        .route("/api/v1/changes/{change_id}/approve", axum::routing::post(crate::business::change_management::approve_change))
+        .route("/api/v1/changes/{change_id}/rollback", axum::routing::post(crate::business::change_management::rollback_change))
         // Health Monitoring
         .route("/api/orgs/{org_id}/health", axum::routing::get(crate::health_monitor_api::health_snapshot))
         // External Alert Ingestion (no auth — webhook from Alertmanager/Zabbix)
