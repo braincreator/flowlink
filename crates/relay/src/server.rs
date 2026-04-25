@@ -2136,7 +2136,10 @@ pub fn build_router(state: AppState) -> Router {
         // MCP (has its own validation)
         .route("/mcp", axum::routing::post(crate::mcp::handle_mcp))
         // SSE (has its own token validation)
-        .route("/api/events", get(sse_events));
+        .route("/api/events", get(sse_events))
+        // External alert ingestion (no auth — from Prometheus/Zabbix/Grafana)
+        .route("/api/webhooks/alertmanager", axum::routing::post(crate::alert_ingestion::alertmanager_webhook))
+        .route("/api/webhooks/generic-alert", axum::routing::post(crate::alert_ingestion::generic_alert_webhook));
 
     // ── Protected routes (require JWT auth) ──
     let protected_routes = Router::new()
@@ -2354,6 +2357,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/map/service/{service_id}/secrets", axum::routing::get(crate::infra_map_api::service_secrets))
         // Health Monitoring
         .route("/api/orgs/{org_id}/health", axum::routing::get(crate::health_monitor_api::health_snapshot))
+        // External Alert Ingestion (no auth — webhook from Alertmanager/Zabbix)
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
     let api_routes = Router::new()
