@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::auth::Claims;
 use crate::server::AppState;
+use flowlink_core::channels::{AuditEvent, AuditEventType};
 
 /// Scope — what to scan (mirrors flowlink_agent::discovery::DiscoveryScope)
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -184,6 +185,30 @@ pub async fn start_discovery(
         // Table might not exist yet — still return OK, scan is queued in log
     }
 
+    // Record audit event (immutable, integrity-hashed)
+    let _ = state.audit_store.record(AuditEvent {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent_id: req.agent_id.clone(),
+        event_type: AuditEventType::DiscoveryStarted {
+            scan_id: scan_id.clone(),
+            agent_id: req.agent_id.clone(),
+        },
+        timestamp_nanos: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64,
+        timestamp_iso: chrono::Utc::now().to_rfc3339(),
+        forensic: None,
+        metadata: {
+            let mut m = std::collections::HashMap::new();
+            m.insert("org_id".into(), org_id.to_string());
+            m.insert("started_by".into(), claims.account_id.clone());
+            m.insert("scope_dirs".into(), scope.directories.join(","));
+            m.insert("scope_services".into(), scope.service_types.join(","));
+            m
+        },
+    });
+
     (StatusCode::OK, Json(DiscoveryResponse {
         ok: true,
         scan_id,
@@ -301,6 +326,29 @@ pub async fn approve_discovery(
         "🔑 Discovery scan {} approved by {} (role={}) for {} secrets in org {}",
         scan_id, claims.sub, role, req.secret_ids.len(), org_id
     );
+
+    // Record audit event (immutable)
+    let _ = state.audit_store.record(AuditEvent {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent_id: String::new(),
+        event_type: AuditEventType::DiscoveryApproved {
+            scan_id: scan_id.clone(),
+            secret_count: req.secret_ids.len(),
+        },
+        timestamp_nanos: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64,
+        timestamp_iso: chrono::Utc::now().to_rfc3339(),
+        forensic: None,
+        metadata: {
+            let mut m = std::collections::HashMap::new();
+            m.insert("org_id".into(), org_id.to_string());
+            m.insert("approved_by".into(), claims.account_id.clone());
+            m.insert("approved_by_role".into(), role);
+            m
+        },
+    });
 
     (StatusCode::OK, Json(serde_json::json!({
         "ok": true,

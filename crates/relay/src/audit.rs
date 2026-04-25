@@ -422,6 +422,16 @@ fn map_event_to_db_fields(event: &AuditEvent) -> (String, String, Option<String>
             meta.insert("version".to_string(), Value::String(version.clone()));
             ("info".into(), "policy_load".into(), None, None)
         }
+        AuditEventType::DiscoveryStarted { scan_id, agent_id } => {
+            meta.insert("scan_id".to_string(), Value::String(scan_id.clone()));
+            meta.insert("agent_id".to_string(), Value::String(agent_id.clone()));
+            ("info".into(), "discovery_started".into(), Some(scan_id.clone()), Some("pending".into()))
+        }
+        AuditEventType::DiscoveryApproved { scan_id, secret_count } => {
+            meta.insert("scan_id".to_string(), Value::String(scan_id.clone()));
+            meta.insert("secret_count".to_string(), Value::Number((*secret_count).into()));
+            ("info".into(), "discovery_approved".into(), Some(scan_id.clone()), Some("approved".into()))
+        }
     };
 
     (level, action, target, result, Value::Object(meta))

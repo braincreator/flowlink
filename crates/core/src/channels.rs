@@ -86,6 +86,14 @@ pub enum AuditEventType {
         rules_count: u32,
         version: String,
     },
+    DiscoveryStarted {
+        scan_id: String,
+        agent_id: String,
+    },
+    DiscoveryApproved {
+        scan_id: String,
+        secret_count: usize,
+    },
 }
 
 impl AuditEventType {
@@ -104,6 +112,8 @@ impl AuditEventType {
             Self::AgentDisconnected { .. } => "agent_disconnected",
             Self::PolicyViolation { .. } => "policy_violation",
             Self::PolicyLoaded { .. } => "policy_loaded",
+            Self::DiscoveryStarted { .. } => "discovery_started",
+            Self::DiscoveryApproved { .. } => "discovery_approved",
         }
     }
 
@@ -376,6 +386,14 @@ mod tests {
             AuditEventType::PolicyLoaded {
                 rules_count: 15,
                 version: "v2".into(),
+            },
+            AuditEventType::DiscoveryStarted {
+                scan_id: "test-scan-123".into(),
+                agent_id: "agent-1".into(),
+            },
+            AuditEventType::DiscoveryApproved {
+                scan_id: "test-scan-123".into(),
+                secret_count: 5,
             },
         ];
         for et in types {
