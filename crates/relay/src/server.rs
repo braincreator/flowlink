@@ -2392,6 +2392,20 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/map/services", axum::routing::get(crate::infra_map_api::find_services))
         .route("/api/orgs/{org_id}/map/service/{service_id}/topology", axum::routing::get(crate::infra_map_api::service_topology))
         .route("/api/orgs/{org_id}/map/service/{service_id}/secrets", axum::routing::get(crate::infra_map_api::service_secrets))
+
+        // ── Forensics & Incident Analysis ──
+        .route("/api/v1/forensics/timeline", axum::routing::get(crate::forensics::timeline::get_timeline))
+        .route("/api/v1/forensics/reconstruct/{agent_id}", axum::routing::get(crate::forensics::timeline::reconstruct_agent))
+        .route("/api/v1/forensics/report", axum::routing::post(crate::forensics::report::generate_forensic_report))
+        .route("/api/v1/forensics/snapshot", axum::routing::post(crate::forensics::snapshot_context::create_snapshot))
+        .route("/api/v1/forensics/snapshots", axum::routing::get(crate::forensics::snapshot_context::list_snapshots))
+        .route("/api/v1/forensics/snapshot/{snapshot_id}", axum::routing::get(crate::forensics::snapshot_context::get_snapshot))
+        .route("/api/v1/forensics/diff/{ida}/{idb}", axum::routing::get(crate::forensics::snapshot_context::diff_snapshots))
+
+        // ── Business: Service Catalog & Efficiency ──
+        .route("/api/v1/catalog/services", axum::routing::get(crate::business::service_catalog::list_catalog))
+        .route("/api/v1/catalog/summary", axum::routing::get(crate::business::service_catalog::catalog_summary))
+        .route("/api/v1/catalog/efficiency", axum::routing::get(crate::business::service_catalog::efficiency_insights))
         // Health Monitoring
         .route("/api/orgs/{org_id}/health", axum::routing::get(crate::health_monitor_api::health_snapshot))
         // External Alert Ingestion (no auth — webhook from Alertmanager/Zabbix)
