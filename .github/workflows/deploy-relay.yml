@@ -1,0 +1,54 @@
+name: Build & Deploy Relay
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'cmd/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'migrations/**'
+      - 'config/**'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build release
+        run: cargo build --release --bin flowlink --features tgbot
+
+      - name: Deploy to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          echo "$VPS_KEY" > /tmp/vps_key && chmod 600 /tmp/vps_key
+          scp -i /tmp/vps_key -o StrictHostKeyChecking=no target/release/flowlink $VPS_USER@$VPS_HOST:/tmp/flowlink-new
+          ssh -i /tmp/vps_key -o StrictHostKeyChecking=no $VPS_USER@$VPS_HOST << 'DEPLOY'
+            systemctl stop flowlink
+            sleep 3
+            fuser -k 9081/tcp 2>/dev/null || true
+            sleep 1
+            cp /tmp/flowlink-new /opt/flowlink/bin/flowlink
+            chmod +x /opt/flowlink/bin/flowlink
+            systemctl start flowlink
+            sleep 5
+            systemctl is-active flowlink && echo "DEPLOY OK" || echo "DEPLOY FAILED"
+          DEPLOY

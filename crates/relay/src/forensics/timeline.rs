@@ -290,11 +290,136 @@ fn build_summary(entries: &[TimelineEntry], anomalies: &[AnomalyRecord], from: D
     if anomalies.iter().any(|a| a.anomaly_type == "lateral_movement") { recs.push("Lateral movement — review agent scope".into()); }
     if recs.is_empty() { recs.push("No significant anomalies".into()); }
 
-    IncidentSummary {
+        IncidentSummary {
         total_events: entries.len(), time_range: (from, to),
         agents_involved: agents, services_affected: services,
         commands_executed: entries.iter().filter(|e| e.event_type == "command").count(),
         blocked_actions: blocked, approved_actions: approved,
         highest_risk: highest, risk_score, anomalies: anomalies.to_vec(), recommendations: recs,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn make_entry(ts: &str, event_type: &str, action: &str, risk: &str, result: &str, agent_id: Option<&str>) -> TimelineEntry {
+        TimelineEntry {
+            timestamp: Utc.with_ymd_and_hms(2026, 4, 25, 
+                ts[0..2].parse().unwrap(), ts[3..5].parse().unwrap(), 0).unwrap(),
+            event_type: event_type.into(), source: "test".into(),
+            agent_id: agent_id.map(String::from), account_id: None,
+            action: action.into(), target: None, result: result.into(),
+            risk_level: risk.into(), details: serde_json::json!({}),
+            related_nodes: vec![], blast_radius: vec![],
+        }
+    }
+
+    #[test]
+    fn test_detect_off_hours() {
+        let entries = vec![
+            make_entry("23:30", "command", "rm -rf /", "high", "blocked", Some("agent-1")),
+        ];
+        let anomalies = detect_anomalies(&entries);
+        assert_eq!(anomalies.len(), 1);
+        assert_eq!(anomalies[0].anomaly_type, "off_hours");
+    }
+
+    #[test]
+    fn test_detect_privilege_escalation() {
+        let entries = vec![
+            make_entry("10:00", "command", "sudo chmod 777 /etc", "high", "allowed", Some("agent-1")),
+        ];
+        let anomalies = detect_anomalies(&entries);
+        assert!(anomalies.iter().any(|a| a.anomaly_type == "privilege_escalation"));
+    }
+
+    #[test]
+    fn test_detect_lateral_movement() {
+        let base = Utc.with_ymd_and_hms(2026, 4, 25, 10, 0, 0).unwrap();
+        let entries = vec![
+            TimelineEntry {
+                timestamp: base, event_type: "command".into(), source: "test".into(),
+                agent_id: Some("agent-1".into()), account_id: None,
+                action: "ssh".into(), target: Some("host-a".into()), result: "allowed".into(),
+                risk_level: "low".into(), details: serde_json::json!({}),
+                related_nodes: vec![], blast_radius: vec![],
+            },
+            TimelineEntry {
+                timestamp: base + chrono::Duration::minutes(1), event_type: "command".into(), source: "test".into(),
+                agent_id: Some("agent-1".into()), account_id: None,
+                action: "ssh".into(), target: Some("host-b".into()), result: "allowed".into(),
+                risk_level: "low".into(), details: serde_json::json!({}),
+                related_nodes: vec![], blast_radius: vec![],
+            },
+        ];
+        let anomalies = detect_anomalies(&entries);
+        assert!(anomalies.iter().any(|a| a.anomaly_type == "lateral_movement"));
+    }
+
+    #[test]
+    fn test_detect_data_exfil() {
+        let entries = vec![
+            make_entry("10:00", "command", "scp /etc/secrets user@external:", "medium", "blocked", Some("agent-1")),
+        ];
+        let anomalies = detect_anomalies(&entries);
+        assert!(anomalies.iter().any(|a| a.anomaly_type == "data_exfil_risk"));
+    }
+
+    #[test]
+    fn test_no_anomalies_normal_hours() {
+        let entries = vec![
+            make_entry("10:00", "audit", "login", "info", "allowed", Some("agent-1")),
+        ];
+        let anomalies = detect_anomalies(&entries);
+        assert!(anomalies.is_empty());
+    }
+
+    #[test]
+    fn test_build_summary_basic() {
+        let from = Utc.with_ymd_and_hms(2026, 4, 25, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 4, 25, 23, 59, 59).unwrap();
+        let entries = vec![
+            make_entry("10:00", "command", "ls", "low", "allowed", Some("a1")),
+            make_entry("11:00", "command", "rm", "high", "blocked", Some("a2")),
+        ];
+        let anomalies = vec![];
+        let summary = build_summary(&entries, &anomalies, from, to);
+        assert_eq!(summary.total_events, 2);
+        assert_eq!(summary.blocked_actions, 1);
+        assert_eq!(summary.approved_actions, 0);
+        assert_eq!(summary.commands_executed, 2);
+        assert_eq!(summary.highest_risk, "high");
+        assert_eq!(summary.agents_involved.len(), 2);
+    }
+
+    #[test]
+    fn test_risk_score_calculation() {
+        let from = Utc.with_ymd_and_hms(2026, 4, 25, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 4, 25, 23, 59, 59).unwrap();
+        // 10 entries, 2 blocked → score = min(50, 10/2=5) + min(30, 2*5=10) = 15
+        let entries: Vec<TimelineEntry> = (0..10).map(|i| {
+            make_entry("10:00", "command", &format!("cmd-{}", i), "low",
+                if i < 2 { "blocked" } else { "allowed" }, Some("a1"))
+        }).collect();
+        let summary = build_summary(&entries, &[], from, to);
+        assert_eq!(summary.risk_score, 15);
+    }
+
+    #[test]
+    fn test_risk_score_max_100() {
+        let from = Utc.with_ymd_and_hms(2026, 4, 25, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 4, 25, 23, 59, 59).unwrap();
+        let entries: Vec<TimelineEntry> = (0..200).map(|i| {
+            make_entry("10:00", "command", &format!("cmd-{}", i), "critical", "blocked", Some("a1"))
+        }).collect();
+        let anomaly = AnomalyRecord {
+            anomaly_type: "privilege_escalation".into(),
+            description: "test".into(),
+            timestamp: from, severity: "high".into(), related_entries: vec![],
+        };
+        let summary = build_summary(&entries, &std::iter::repeat(anomaly).take(5).collect::<Vec<_>>(), from, to);
+        assert_eq!(summary.risk_score, 100);
     }
 }
