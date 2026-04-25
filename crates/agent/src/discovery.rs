@@ -3,6 +3,7 @@
 // AI-агент НЕ может инициировать discovery самостоятельно.
 
 use anyhow::Result;
+use flowlink_crypto::{EncryptedEnvelope, KeyPair};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -130,6 +131,48 @@ pub struct DiscoveryResult {
     pub secrets: Vec<DiscoveredSecret>,
     pub scan_duration_ms: u64,
     pub errors: Vec<String>,
+}
+
+impl DiscoveryResult {
+    /// Encrypt the discovery result using E2EE before sending to relay.
+    /// Relay sees only ciphertext — cannot read secrets.
+    /// The agent's keypair + relay's public key are used for X25519 key exchange.
+    pub fn encrypt_for_relay(
+        &self,
+        agent_keypair: &KeyPair,
+        relay_public_key: &str,
+    ) -> Result<EncryptedDiscoveryResult> {
+        let json = serde_json::to_vec(self)?;
+        let envelope = flowlink_crypto::encrypt(agent_keypair, relay_public_key, &json)?;
+        Ok(EncryptedDiscoveryResult {
+            host: self.host.clone(),
+            timestamp: self.timestamp.clone(),
+            scan_duration_ms: self.scan_duration_ms,
+            services_count: self.services.len(),
+            secrets_count: self.secrets.len(),
+            errors_count: self.errors.len(),
+            encrypted_payload: envelope,
+        })
+    }
+}
+
+/// E2EE-wrapped discovery result — relay sees metadata + ciphertext only
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptedDiscoveryResult {
+    /// Host that was scanned (metadata, not secret)
+    pub host: String,
+    /// When the scan ran
+    pub timestamp: String,
+    /// How long the scan took
+    pub scan_duration_ms: u64,
+    /// Number of services found (metadata)
+    pub services_count: usize,
+    /// Number of secrets found (metadata)
+    pub secrets_count: usize,
+    /// Number of errors (metadata)
+    pub errors_count: usize,
+    /// E2EE encrypted payload — contains actual DiscoveryResult
+    pub encrypted_payload: EncryptedEnvelope,
 }
 
 /// Паттерн для поиска секретов в конфигах
@@ -1132,5 +1175,48 @@ logging:
         assert_eq!(identify_source_service("/etc/postgresql/15/main/postgresql.conf"), "postgres");
         assert_eq!(identify_source_service("/opt/redis/redis.conf"), "redis");
         assert_eq!(identify_source_service("/home/app/.env"), "unknown");
+    }
+
+    #[test]
+    fn test_e2ee_encrypt_discovery_result() {
+        let agent_kp = KeyPair::generate();
+        let relay_kp = KeyPair::generate();
+
+        let result = DiscoveryResult {
+            host: "test-host".into(),
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            scope: DiscoveryScope::default(),
+            services: vec![],
+            secrets: vec![DiscoveredSecret {
+                source_path: "/app/.env".into(),
+                service_type: "app".into(),
+                key_type: SecretType::Password,
+                key_name: "DB_PASSWORD".into(),
+                value_hash: "abc123".into(),
+                metadata: HashMap::new(),
+            }],
+            scan_duration_ms: 150,
+            errors: vec![],
+        };
+
+        // Agent encrypts for relay
+        let encrypted = result.encrypt_for_relay(&agent_kp, &relay_kp.public_key).unwrap();
+
+        // Metadata is visible
+        assert_eq!(encrypted.host, "test-host");
+        assert_eq!(encrypted.secrets_count, 1);
+        assert_eq!(encrypted.scan_duration_ms, 150);
+
+        // Relay can decrypt
+        let decrypted_envelope = &encrypted.encrypted_payload;
+        let plaintext = flowlink_crypto::decrypt(&relay_kp, decrypted_envelope).unwrap();
+        let restored: DiscoveryResult = serde_json::from_slice(&plaintext).unwrap();
+        assert_eq!(restored.host, "test-host");
+        assert_eq!(restored.secrets.len(), 1);
+        assert_eq!(restored.secrets[0].key_name, "DB_PASSWORD");
+
+        // Wrong key cannot decrypt
+        let attacker_kp = KeyPair::generate();
+        assert!(flowlink_crypto::decrypt(&attacker_kp, decrypted_envelope).is_err());
     }
 }
