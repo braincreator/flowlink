@@ -1485,6 +1485,75 @@ fn deduplicate_secrets(secrets: Vec<DiscoveredSecret>) -> Vec<DiscoveredSecret> 
     }).collect()
 }
 
+/// Build infrastructure map edges from discovered services and secrets
+pub fn build_infra_edges(
+    host_id: &str,
+    services: &[DiscoveredService],
+    secrets: &[DiscoveredSecret],
+) -> Vec<InfraEdge> {
+    let mut edges = Vec::new();
+    let mut edge_id = 0u64;
+
+    // HOST → SERVICE edges
+    for svc in services {
+        edge_id += 1;
+        edges.push(InfraEdge {
+            id: format!("edge-{edge_id}"),
+            from_id: host_id.to_string(),
+            to_id: format!("svc-{}", slugify_simple(&svc.service_type)),
+            rel_type: "HOSTS_SERVICE".into(),
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert("name".into(), svc.name.clone());
+                m.insert("status".into(), format!("{:?}", svc.status));
+                if let Some(v) = &svc.version {
+                    m.insert("version".into(), v.clone());
+                }
+                m
+            },
+        });
+    }
+
+    // SERVICE → SECRET_REF edges
+    for secret in secrets {
+        edge_id += 1;
+        let svc_id = format!("svc-{}", slugify_simple(&secret.service_type));
+        edges.push(InfraEdge {
+            id: format!("edge-{edge_id}"),
+            from_id: svc_id,
+            to_id: format!("secret-{}", slugify_simple(&secret.key_name)),
+            rel_type: "SERVICE_HAS_SECRET".into(),
+            metadata: {
+                let mut m = HashMap::new();
+                m.insert("key_type".into(), format!("{:?}", secret.key_type));
+                m.insert("source".into(), secret.source_path.clone());
+                m
+            },
+        });
+    }
+
+    edges
+}
+
+/// Simple slugify for IDs
+fn slugify_simple(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+/// Infrastructure edge (lightweight, for sending to relay)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InfraEdge {
+    pub id: String,
+    pub from_id: String,
+    pub to_id: String,
+    pub rel_type: String,
+    pub metadata: HashMap<String, String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1615,6 +1684,45 @@ logging:
         assert_eq!(identify_source_service("/etc/postgresql/15/main/postgresql.conf"), "postgres");
         assert_eq!(identify_source_service("/opt/redis/redis.conf"), "redis");
         assert_eq!(identify_source_service("/home/app/.env"), "unknown");
+    }
+
+    #[test]
+    fn test_build_infra_edges() {
+        let services = vec![
+            DiscoveredService {
+                service_type: "postgres".into(),
+                name: "postgresql.service".into(),
+                version: Some("15.4".into()),
+                config_paths: vec![],
+                listen_addresses: vec!["127.0.0.1:5432".into()],
+                status: ServiceStatus::Running,
+            },
+        ];
+        let secrets = vec![
+            DiscoveredSecret {
+                source_path: "/etc/postgresql/main/postgresql.conf".into(),
+                service_type: "postgres".into(),
+                key_type: SecretType::Password,
+                key_name: "DB_PASSWORD".into(),
+                value_hash: "abc".into(),
+                metadata: HashMap::new(),
+            },
+        ];
+
+        let edges = build_infra_edges("host-prod-01", &services, &secrets);
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].rel_type, "HOSTS_SERVICE");
+        assert_eq!(edges[0].from_id, "host-prod-01");
+        assert_eq!(edges[0].to_id, "svc-postgres");
+        assert_eq!(edges[1].rel_type, "SERVICE_HAS_SECRET");
+        assert_eq!(edges[1].from_id, "svc-postgres");
+    }
+
+    #[test]
+    fn test_slugify_simple() {
+        assert_eq!(slugify_simple("PostgreSQL 15"), "postgresql-15");
+        assert_eq!(slugify_simple("redis"), "redis");
+        assert_eq!(slugify_simple("DB_PASSWORD"), "db-password");
     }
 
     #[test]
