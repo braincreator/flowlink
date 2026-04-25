@@ -2352,6 +2352,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/orgs/{org_id}/map/services", axum::routing::get(crate::infra_map_api::find_services))
         .route("/api/orgs/{org_id}/map/service/{service_id}/topology", axum::routing::get(crate::infra_map_api::service_topology))
         .route("/api/orgs/{org_id}/map/service/{service_id}/secrets", axum::routing::get(crate::infra_map_api::service_secrets))
+        // Health Monitoring
+        .route("/api/orgs/{org_id}/health", axum::routing::get(crate::health_monitor_api::health_snapshot))
         .layer(middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), crate::middleware::jwt_auth));
 
     let api_routes = Router::new()
