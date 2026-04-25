@@ -161,7 +161,7 @@ pub async fn emergency_stop_bot(_bot: Bot) {
 }
 
 /// Central command router
-async fn handle_command(
+pub async fn handle_command(
     bot: Bot,
     msg: Message,
     cmd: Command,
@@ -226,7 +226,7 @@ async fn handle_command(
 }
 
 /// Handle inline button callbacks
-async fn handle_callback(
+pub async fn handle_callback(
     bot: Bot,
     q: CallbackQuery,
     ctx: BotContext,

@@ -479,9 +479,21 @@ impl Relay {
             if !tg_token.is_empty() {
                 let bot_state = Arc::new(state.clone());
                 let token = tg_token.clone();
+                let (bot_mode, webhook_url) = if let Some(ref url) = self.config.tg_webhook_url {
+                    if !url.is_empty() {
+                        info!("Telegram bot: webhook mode → {}", url);
+                        (crate::tgbot::bot::BotMode::Webhook, Some(url.clone()))
+                    } else {
+                        info!("Telegram bot: polling mode (empty webhook_url)");
+                        (crate::tgbot::bot::BotMode::Polling, None)
+                    }
+                } else {
+                    info!("Telegram bot: polling mode (no webhook_url)");
+                    (crate::tgbot::bot::BotMode::Polling, None)
+                };
                 let bot_config = crate::tgbot::bot::BotConfig {
-                    mode: crate::tgbot::bot::BotMode::Polling,
-                    webhook_url: None,
+                    mode: bot_mode,
+                    webhook_url,
                     polling_interval: std::time::Duration::from_secs(5),
                     auto_recovery_enabled: true,
                 };

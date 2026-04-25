@@ -345,6 +345,41 @@ async fn healthz() -> Json<serde_json::Value> {
     }))
 }
 
+/// Telegram webhook handler — receives updates from Telegram API.
+/// Dispatches them through the bot's command/callback handlers.
+#[cfg(feature = "tgbot")]
+async fn tg_webhook_handler(
+    State(state): State<AppState>,
+    axum::Json(update): axum::Json<teloxide::types::Update>,
+) -> Result<axum::http::StatusCode, axum::http::StatusCode> {
+    let bot = match state.tg_bot.get() {
+        Some(b) => b.clone(),
+        None => {
+            log::error!("tg_webhook: bot not initialized");
+            return Err(axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        }
+    };
+
+    let ctx = crate::tgbot::commands::BotContext { state: std::sync::Arc::new(state.clone()) };
+
+    // Process in background to return 200 quickly to Telegram
+    tokio::spawn(async move {
+        if let Err(e) = crate::tgbot::process_update(bot, update, ctx).await {
+            log::error!("tg_webhook: error processing update: {}", e);
+        }
+    });
+
+    Ok(axum::http::StatusCode::OK)
+}
+
+#[cfg(not(feature = "tgbot"))]
+async fn tg_webhook_handler(
+    axum::Json(_update): axum::Json<serde_json::Value>,
+) -> axum::http::StatusCode {
+    log::warn!("tg_webhook: received update but tgbot feature is disabled");
+    axum::http::StatusCode::SERVICE_UNAVAILABLE
+}
+
 async fn list_agents(
     State(state): State<AppState>,
     axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
@@ -2139,7 +2174,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/events", get(sse_events))
         // External alert ingestion (no auth — from Prometheus/Zabbix/Grafana)
         .route("/api/webhooks/alertmanager", axum::routing::post(crate::alert_ingestion::alertmanager_webhook))
-        .route("/api/webhooks/generic-alert", axum::routing::post(crate::alert_ingestion::generic_alert_webhook));
+        .route("/api/webhooks/generic-alert", axum::routing::post(crate::alert_ingestion::generic_alert_webhook))
+        // Telegram webhook (receives updates from Telegram API)
+        .route("/api/tg/webhook", axum::routing::post(tg_webhook_handler));
 
     // ── Protected routes (require JWT auth) ──
     let protected_routes = Router::new()
