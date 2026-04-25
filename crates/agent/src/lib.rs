@@ -7,6 +7,7 @@ pub mod autonomous;
 pub mod backup;
 pub mod connection;
 pub mod dispatch;
+pub mod discovery;
 pub mod executor;
 pub mod fileops;
 pub mod killswitch;
