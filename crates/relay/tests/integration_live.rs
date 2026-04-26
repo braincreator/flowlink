@@ -79,6 +79,8 @@ fn make_state() -> (AppState, tempfile::TempDir) {
         tiered_rate_limiter: Arc::new(flowlink_relay::rate_limiter::TieredRateLimiter::new()),
         key_rate_limiter: Arc::new(flowlink_relay::api_keys::KeyRateLimiter::new(100, 60)),
         saml_config: None,
+        rate_limits_config: Arc::new(std::sync::RwLock::new(flowlink_relay::rate_limiter::RateLimitsConfig::default())),
+        vault: None,
         rusiem_config: None,
         http_client: reqwest::Client::new(),
         cors_origins: vec!["*".to_string()],
