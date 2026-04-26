@@ -878,3 +878,33 @@ All errors follow a consistent format:
 | 409 | CONFLICT | Agent already registered |
 | 429 | RATE_LIMITED | Too many requests |
 | 500 | INTERNAL_ERROR | Server error |
+
+---
+
+## GitOps
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/gitops/drift/{agent_id}` | Drift status for agent |
+| POST | `/api/v1/gitops/backup/{agent_id}` | Trigger backup |
+| GET | `/api/v1/gitops/backups/{agent_id}` | List backups |
+| POST | `/api/v1/gitops/restore/{agent_id}` | Restore from backup |
+| GET | `/api/v1/gitops/guard/{agent_id}` | Server guard status |
+
+## Compliance & Forensics
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/compliance/audit` | Compliance audit report |
+| GET | `/api/v1/compliance/policy` | Policy compliance check |
+| GET | `/api/v1/compliance/exec-summary` | Executive security summary |
+| GET | `/api/v1/compliance/fstek` | FSTEK/152-FZ compliance |
+| GET | `/api/v1/forensics/timeline` | Forensic incident timeline |
+
+## Discovery & Infrastructure
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/discovery/services` | Discovered services catalog |
+| GET | `/api/v1/health/agents` | Agent health overview |
+| GET | `/api/v1/infra/map` | Infrastructure topology map |

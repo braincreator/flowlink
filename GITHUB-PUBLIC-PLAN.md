@@ -39,7 +39,7 @@ flowlink/                    # public repo
 - ❌ GitHub Actions CI (нет кода = нет CI)
 - ❌ Releases / бинарники / теги
 - ❌ .git history с секретами
-- ❌ Go-код / Go-версии (если есть)
+- ❌ Go-код / Go-версии (проект полностью Rust)
 
 ## Phase 1: README
 
