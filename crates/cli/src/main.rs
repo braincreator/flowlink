@@ -118,6 +118,20 @@ enum Commands {
         #[arg(short, long, default_value = "flowlink.json")]
         config: String,
     },
+    /// GitOps operations (drift detection, backup, restore, guard status)
+    Gitops {
+        #[command(subcommand)]
+        action: GitopsAction,
+        /// Relay URL
+        #[arg(short, long, default_value = "https://flowlink.flow-masters.ru")]
+        relay: String,
+        /// Agent ID
+        #[arg(short, long)]
+        agent: Option<String>,
+        /// API key for authentication
+        #[arg(short, long)]
+        key: Option<String>,
+    },
 }
 
 /// Telegram bot management subcommands
@@ -188,6 +202,27 @@ enum ApproveAction {
         #[arg(short, long)]
         id: String,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum GitopsAction {
+    /// Check configuration drift for an agent
+    Drift,
+    /// Trigger a backup for an agent
+    Backup {
+        /// Paths to backup (comma-separated)
+        #[arg(short, long)]
+        paths: Option<String>,
+    },
+    /// List backups for an agent
+    Backups,
+    /// Restore from a backup
+    Restore {
+        /// Backup ID to restore
+        backup_id: String,
+    },
+    /// Show server guard status
+    Guard,
 }
 
 #[derive(Subcommand, Debug)]
@@ -296,6 +331,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Devices { action, config } => cmd_devices(action, &config),
         Commands::Approve { action, config } => cmd_approve(action, &config),
         Commands::Policy { action, config } => cmd_policy(action, &config),
+        Commands::Gitops { action, relay, agent, key } => cmd_gitops(action, &relay, agent.as_deref(), key.as_deref()).await,
         Commands::Bot { command, config } => cmd_bot(command, &config),
         Commands::Mcp => {
             let server = flowlink_mcp::McpServer::new();
@@ -691,8 +727,153 @@ fn cmd_policy(action: PolicyAction, _config: &str) -> anyhow::Result<()> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Tests
+// GitOps
 // ═══════════════════════════════════════════════════════════
+
+async fn cmd_gitops(
+    action: GitopsAction,
+    relay: &str,
+    agent: Option<&str>,
+    key: Option<&str>,
+) -> anyhow::Result<()> {
+    let agent_id = agent.unwrap_or("default");
+    let client = reqwest::Client::new();
+    let base_url = relay.trim_end_matches('/');
+
+    let auth_header = match key {
+        Some(k) => format!("Bearer {}", k),
+        None => {
+            // Try env var
+            match std::env::var("FLOWLINK_API_KEY") {
+                Ok(k) => format!("Bearer {}", k),
+                Err(_) => {
+                    println!("⚠️  No API key provided. Use --key or set FLOWLINK_API_KEY env var.");
+                    return Ok(());
+                }
+            }
+        }
+    };
+
+    match action {
+        GitopsAction::Drift => {
+            let url = format!("{}/api/v1/gitops/drift/{}", base_url, agent_id);
+            let resp = client.get(&url)
+                .header("Authorization", &auth_header)
+                .timeout(std::time::Duration::from_secs(10))
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let body: serde_json::Value = r.json().await?;
+                    let count = body["drift_count"].as_u64().unwrap_or(0);
+                    if count == 0 {
+                        println!("✅ No drift detected for agent '{}'", agent_id);
+                    } else {
+                        println!("⚠️  {} drift(s) detected for agent '{}':", count, agent_id);
+                        if let Some(drifts) = body["drifts"].as_array() {
+                            for d in drifts {
+                                println!("  • {} → expected: {} | actual: {} ({})",
+                                    d["path"].as_str().unwrap_or("?"),
+                                    d["expected"].as_str().unwrap_or("?"),
+                                    d["actual"].as_str().unwrap_or("?"),
+                                    d["severity"].as_str().unwrap_or("?"));
+                            }
+                        }
+                    }
+                }
+                Err(e) => println!("❌ Failed to check drift: {}", e),
+            }
+        }
+        GitopsAction::Backup { paths } => {
+            let url = format!("{}/api/v1/gitops/backup/{}", base_url, agent_id);
+            let resp = client.post(&url)
+                .header("Authorization", &auth_header)
+                .timeout(std::time::Duration::from_secs(15))
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let body: serde_json::Value = r.json().await?;
+                    println!("💾 Backup triggered for agent '{}'", agent_id);
+                    println!("  ID: {}", body["backup_id"].as_str().unwrap_or("?"));
+                    println!("  Status: {}", body["status"].as_str().unwrap_or("?"));
+                    if let Some(p) = paths {
+                        println!("  Paths: {}", p);
+                    }
+                }
+                Err(e) => println!("❌ Failed to trigger backup: {}", e),
+            }
+        }
+        GitopsAction::Backups => {
+            let url = format!("{}/api/v1/gitops/backups/{}", base_url, agent_id);
+            let resp = client.get(&url)
+                .header("Authorization", &auth_header)
+                .timeout(std::time::Duration::from_secs(10))
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let body: serde_json::Value = r.json().await?;
+                    let backups = body["backups"].as_array().map(|a| a.len()).unwrap_or(0);
+                    if backups == 0 {
+                        println!("📂 No backups found for agent '{}'", agent_id);
+                    } else {
+                        println!("📂 {} backup(s) for agent '{}':", backups, agent_id);
+                    }
+                }
+                Err(e) => println!("❌ Failed to list backups: {}", e),
+            }
+        }
+        GitopsAction::Restore { backup_id } => {
+            let url = format!("{}/api/v1/gitops/restore/{}", base_url, agent_id);
+            println!("♻️  Restoring backup '{}' for agent '{}'...", backup_id, agent_id);
+            let resp = client.post(&url)
+                .header("Authorization", &auth_header)
+                .json(&serde_json::json!({"backup_id": backup_id}))
+                .timeout(std::time::Duration::from_secs(30))
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let body: serde_json::Value = r.json().await?;
+                    println!("✅ Restore {} for agent '{}'",
+                        body["status"].as_str().unwrap_or("?"),
+                        agent_id);
+                }
+                Err(e) => println!("❌ Failed to restore: {}", e),
+            }
+        }
+        GitopsAction::Guard => {
+            let url = format!("{}/api/v1/gitops/guard/{}", base_url, agent_id);
+            let resp = client.get(&url)
+                .header("Authorization", &auth_header)
+                .timeout(std::time::Duration::from_secs(10))
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let body: serde_json::Value = r.json().await?;
+                    let running = body["running"].as_bool().unwrap_or(false);
+                    let emoji = if running { "🟢" } else { "🔴" };
+                    println!("{} ServerGuard for agent '{}': {}", emoji, agent_id,
+                        if running { "RUNNING" } else { "NOT RUNNING" });
+                    if let Some(paths) = body["watch_paths"].as_array() {
+                        println!("  Watching:");
+                        for p in paths {
+                            println!("    • {}", p.as_str().unwrap_or("?"));
+                        }
+                    }
+                    println!("  Docker events: {}",
+                        if body["watch_docker"].as_bool().unwrap_or(false) { "ON" } else { "OFF" });
+                    println!("  Canary tokens: {}",
+                        if body["watch_canary"].as_bool().unwrap_or(false) { "ON" } else { "OFF" });
+                }
+                Err(e) => println!("❌ Failed to get guard status: {}", e),
+            }
+        }
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
