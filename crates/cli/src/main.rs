@@ -132,6 +132,40 @@ enum Commands {
         #[arg(short, long)]
         key: Option<String>,
     },
+    /// Agent health monitoring
+    Health {
+        /// Relay URL
+        #[arg(short, long, default_value = "https://flowlink.flow-masters.ru")]
+        relay: String,
+        /// Agent ID (omit for all agents)
+        #[arg(short, long)]
+        agent: Option<String>,
+        /// API key for authentication
+        #[arg(short, long)]
+        key: Option<String>,
+    },
+    /// Command history and replay
+    History {
+        #[command(subcommand)]
+        action: HistoryAction,
+        /// Relay URL
+        #[arg(short, long, default_value = "https://flowlink.flow-masters.ru")]
+        relay: String,
+        /// API key for authentication
+        #[arg(short, long)]
+        key: Option<String>,
+    },
+    /// Interactive agent sessions
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+        /// Relay URL
+        #[arg(short, long, default_value = "https://flowlink.flow-masters.ru")]
+        relay: String,
+        /// API key for authentication
+        #[arg(short, long)]
+        key: Option<String>,
+    },
 }
 
 /// Telegram bot management subcommands
@@ -223,6 +257,63 @@ enum GitopsAction {
     },
     /// Show server guard status
     Guard,
+}
+
+/// Command history subcommands
+#[derive(Subcommand, Debug)]
+enum HistoryAction {
+    /// List command history
+    List {
+        /// Filter by agent ID
+        #[arg(short, long)]
+        agent: Option<String>,
+        /// Filter by shield result (blocked/allowed/approved)
+        #[arg(short, long)]
+        result: Option<String>,
+        /// Maximum entries (default 50)
+        #[arg(short, long, default_value = "50")]
+        limit: i64,
+    },
+    /// Show details of a specific command
+    Show {
+        /// Command ID
+        id: String,
+    },
+    /// Dry-run a command against current policies
+    DryRun {
+        /// Command to test
+        command: String,
+        /// Agent ID to test against
+        #[arg(short, long)]
+        agent: Option<String>,
+    },
+}
+
+/// Session subcommands
+#[derive(Subcommand, Debug)]
+enum SessionAction {
+    /// List active sessions
+    List {
+        /// Filter by agent ID
+        #[arg(short, long)]
+        agent: Option<String>,
+        /// Filter by status
+        #[arg(short, long)]
+        status: Option<String>,
+    },
+    /// Create a new session with an agent
+    Create {
+        /// Agent ID to connect to
+        agent_id: String,
+        /// Working directory
+        #[arg(short, long, default_value = "/")]
+        cwd: String,
+    },
+    /// Close a session
+    Close {
+        /// Session ID
+        session_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -332,6 +423,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Approve { action, config } => cmd_approve(action, &config),
         Commands::Policy { action, config } => cmd_policy(action, &config),
         Commands::Gitops { action, relay, agent, key } => cmd_gitops(action, &relay, agent.as_deref(), key.as_deref()).await,
+        Commands::Health { relay, agent, key } => cmd_health(&relay, agent.as_deref(), key.as_deref()).await,
+        Commands::History { action, relay, key } => cmd_history(action, &relay, key.as_deref()).await,
+        Commands::Session { action, relay, key } => cmd_session(action, &relay, key.as_deref()).await,
         Commands::Bot { command, config } => cmd_bot(command, &config),
         Commands::Mcp => {
             let server = flowlink_mcp::McpServer::new();
@@ -875,7 +969,270 @@ async fn cmd_gitops(
     Ok(())
 }
 
-#[cfg(test)]
+async fn cmd_health(relay: &str, agent: Option<&str>, key: Option<&str>) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let base_url = relay.trim_end_matches('/');
+    let auth_header = match key {
+        Some(k) => format!("Bearer {}", k),
+        None => match std::env::var("FLOWLINK_API_KEY") {
+            Ok(k) => format!("Bearer {}", k),
+            Err(_) => {
+                println!("\u{26a0}\u{fe0f}  No API key provided. Use --key or set FLOWLINK_API_KEY env var.");
+                return Ok(());
+            }
+        },
+    };
+
+    let url = match agent {
+        Some(id) => format!("{}/api/v1/agents/{}/health/latest", base_url, id),
+        None => format!("{}/api/v1/agents/health", base_url),
+    };
+
+    let resp = client.get(&url)
+        .header("Authorization", &auth_header)
+        .timeout(std::time::Duration::from_secs(10))
+        .send().await;
+
+    match resp {
+        Ok(r) => {
+            let body: serde_json::Value = r.json().await?;
+            if let Some(arr) = body.as_array() {
+                if arr.is_empty() {
+                    println!("No agents reporting health data.");
+                } else {
+                    println!("{:<20} {:<10} {:<8} {:<8} {:<12}
+", "AGENT", "STATUS", "CPU%", "RAM%", "DISK%");
+                    for item in arr {
+                        let id = item["agent_id"].as_str().unwrap_or("?");
+                        let cpu = item["cpu_percent"].as_f64().map(|v| format!("{:.1}", v)).unwrap_or("-".into());
+                        let ram = item["ram_percent"].as_f64().map(|v| format!("{:.1}", v)).unwrap_or("-".into());
+                        let disk = item["disk_percent"].as_f64().map(|v| format!("{:.1}", v)).unwrap_or("-".into());
+                        let status = if cpu.parse::<f64>().unwrap_or(0.0) > 90.0 || ram.parse::<f64>().unwrap_or(0.0) > 90.0 {
+                            "\u{1f7e1} WARN"
+                        } else {
+                            "\u{1f7e2} OK"
+                        };
+                        println!("{:<20} {:<10} {:<8} {:<8} {:<12}", id, status, cpu, ram, disk);
+                    }
+                }
+            } else {
+                // Single agent response
+                let id = agent.unwrap_or("?");
+                let cpu = body["cpu_percent"].as_f64().map(|v| format!("{:.1}%", v)).unwrap_or("-".into());
+                let ram = body["ram_percent"].as_f64().map(|v| format!("{:.1}%", v)).unwrap_or("-".into());
+                let disk = body["disk_percent"].as_f64().map(|v| format!("{:.1}%", v)).unwrap_or("-".into());
+                println!("Agent: {}", id);
+                println!("  CPU:     {}", cpu);
+                println!("  RAM:     {}", ram);
+                println!("  Disk:    {}", disk);
+                if let Some(uptime) = body["uptime_seconds"].as_i64() {
+                    let hours = uptime / 3600;
+                    let mins = (uptime % 3600) / 60;
+                    println!("  Uptime:  {}h {}m", hours, mins);
+                }
+            }
+        }
+        Err(e) => println!("\u{274c} Failed to get health data: {}", e),
+    }
+    Ok(())
+}
+
+async fn cmd_history(action: HistoryAction, relay: &str, key: Option<&str>) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let base_url = relay.trim_end_matches('/');
+    let auth_header = match key {
+        Some(k) => format!("Bearer {}", k),
+        None => match std::env::var("FLOWLINK_API_KEY") {
+            Ok(k) => format!("Bearer {}", k),
+            Err(_) => {
+                println!("\u{26a0}\u{fe0f}  No API key. Use --key or set FLOWLINK_API_KEY.");
+                return Ok(());
+            }
+        },
+    };
+
+    match action {
+        HistoryAction::List { agent, result, limit } => {
+            let mut url = format!("{}/api/v1/command-history?limit={}", base_url, limit);
+            if let Some(a) = agent { url.push_str(&format!("&agent_id={}", a)); }
+            if let Some(r) = result { url.push_str(&format!("&shield_result={}", r)); }
+
+            let resp = client.get(&url)
+                .header("Authorization", &auth_header)
+                .timeout(std::time::Duration::from_secs(10))
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let body: serde_json::Value = r.json().await?;
+                    if let Some(arr) = body.as_array() {
+                        if arr.is_empty() {
+                            println!("No command history found.");
+                        } else {
+                            println!("{:<36} {:<16} {:<10} {:<8} {}\n", "ID", "AGENT", "RESULT", "RISK", "COMMAND");
+                            for item in arr {
+                                let id = item["id"].as_str().unwrap_or("?");
+                                let agent_id = item["agent_id"].as_str().unwrap_or("?");
+                                let result = item["shield_result"].as_str().unwrap_or("?");
+                                let risk = item["shield_risk"].as_str().unwrap_or("-");
+                                let cmd = item["command"].as_str().unwrap_or("?").chars().take(40).collect::<String>();
+                                println!("{:<36} {:<16} {:<10} {:<8} {}", &id[..id.len().min(36)], agent_id, result, risk, cmd);
+                            }
+                        }
+                    }
+                }
+                Err(e) => println!("\u{274c} Failed to get history: {}", e),
+            }
+        }
+        HistoryAction::Show { id } => {
+            let url = format!("{}/api/v1/command-history/{}", base_url, id);
+            let resp = client.get(&url)
+                .header("Authorization", &auth_header)
+                .timeout(std::time::Duration::from_secs(10))
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let body: serde_json::Value = r.json().await?;
+                    println!("Command: {}", body["command"].as_str().unwrap_or("?"));
+                    println!("Args:    {}", body["args"].as_str().unwrap_or("-"));
+                    println!("Result:  {}", body["shield_result"].as_str().unwrap_or("?"));
+                    println!("Risk:    {}", body["shield_risk"].as_str().unwrap_or("-"));
+                    if let Some(exit) = body["exit_code"].as_i64() {
+                        println!("Exit:    {}", exit);
+                    }
+                    if let Some(dur) = body["duration_ms"].as_i64() {
+                        println!("Duration: {}ms", dur);
+                    }
+                }
+                Err(e) => println!("\u{274c} Failed to get command: {}", e),
+            }
+        }
+        HistoryAction::DryRun { command, agent } => {
+            let mut body = serde_json::json!({ "command": command });
+            if let Some(a) = agent {
+                body["agent_id"] = serde_json::Value::String(a);
+            }
+            let url = format!("{}/api/v1/shield/dry-run", base_url);
+            let resp = client.post(&url)
+                .header("Authorization", &auth_header)
+                .header("Content-Type", "application/json")
+                .timeout(std::time::Duration::from_secs(10))
+                .body(serde_json::to_string(&body)?)
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let result: serde_json::Value = r.json().await?;
+                    let blocked = result["would_block"].as_bool().unwrap_or(false);
+                    if blocked {
+                        println!("\u{1f6ab} Command would be BLOCKED:");
+                        if let Some(reasons) = result["reasons"].as_array() {
+                            for r in reasons {
+                                println!("  \u{2022} {}", r.as_str().unwrap_or("?"));
+                            }
+                        }
+                    } else {
+                        println!("\u{2705} Command would be ALLOWED");
+                    }
+                    if let Some(policies) = result["policies_matched"].as_array() {
+                        if !policies.is_empty() {
+                            println!("Policies matched: {}", policies.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", "));
+                        }
+                    }
+                }
+                Err(e) => println!("\u{274c} Dry-run failed: {}", e),
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_session(action: SessionAction, relay: &str, key: Option<&str>) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let base_url = relay.trim_end_matches('/');
+    let auth_header = match key {
+        Some(k) => format!("Bearer {}", k),
+        None => match std::env::var("FLOWLINK_API_KEY") {
+            Ok(k) => format!("Bearer {}", k),
+            Err(_) => {
+                println!("\u{26a0}\u{fe0f}  No API key. Use --key or set FLOWLINK_API_KEY.");
+                return Ok(());
+            }
+        },
+    };
+
+    match action {
+        SessionAction::List { agent, status } => {
+            let mut url = format!("{}/api/v1/sessions?limit=20", base_url);
+            if let Some(a) = agent { url.push_str(&format!("&agent_id={}", a)); }
+            if let Some(s) = status { url.push_str(&format!("&status={}", s)); }
+
+            let resp = client.get(&url)
+                .header("Authorization", &auth_header)
+                .timeout(std::time::Duration::from_secs(10))
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let body: serde_json::Value = r.json().await?;
+                    if let Some(arr) = body.as_array() {
+                        if arr.is_empty() {
+                            println!("No active sessions.");
+                        } else {
+                            println!("{:<36} {:<16} {:<10} {:<8} {}\n", "ID", "AGENT", "STATUS", "SHELL", "CREATED");
+                            for s in arr {
+                                let id = s["id"].as_str().unwrap_or("?");
+                                let agent = s["agent_id"].as_str().unwrap_or("?");
+                                let status = s["status"].as_str().unwrap_or("?");
+                                let shell = s["shell"].as_str().unwrap_or("?");
+                                let created = s["created_at"].as_str().unwrap_or("?");
+                                println!("{:<36} {:<16} {:<10} {:<8} {}", &id[..id.len().min(36)], agent, status, shell, &created[..created.len().min(19)]);
+                            }
+                        }
+                    }
+                }
+                Err(e) => println!("\u{274c} Failed to list sessions: {}", e),
+            }
+        }
+        SessionAction::Create { agent_id, cwd } => {
+            let url = format!("{}/api/v1/sessions", base_url);
+            let body = serde_json::json!({ "agent_id": agent_id, "cwd": cwd });
+            let resp = client.post(&url)
+                .header("Authorization", &auth_header)
+                .header("Content-Type", "application/json")
+                .timeout(std::time::Duration::from_secs(10))
+                .body(serde_json::to_string(&body)?)
+                .send().await;
+
+            match resp {
+                Ok(r) => {
+                    let result: serde_json::Value = r.json().await?;
+                    println!("\u{2705} Session created:");
+                    println!("  ID:     {}", result["id"].as_str().unwrap_or("?"));
+                    println!("  Agent:  {}", result["agent_id"].as_str().unwrap_or("?"));
+                    println!("  Shell:  {}", result["shell"].as_str().unwrap_or("?"));
+                    println!("  CWD:    {}", result["cwd"].as_str().unwrap_or("?"));
+                    println!("  Status: {}", result["status"].as_str().unwrap_or("?"));
+                }
+                Err(e) => println!("\u{274c} Failed to create session: {}", e),
+            }
+        }
+        SessionAction::Close { session_id } => {
+            let url = format!("{}/api/v1/sessions/{}", base_url, session_id);
+            let resp = client.delete(&url)
+                .header("Authorization", &auth_header)
+                .timeout(std::time::Duration::from_secs(10))
+                .send().await;
+
+            match resp {
+                Ok(_) => println!("\u{2705} Session {} closed.", session_id),
+                Err(e) => println!("\u{274c} Failed to close session: {}", e),
+            }
+        }
+    }
+    Ok(())
+}
 mod tests {
     use super::*;
     use clap::CommandFactory;

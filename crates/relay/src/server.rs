@@ -2359,6 +2359,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/commands/history", axum::routing::get(crate::command_history_api::list_history))
         .route("/api/v1/commands/history/{id}", axum::routing::get(crate::command_history_api::get_entry))
         .route("/api/v1/commands/stats", axum::routing::get(crate::command_history_api::command_stats))
+        .route("/api/v1/shield/dry-run", axum::routing::post(crate::command_history_api::dry_run))
         // Agent Health
         .route("/api/v1/agents/{agent_id}/health", axum::routing::get(crate::agent_health_api::get_latest))
         .route("/api/v1/agents/{agent_id}/health/timeseries", axum::routing::get(crate::agent_health_api::get_timeseries))

@@ -139,3 +139,100 @@ pub async fn command_stats(
 
     Ok((StatusCode::OK, Json(CommandStats { total_commands: total, blocked_commands: blocked, avg_duration_ms: avg, top_commands })))
 }
+
+
+// ── Dry-Run endpoint ──────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct DryRunRequest {
+    pub command: String,
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DryRunResult {
+    pub command: String,
+    pub would_block: bool,
+    pub reasons: Vec<String>,
+    pub policies_matched: Vec<String>,
+    pub risk_level: String,
+}
+
+pub async fn dry_run(
+    State(state): State<AppState>,
+    axum::extract::Extension(claims): axum::extract::Extension<crate::auth::Claims>,
+    Json(body): Json<DryRunRequest>,
+) -> Result<(StatusCode, Json<DryRunResult>), (StatusCode, String)> {
+    if !claims.is_admin && claims.org_id.is_none() {
+        return Err((StatusCode::FORBIDDEN, "Admin or org required".into()));
+    }
+
+    let command = body.command.to_lowercase();
+    let mut reasons = Vec::new();
+    let mut policies_matched = Vec::new();
+    let mut risk_level = "low".to_string();
+    let mut would_block = false;
+
+    // Check against known dangerous patterns (same as shield)
+    let dangerous_patterns = [
+        ("rm -rf /", "Destructive: recursive root delete"),
+        ("rm -rf /*", "Destructive: recursive root delete"),
+        ("drop table", "SQL: destructive schema change"),
+        ("truncate table", "SQL: data destruction"),
+        (":(){ :|:& };:", "Fork bomb: resource abuse"),
+        ("dd if=/dev/zero", "Disk wipe: destructive overwrite"),
+        ("mkfs.", "Filesystem format: destructive"),
+        ("chmod 777", "Privilege escalation: world-writable"),
+        ("chmod -R 777", "Privilege escalation: recursive world-writable"),
+        ("> /dev/sda", "Direct disk write: destructive"),
+        ("curl.*|.*sh", "Remote code execution: piped download"),
+        ("wget.*|.*bash", "Remote code execution: piped download"),
+        (":(){ :|:&", "Fork bomb: denial of service"),
+    ];
+
+    for (pattern, reason) in &dangerous_patterns {
+        if command.contains(pattern) {
+            would_block = true;
+            reasons.push(reason.to_string());
+            policies_matched.push("blacklist".to_string());
+            risk_level = "critical".to_string();
+        }
+    }
+
+    // Suspicious patterns (warn, not block)
+    let suspicious = [
+        ("sudo", "Privilege escalation: sudo usage"),
+        ("cat /etc/shadow", "Credential access: shadow file"),
+        ("cat /etc/passwd", "Credential access: passwd file"),
+        (".env", "Potential secret exposure: .env file"),
+        ("ssh -R", "Tunnel: reverse SSH forwarding"),
+        ("nc -l", "Network: netcat listener"),
+        ("curl.*-o.*", "File download: outbound transfer"),
+        ("aws s3 cp", "Cloud: S3 data transfer"),
+    ];
+
+    for (pattern, reason) in &suspicious {
+        if command.contains(pattern) && !would_block {
+            reasons.push(format!("[WARN] {}", reason));
+            policies_matched.push("policy".to_string());
+            if risk_level == "low" {
+                risk_level = "medium".to_string();
+            }
+        }
+    }
+
+    // Check if agent exists in pool (optional)
+    if let Some(ref agent_id) = body.agent_id {
+        if state.pool.get(agent_id).is_none() {
+            reasons.push(format!("[INFO] Agent '{}' not currently connected", agent_id));
+        }
+    }
+
+    Ok((StatusCode::OK, Json(DryRunResult {
+        command: body.command,
+        would_block,
+        reasons,
+        policies_matched,
+        risk_level,
+    })))
+}
