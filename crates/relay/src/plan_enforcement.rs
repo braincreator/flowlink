@@ -336,6 +336,8 @@ mod tests {
                 approval: false, rbac: false, pattern_learning: false,
                 e2ee: true, audit_log: true, webhooks: false,
                 siem_export: false, sso: false, on_premise: false,
+                forensics: false, service_catalog: false,
+                ai_ops: false, change_management: false,
             },
             limits: PlanLimits {
                 max_agents: 1, max_users: 1, audit_retention_days: 30,
@@ -364,6 +366,8 @@ mod tests {
                 approval: true, rbac: true, pattern_learning: false,
                 e2ee: true, audit_log: true, webhooks: true,
                 siem_export: true, sso: false, on_premise: false,
+                forensics: false, service_catalog: false,
+                ai_ops: false, change_management: false,
             },
             limits: PlanLimits {
                 max_agents: 5, max_users: 5, audit_retention_days: 60,

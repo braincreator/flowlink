@@ -10,6 +10,7 @@ pub mod dispatch;
 pub mod discovery;
 pub mod executor;
 pub mod fileops;
+pub mod gitops_bridge;
 pub mod killswitch;
 pub mod pattern_learn;
 pub mod policy;

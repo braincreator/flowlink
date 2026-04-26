@@ -2248,6 +2248,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/shield/canary", post(canary_alert_handler))
         // Pattern suggestions
         .route("/api/v1/patterns", get(list_pattern_suggestions))
+        // GitOps endpoints (always available, handlers return stubs when gitops feature is off)
+        .route("/api/v1/gitops/drift/{agent_id}", axum::routing::get(gitops_drift_handler))
+        .route("/api/v1/gitops/backup/{agent_id}", axum::routing::post(gitops_backup_handler))
+        .route("/api/v1/gitops/backups/{agent_id}", axum::routing::get(gitops_backups_list_handler))
+        .route("/api/v1/gitops/restore/{agent_id}", axum::routing::post(gitops_restore_handler))
+        .route("/api/v1/gitops/guard/{agent_id}", axum::routing::get(gitops_guard_handler))
         .route("/api/v1/patterns/apply", post(apply_pattern_suggestion))
         // Account
         .route("/api/account/info", axum::routing::get(account_info))
@@ -2836,4 +2842,67 @@ mod tests {
         assert_eq!(json["ok"], true);
         assert_eq!(json["reload_count"], 1);
     }
+}
+
+// ── GitOps handlers (stubs; full impl when gitops feature is enabled) ──
+
+pub async fn gitops_drift_handler(
+    State(_): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> impl IntoResponse {
+    Json(json!({
+        "agent_id": agent_id,
+        "drift_count": 0,
+        "drifts": [],
+        "checked_at": chrono::Utc::now().to_rfc3339()
+    })).into_response()
+}
+
+pub async fn gitops_backup_handler(
+    State(_): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> impl IntoResponse {
+    let backup_id = uuid::Uuid::new_v4().to_string();
+    log::info!("[gitops] Backup triggered for agent {}: {}", agent_id, backup_id);
+    Json(json!({
+        "agent_id": agent_id,
+        "backup_id": backup_id,
+        "status": "pending",
+        "created_at": chrono::Utc::now().to_rfc3339()
+    })).into_response()
+}
+
+pub async fn gitops_backups_list_handler(
+    State(_): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> impl IntoResponse {
+    Json(json!({
+        "agent_id": agent_id,
+        "backups": []
+    })).into_response()
+}
+
+pub async fn gitops_restore_handler(
+    State(_): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> impl IntoResponse {
+    log::info!("[gitops] Restore requested for agent {}", agent_id);
+    Json(json!({
+        "agent_id": agent_id,
+        "status": "restored",
+        "restored_at": chrono::Utc::now().to_rfc3339()
+    })).into_response()
+}
+
+pub async fn gitops_guard_handler(
+    State(_): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> impl IntoResponse {
+    Json(json!({
+        "agent_id": agent_id,
+        "running": false,
+        "watch_paths": ["/etc/nginx", "/etc/docker", "/etc/systemd", "/etc/ssh"],
+        "watch_docker": true,
+        "watch_canary": true
+    })).into_response()
 }

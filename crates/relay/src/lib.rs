@@ -43,6 +43,9 @@ pub mod control_plane;
 #[cfg(feature = "tgbot")]
 pub mod tgbot;
 
+#[cfg(feature = "gitops")]
+pub mod gitops_api;
+
 use std::sync::Arc;
 use std::path::PathBuf;
 use log::info;

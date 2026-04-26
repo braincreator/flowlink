@@ -222,6 +222,10 @@ mod tests {
                 siem_export: true,
                 sso: false,
                 on_premise: false,
+                forensics: false,
+                service_catalog: false,
+                ai_ops: false,
+                change_management: false,
             },
             limits: PlanLimits {
                 max_agents: 5,
@@ -267,6 +271,10 @@ mod tests {
                 siem_export: false,
                 sso: false,
                 on_premise: false,
+                forensics: false,
+                service_catalog: false,
+                ai_ops: false,
+                change_management: false,
             },
             limits: PlanLimits {
                 max_agents: 1,
