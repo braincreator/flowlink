@@ -1,3 +1,52 @@
+## [0.3.1-dev] - 2026-04-26
+
+### 🏗️ Architecture
+- Repositioned as MCP Gateway + AI-Native SecOps platform
+- 12 crates, ~158K lines Rust, ~1187 tests
+- GitOps module (19K lines, 183 tests) — feature-gated, ServerGuard + BackupEngine + DriftDetector
+- K8s Operator (5K lines, 76 tests) — CRD + AdmissionWebhook + SidecarInjection
+
+### 🛡️ Security
+- Zero-Trust Secret Injection via HashiCorp Vault integration
+- Forensic Timeline API (`/api/v1/forensics/timeline`)
+- Compliance API (security_audit, policy_compliance, exec_summary, fstek)
+- OWASP MCP risk mapping in docs
+
+### 📋 Governance
+- Approval Workflow (Telegram + Dashboard)
+- Change Management API
+- Service Catalog (80+ service types)
+- Pattern Learning (behavioral baseline)
+
+### 💰 Billing
+- Plans updated: Starter (4 990₽), Professional (39 990₽), Scale (79 990₽), Enterprise (custom)
+- PlanFeatures extended: forensics, service_catalog, ai_ops, change_management
+- Tochka Bank payment integration
+
+### 📊 Observability
+- SIEM export: CEF, LEEF, JSON + RuSIEM + MaxPatrol connectors
+- Infrastructure Map (live topology)
+- Discovery (automatic service catalog)
+- AI Ops Assistant
+
+### 🌐 Website
+- Hero repositioned: "MCP Gateway + AI-Native SecOps"
+- New page: Hello, Secure Agent quickstart (/docs/quickstart)
+- New page: FlowLink vs Competitors comparison (/docs/comparison)
+- Favicon: multi-resolution ICO (16/32/48/64) + apple-touch-icon
+- OG Image: Visibility/Governance/Protection triptych
+- Pricing comparison table extended (18 rows)
+- Features registry: 12 features (was 8)
+- Docs index: NEW badges, Recommended Path updated
+
+### 📝 Documentation
+- README.md + README_ru.md fully updated
+- ARCHITECTURE.md rewritten with Shield L1-L7, OWASP mapping
+- ROADMAP.md: 7 of 15 phases marked as DONE
+- GTM-PLAN.md: pricing synchronized with site
+
+---
+
 ## [0.3.1] - 2026-04-05
 
 ### 🔧 Improvements

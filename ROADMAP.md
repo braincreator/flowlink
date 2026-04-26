@@ -1,18 +1,24 @@
 # FlowLink Feature Roadmap
 
-## Текущий статус (2026-04-21)
+## Текущий статус (2026-04-26)
 
-**Готово:** Relay, Agent, Shield, Policy Engine, MCP (12 tools), Auth, Billing, API Keys, Pattern Learning, SIEM (CEF/LEEF/JSON), SAML SSO, K8s Operator (draft)
+**Версия:** 0.3.1-dev | **Крейты:** 12 | **Строк:** ~158K | **Тестов:** ~1187
 
-**Крейт-модули:**
-- `crates/relay/` — серверная часть (API, MCP, billing, auth, policies, api_keys, approval, saml, audit)
-- `crates/agent/` — агент (connection, executor, shield, policy, pattern_learn, approval)
-- `crates/shield/` — движок анализа команд (levels 1-3, forensic)
-- `crates/core/` — общие типы (rbac, messages, protocol)
-- `crates/db/` — миграции, pool
-- `crates/k8s/` — Kubernetes operator (839 lines, не тестирован)
-- `crates/gitops/` — GitOps (заглушка)
-- `crates/cli/` — CLI бинарник
+**Готово:** Relay, Agent, Shield (L1-L7), Policy Engine, MCP (12 tools), Auth (OAuth VK/Yandex/GitHub + 2FA + SAML), Billing (Точка Банк), API Keys, Pattern Learning, SIEM (CEF/LEEF/JSON + RuSIEM + MaxPatrol), K8s Operator (draft), GitOps (19K строк, feature-gated), Compliance API, Forensics Timeline, AI Ops, Change Management, Service Catalog, Zero-Trust Secret Injection, Discovery (80+ сервисов), Infra Map, Telegram Bot
+
+**Крейты:**
+- `core` (~15K) — типы сообщений, конфигурация, каналы
+- `crypto` (~3K) — X25519 + AES-256-GCM
+- `db` (~12K) — PostgreSQL репозитории (sqlx)
+- `billing` (~8K) — планы, счета, usage, Точка Банк
+- `agent` (~25K) — диспетчер, политики, sandbox, killswitch, exec
+- `relay` (~35K) — WS сервер, REST API, RBAC, E2EE, MCP
+- `shield` (~20K) — eBPF/macOS ES, анализ угроз, L1-L7
+- `gitops` (~19K) — drift detection, ServerGuard, backup engine (feature-gated)
+- `k8s` (~5K) — Operator, CRD, admission webhooks (draft)
+- `mcp` (~3K) — MCP протокол
+- `sentinel` (~5K) — AI Ops ассистент, pattern learning
+- `cli` (~8K) — бинарник, MCP сервер
 
 ---
 
@@ -38,7 +44,10 @@
 
 ---
 
-### Фаза 2: Webhook Notifications
+### Фаза 2: Webhook Notifications ✅
+**Статус:** РЕАЛИЗОВАНО
+
+Webhooks реализованы в relay. Поддерживаются shield.block, shield.warn, approval.pending, approval.resolved, agent.online, agent.offline, policy.changed.
 **Оценка:** 2 дня
 **Зависимости:** нет
 
@@ -56,7 +65,10 @@
 
 ---
 
-### Фаза 3: Agent Fleet Tags & Filtering
+### Фаза 3: Agent Fleet Tags & Filtering ✅
+**Статус:** РЕАЛИЗОВАНО
+
+Теги реализованы. API: `/api/v1/agents/{id}/tags`, MCP: фильтр по tags в flowlink_exec.
 **Оценка:** 1-2 дня
 **Зависимости:** нет
 
@@ -75,7 +87,10 @@
 
 ---
 
-### Фаза 4: Audit Log Timeline UI
+### Фаза 4: Audit Log Timeline UI ✅
+**Статус:** РЕАЛИЗОВАНО
+
+Audit Timeline реализован в Dashboard. API: `/api/v1/audit` с фильтрами, SIEM экспорт.
 **Оценка:** 2 дня
 **Зависимости:** нет
 
@@ -150,7 +165,10 @@
 
 ---
 
-### Фаза 8: Secrets Vault Integration
+### Фаза 8: Secrets Vault Integration ✅
+**Статус:** РЕАЛИЗОВАНО
+
+Zero-Trust Secret Injection через HashiCorp Vault. Секреты никогда не попадают в контекст агента.
 **Оценка:** 2-3 дня
 **Зависимости:** нет
 
@@ -222,7 +240,10 @@
 
 ---
 
-### Фаза 12: Telegram Bot for Approvals
+### Фаза 12: Telegram Bot for Approvals ✅
+**Статус:** РЕАЛИЗОВАНО
+
+Telegram бот с inline кнопками approve/deny. Webhook mode.
 **Оценка:** 1-2 дня
 **Зависимости:** Webhooks (Фаза 2)
 
@@ -240,7 +261,10 @@
 
 ---
 
-### Фаза 13: Russian SIEM Connectors (RuSIEM / MaxPatrol)
+### Фаза 13: Russian SIEM Connectors (RuSIEM / MaxPatrol) ✅
+**Статус:** РЕАЛИЗОВАНО
+
+RuSIEM (syslog UDP/TLS) и MaxPatrol (REST API) коннекторы реализованы.
 **Оценка:** 2-3 дня
 **Зависимости:** SIEM export (CEF/LEEF/JSON — готово)
 
@@ -258,7 +282,10 @@
 
 ---
 
-### Фаза 14: ФСТЭК/152-ФЗ Compliance Mode
+### Фаза 14: ФСТЭК/152-ФЗ Compliance Mode ✅
+**Статус:** РЕАЛИЗОВАНО
+
+Compliance API с security_audit, policy_compliance, exec_summary, fstek endpoints.
 **Оценка:** 3-5 дней
 **Зависимости:** Audit Log (Фаза 4), SIEM (Фаза 13)
 
