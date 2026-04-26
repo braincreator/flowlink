@@ -42,12 +42,14 @@ struct KvV2ReadResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct KvV2ReadData {
     data: serde_json::Value,
     metadata: KvV2Metadata,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct KvV2Metadata {
     version: u64,
     created_time: String,

@@ -1,8 +1,8 @@
 # Terms of Service — FlowLink
 
-**Last Updated:** April 3, 2026  
-**Effective Date:** April 3, 2026  
-**Version:** 1.0
+**Last Updated:** April 26, 2026  
+**Effective Date:** April 26, 2026  
+**Version:** 1.1
 
 ---
 
@@ -16,11 +16,12 @@ FlowLink is developed and operated by FlowMasters ("we", "us", "our").
 
 ## 2. Description of Service
 
-FlowLink is an **open-source infrastructure routing tool** that:
+FlowLink is an **MCP Gateway + AI-Native SecOps platform** that:
 
-- Routes commands from AI assistants to servers you own and control
-- Provides a relay server for command routing
-- Offers optional managed cloud hosting for the relay
+- Routes commands from AI assistants through a zero-trust MCP gateway
+- Provides a relay server with 7-level Shield security pipeline
+- Offers policy engine, approval workflow, and forensic timeline
+- Supports managed cloud hosting for the relay
 
 **FlowLink does NOT:**
 - Control, modify, or initiate commands
@@ -126,7 +127,8 @@ If you use FlowLink Cloud:
 - Payment is processed through our payment provider
 - We reserve the right to suspend service for non-payment
 - No refunds for partial months
-- We provide a 14-day free trial for new accounts
+- We provide a 14-day free trial for Professional plan
+- Plans: Starter (4 990₽/мес), Professional (39 990₽/мес), Scale (79 990₽/мес), Enterprise (custom)
 - Pricing may change with 30 days notice
 
 ---
