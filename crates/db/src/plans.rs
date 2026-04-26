@@ -60,13 +60,9 @@ pub struct PlanFeatures {
     pub siem_export: bool,
     pub sso: bool,
     pub on_premise: bool,
-    #[serde(default)]
     pub forensics: bool,
-    #[serde(default)]
     pub service_catalog: bool,
-    #[serde(default)]
     pub ai_ops: bool,
-    #[serde(default)]
     pub change_management: bool,
 }
 
