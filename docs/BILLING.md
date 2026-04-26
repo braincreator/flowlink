@@ -28,7 +28,7 @@ FlowLink uses **Tochka Bank Subscriptions API** for recurring billing. Payments 
 ## Cancellation Policy
 - Subscription remains active until end of current period
 - No partial refunds
-- Account reverts to Free (Trial) plan after expiration
+- Account reverts to Starter plan after expiration
 - Can re-subscribe at any time
 
 ## Pause/Resume
@@ -43,7 +43,7 @@ FlowLink uses **Tochka Bank Subscriptions API** for recurring billing. Payments 
 | `created` | Activate subscription, update account plan |
 | `renewed` | Extend subscription period |
 | `payment_failed` | Mark as past_due, retry on next cycle |
-| `cancelled` | Deactivate account, revert to Free plan |
+| `cancelled` | Deactivate account, revert to Starter plan |
 | `paused` | Suspend service |
 | `resumed` | Restore service |
 

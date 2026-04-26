@@ -6,7 +6,8 @@ Thank you for your interest in contributing! This guide covers everything you ne
 
 ### Prerequisites
 
-- **Go 1.25+** — [Install Go](https://go.dev/doc/install)
+- **Rust 1.80+** — [Install Rust](https://rustup.rs)
+- **PostgreSQL 14+** — for relay database
 - **Make** — build tool
 - **Git** — version control
 
@@ -17,116 +18,110 @@ Thank you for your interest in contributing! This guide covers everything you ne
 git clone https://github.com/braincreator/flowlink.git
 cd flowlink
 
-# Install dependencies
-go mod download
-
 # Build
 make build
 
-# Run tests
+# Run tests (~1360)
 make test
+
+# Build with GitOps feature
+cargo build --release --features gitops
 ```
 
 ## Project Structure
 
 ```
 flowlink/
-├── cmd/
-│   ├── agent/       # Agent entrypoint (main.go)
-│   ├── bot/         # Telegram Bot entrypoint
-│   └── relay/       # Relay entrypoint
-├── internal/
-│   ├── agent/       # Agent daemon (executor, sandbox, approval, backup, kill switch)
-│   ├── billing/     # Plans, usage tracking, invoices
-│   ├── config/      # Configuration loading
-│   ├── dashboard/   # Web Dashboard SPA (embedded assets)
-│   ├── protocol/    # WebSocket message types
-│   ├── relay/       # Relay server (WSS, HTTP API, MCP, auth, audit, registry)
-│   ├── tgbot/       # Telegram Bot (long polling)
-│   └── transport/   # WebSocket transport layer
-├── scripts/         # Install/uninstall/update scripts
-├── docs/            # Documentation
-├── web/             # Frontend assets
-├── Makefile
-├── go.mod
-└── go.sum
+├── crates/
+│   ├── core/       # Message types, config, channels
+│   ├── crypto/     # X25519 + AES-256-GCM encryption
+│   ├── db/         # PostgreSQL repos (sqlx)
+│   ├── billing/    # Plans, invoices, usage, Tochka Bank
+│   ├── agent/      # Dispatch, policy, sandbox, killswitch, exec
+│   ├── relay/      # WS server, REST API, RBAC, E2EE, MCP
+│   ├── shield/     # eBPF/macOS ES, threat analysis, L1-L7
+│   ├── gitops/     # Drift detection, ServerGuard, backup engine
+│   ├── k8s/        # Operator, CRD, admission webhooks
+│   ├── mcp/        # MCP protocol types and server
+│   ├── sentinel/   # AI Ops assistant, pattern learning
+│   └── cli/        # Binary entrypoint, MCP server
+├── scripts/        # Install/uninstall/update scripts
+├── docs/           # Documentation
+├── Cargo.toml      # Workspace config
+└── Makefile
 ```
 
 ## Running Tests
 
 ```bash
 # Run all tests
-go test ./...
+cargo test --workspace
 
 # Run with verbose output
-go test -v ./...
+cargo test --workspace -- --nocapture
 
-# Run specific package
-go test ./internal/relay/...
+# Run specific crate
+cargo test -p flowlink-relay
 
-# Run with coverage
-go test -cover ./...
+# Run with GitOps feature
+cargo test --workspace --features gitops
 
-# Run with race detector
-go test -race ./...
+# Run with coverage (requires tarpaulin)
+cargo tarpaulin --workspace
 ```
 
 ## Code Style
 
-We follow standard Go conventions:
+We follow standard Rust conventions:
 
-- **`gofmt`** — always format code before committing
-- **`go vet`** — run static analysis
-- **`golint`** — lint for style issues
+- **`cargo fmt`** — always format code before committing
+- **`cargo clippy`** — run linter
+- **`cargo check`** — fast compilation check
 
 ```bash
 # Format
-gofmt -w .
+cargo fmt
 
-# Vet
-go vet ./...
+# Lint
+cargo clippy --workspace -- -D warnings
 
-# Lint (if golangci-lint installed)
-golangci-lint run
+# Check
+cargo check --workspace
 ```
 
 ### Naming Conventions
 
-- Packages: lowercase, single word (`agent`, `relay`, `config`)
-- Exported types: PascalCase (`AgentConn`, `RelayConfig`)
-- Private types/functions: camelCase (`handleExec`, `newPool`)
-- Constants: PascalCase for exported, camelCase for private
-- Interfaces: `-er` suffix (`Handler`, `Provider`)
+- Crates: snake_case (`flowlink-relay`, `flowlink-shield`)
+- Types: PascalCase (`AppState`, `ShieldAlert`)
+- Functions: snake_case (`handle_exec`, `new_pool`)
+- Constants: SCREAMING_SNAKE_CASE (`MAX_BACKOFF`)
+- Modules: snake_case (`gitops_bridge`, `policy_engine`)
 
 ### Error Handling
 
-```go
-// ✅ DO: Return errors, don't panic
-func readFile(path string) ([]byte, error) {
-    data, err := os.ReadFile(path)
-    if err != nil {
-        return nil, fmt.Errorf("read file %s: %w", path, err)
-    }
-    return data, nil
+```rust
+// ✅ DO: Use anyhow for application code, thiserror for library errors
+fn read_config(path: &str) -> anyhow::Result<Config> {
+    let data = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config: {}", path))?;
+    Ok(serde_json::from_str(&data)?)
 }
 
-// ❌ DON'T: Panic in library code
-func readFile(path string) []byte {
-    data, _ := os.ReadFile(path)
-    return data
+// ❌ DON'T: Unwrap in library code
+fn read_config(path: &str) -> Config {
+    let data = std::fs::read_to_string(path).unwrap();
+    serde_json::from_str(&data).unwrap()
 }
 ```
 
 ### Logging
 
-Use structured logging with `log/slog`:
+Use `log` crate with structured messages:
 
-```go
-logger.Info("agent connected",
-    "agent_id", agent.ID,
-    "hostname", agent.Hostname,
-    "os", agent.OS,
-)
+```rust
+log::info!("[gitops] Backup triggered for agent {}: {}", agent_id, backup_id);
+log::warn!("Command blocked: {}", reason);
+log::error!("Connection error: {}", e);
 ```
 
 ## Pull Request Process
@@ -139,7 +134,8 @@ logger.Info("agent connected",
 3. **Make changes** with tests
 4. **Run tests** — all must pass:
    ```bash
-   go test ./...
+   cargo test --workspace
+   cargo clippy --workspace -- -D warnings
    ```
 5. **Commit** with descriptive messages:
    ```bash
@@ -155,11 +151,11 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 type(scope): description
 
 # Examples:
-feat(agent): add backup rotation
+feat(agent): add gitops backup before destructive commands
 fix(relay): handle WebSocket disconnect gracefully
 docs(readme): update installation instructions
 test(billing): add plan validation tests
-refactor(protocol): simplify message types
+refactor(shield): simplify pipeline levels
 ```
 
 ### Types
@@ -179,19 +175,25 @@ refactor(protocol): simplify message types
 ### Running relay locally
 
 ```bash
-go run ./cmd/relay -config ./dev/relay.yaml
+cargo run -p flowlink -- relay --config dev/relay.json
 ```
 
 ### Running agent locally
 
 ```bash
-go run ./cmd/agent -config ./dev/agent.yaml
+cargo run -p flowlink -- agent --config dev/agent.json
 ```
 
-### Running Telegram bot locally
+### Running MCP server
 
 ```bash
-TELEGRAM_BOT_TOKEN=your-token go run ./cmd/bot
+cargo run -p flowlink -- mcp
+```
+
+### Running K8s operator
+
+```bash
+cargo run -p flowlink-k8s -- --relay-url http://localhost:8080
 ```
 
 ### Testing with WebSocket
@@ -201,14 +203,14 @@ TELEGRAM_BOT_TOKEN=your-token go run ./cmd/bot
 npm install -g wscat
 
 # Connect to local relay
-wscat -c ws://localhost:8443/ws
+wscat -c ws://localhost:8080/ws
 ```
 
 ## Reporting Issues
 
 When reporting bugs, please include:
 
-1. **Go version** (`go version`)
+1. **Rust version** (`rustc --version`)
 2. **OS and architecture**
 3. **Steps to reproduce**
 4. **Expected vs actual behavior**

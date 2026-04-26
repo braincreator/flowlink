@@ -52,51 +52,43 @@ cargo build --release --bin flowlink
 #### Windsurf / other MCP clients
 Same pattern — `command: "flowlink"`, `args: ["mcp"]`. Uses stdio transport (stdin/stdout JSON-RPC).
 
-## Tools
+## Tools (12)
 
-### `scan_command`
-Scans a single shell command for security risks.
+### Agent Management
 
-```json
-{
-  "command": "rm -rf /var/log",
-  "context": "cleaning up old logs"
-}
-```
+| Tool | Description |
+|------|------------|
+| `flowlink_agents` | List connected agents with status |
+| `flowlink_deregister` | Disconnect an agent from relay |
+| `flowlink_health` | Health check (relay + agents) |
 
-Returns: `risk_level` (safe/warning/danger), `score` (0-100), `explanation`, `category`, `threat_id`.
+### Execution
 
-### `scan_script`
-Scans a multi-line script. Returns per-line analysis and overall risk assessment.
+| Tool | Description |
+|------|------------|
+| `flowlink_exec` | Execute command on agent (streaming) |
+| `flowlink_kill` | Kill process on agent |
+| `flowlink_read` | Read file from agent |
+| `flowlink_write` | Write file to agent |
+| `flowlink_list` | List directory on agent |
 
-```json
-{
-  "script": "echo hello\nrm -rf /var\nls -la",
-  "language": "bash"
-}
-```
+### Security & Policy
 
-### `get_policy`
-Returns the current security policy configuration — enabled analysis levels, protected paths, and known dangerous operations.
-
-### `explain_risk`
-Detailed risk explanation with specific mitigations for a given command.
-
-```json
-{
-  "command": "chmod 777 -R /var"
-}
-```
+| Tool | Description |
+|------|------------|
+| `flowlink_sysinfo` | Get system info from agent |
+| `flowlink_approve` | Approve/reject pending command |
+| `flowlink_policy` | Manage security policies (list, create, bind) |
+| `flowlink_config_update` | Hot-reload agent configuration |
 
 ## How It Works
 
-The MCP server uses FlowLink Shield's full 3-level analysis engine:
+The MCP server exposes FlowLink's full security platform to AI agents:
 
-- **L1 — Pattern matching**: Structured argument parsing for known dangerous commands (rm, dd, mkfs, docker, git, etc.)
-- **L2 — AST analysis**: tree-sitter bash parsing for commands hidden inside `bash -c`, eval, etc.
-- **L3 — Interpreter heuristics**: Detects dangerous patterns in Python, Node, Perl, Ruby, PHP inline scripts
-
-All analysis runs locally — no network calls, no LLM required. Typical scan time: < 1ms.
+- **Shield L1-L7**: KillSwitch → ReadOnly → Blacklist → Policy → Sandbox → Approval → Backup → Execute
+- **Policy Engine**: Custom allow/deny rules per agent
+- **Approval Workflow**: Block dangerous commands → human review via Telegram/Dashboard
+- **All analysis runs locally** — no network calls, no LLM required. Typical scan time: < 1ms.
 
 ## Manual Testing
 

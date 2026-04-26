@@ -67,10 +67,10 @@
 
 ### 3.1 Tier Definitions
 
-| | **Free** | **Individual** | **Business** |
+| | **Starter** | **Professional** | **Scale** |
 |---|---|---|---|
 | **Аудитория** | Solo dev, оценка | Фрилансер, small team (1-3 чел) | Startup, IT-отдел, DevOps team |
-| **Цена/мес** | 0₽ | **1 990₽** | **4 990₽** |
+| **Цена/мес** | *4 990₽* | *39 990₽* | *79 990₽* |
 | **Год/мес** | — | **1 592₽** (-20%) | **3 992₽** (-20%) |
 | **Серверы** | 1 | до 3 | до 25 |
 | **Пользователи** | 1 | до 2 | до 10 |
@@ -97,7 +97,7 @@
 
 ### 4.2 Relay (WebSocket Hub)
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | WebSocket подключение | 1 агент | до 3 | до 25 |
 | REST API | ✅ | ✅ | ✅ |
@@ -109,7 +109,7 @@
 
 ### 4.3 E2EE (Шифрование)
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | X25519 + AES-256-GCM | ✅ | ✅ | ✅ |
 | Key rotation | ✅ | ✅ | ✅ |
@@ -117,7 +117,7 @@
 
 ### 4.4 Shield — Pattern Matching (L1 basic)
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Pattern blocking (rm -rf, drop table и т.д.) | ✅ РЕАЛЬНО БЛОКИРУЕТ | ✅ | ✅ |
 | Risk scoring (0-10) | ✅ | ✅ | ✅ |
@@ -125,7 +125,7 @@
 
 ### 4.5 Shield — AST + Interpreter (L2)
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | AST анализ команд | ❌ | ✅ | ✅ |
 | Interpreter анализ | ❌ | ✅ | ✅ |
@@ -134,7 +134,7 @@
 
 ### 4.6 Shield — eBPF Kernel-Level (L1 advanced)
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Kernel-level перехват (syscall) | ❌ | ❌ | ✅ |
 | eBPF модули (aya) | ❌ | ❌ | ✅ |
@@ -143,7 +143,7 @@
 
 ### 4.7 Shield — Policy Engine
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | 3 уровня (allow/warn/block) | ❌ всё auto | ✅ | ✅ |
 | Custom policy rules | ❌ | ✅ до 10 | ✅ безлимит |
@@ -151,7 +151,7 @@
 
 ### 4.8 Shield — Approval Workflow
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Auto mode (разрешить безопасные) | ✅ только auto | ✅ | ✅ |
 | Soft ask (уведомить + выполнить) | ❌ | ✅ | ✅ |
@@ -161,7 +161,7 @@
 
 ### 4.9 Shield — Forensics
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Risk scoring | ✅ | ✅ | ✅ |
 | Process tree capture | ❌ | ❌ | ✅ |
@@ -170,7 +170,7 @@
 
 ### 4.10 Backup / Restore
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Ручной бэкап (кнопка) | ✅ | ✅ | ✅ |
 | Ручной rollback | ✅ | ✅ | ✅ |
@@ -186,7 +186,7 @@
 
 ### 4.11 GitOps / Drift Detection
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Config drift detection | ❌ | ❌ | ✅ |
 | Semantic diff | ❌ | ❌ | ✅ |
@@ -196,7 +196,7 @@
 
 ### 4.12 Sandbox
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Allowed dirs restriction | ✅ workdir only | ✅ custom | ✅ custom |
 | Blocked patterns | ✅ базовые | ✅ custom | ✅ custom |
@@ -206,7 +206,7 @@
 
 ### 4.13 Kubernetes
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | K8s Operator | ❌ | ❌ | ✅ |
 | CRD (FlowLinkShieldPolicy) | ❌ | ❌ | ✅ |
@@ -216,7 +216,7 @@
 
 ### 4.14 RBAC
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Роли (admin/operator/viewer) | ❌ 1 user | ✅ 2 users | ✅ 10 users |
 | 20 permissions | ❌ | ✅ базовые | ✅ все |
@@ -225,7 +225,7 @@
 
 ### 4.15 Device Trust
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Device pairing (QR) | ❌ | ✅ | ✅ |
 | Trust scoring (0-100) | ❌ | ✅ | ✅ |
@@ -234,7 +234,7 @@
 
 ### 4.16 LLM Proxy
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Multi-backend (OpenAI/Anthropic/Ollama) | 1 backend | ✅ до 3 | ✅ безлимит |
 | Token tracking | ❌ | ✅ | ✅ |
@@ -243,7 +243,7 @@
 
 ### 4.17 Audit
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Audit log (memory + JSONL) | ✅ 24ч | ✅ 30 дней | ✅ 90 дней |
 | PostgreSQL audit | ❌ | ❌ | ✅ |
@@ -252,7 +252,7 @@
 
 ### 4.18 Billing / Payments
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | SBP (Точка Банк) | — | ✅ | ✅ |
 | Card (Visa/Mir/MC) | — | ✅ | ✅ |
@@ -262,7 +262,7 @@
 
 ### 4.19 Dashboard (Web UI)
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Agent list + status | ✅ basic | ✅ | ✅ |
 | Shield alerts view | ✅ read-only | ✅ | ✅ |
@@ -275,7 +275,7 @@
 
 ### 4.20 Killswitch
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Emergency stop (per agent) | ✅ manual | ✅ | ✅ |
 | Auto-kill (CPU/disk) | ❌ | ✅ | ✅ |
@@ -283,7 +283,7 @@
 
 ### 4.21 File Operations
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | File read/write | ✅ workdir | ✅ sandboxed | ✅ sandboxed |
 | Directory listing | ✅ workdir | ✅ allowed dirs | ✅ allowed dirs |
@@ -291,7 +291,7 @@
 
 ### 4.22 Skills / Tasks
 
-| Фича | Free | Individual | Business |
+| Фича | Starter | Professional | Scale |
 |------|------|------------|----------|
 | Skill push/list/delete | ✅ | ✅ | ✅ |
 | Task dispatch | ✅ | ✅ | ✅ |

@@ -11,7 +11,7 @@
 ### Option 1: Install Script (Recommended)
 
 ```bash
-curl -sSL https://install.flowlink.dev | bash
+curl -sSL https://flowlink.flow-masters.ru/install.sh | bash
 ```
 
 The script will:
@@ -191,7 +191,7 @@ systemctl status flowlink-relay
 ### Via install script
 
 ```bash
-curl -sSL https://install.flowlink.dev | bash
+curl -sSL https://flowlink.flow-masters.ru/install.sh | bash
 ```
 
 The script detects existing installation and updates in-place.
