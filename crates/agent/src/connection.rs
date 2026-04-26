@@ -68,6 +68,33 @@ impl Connection {
 
     /// Connect, authenticate, run message loop with auto-reconnect + exponential backoff.
     pub async fn run(&self) -> anyhow::Result<()> {
+        // ── Start GitOps ServerGuard if feature enabled ──
+        #[cfg(feature = "gitops")]
+        {
+            let guard_config = flowlink_gitops::server_guard::ServerGuardConfig {
+                pipeline: flowlink_gitops::server_guard::pipeline::PipelineConfig::default(),
+                watch_paths: vec![
+                    "/etc/nginx".into(),
+                    "/etc/docker".into(),
+                    "/etc/systemd".into(),
+                    "/etc/ssh".into(),
+                ],
+                watch_docker: true,
+                watch_canary: true,
+                watch_state: true,
+                state_collect_interval_secs: 300,
+                relay_url: Some(self.url.clone()),
+                agent_id: Some(self.agent_id.clone()),
+                agent_token: Some(self.token.clone()),
+            };
+            let guard = crate::gitops_bridge::server_guard::GitOpsGuard::new(guard_config);
+            if let Err(e) = guard.start().await {
+                warn!("[gitops] ServerGuard failed to start: {}", e);
+            } else {
+                info!("[gitops] ServerGuard started — watching /etc/nginx, /etc/docker, /etc/systemd, /etc/ssh");
+            }
+        }
+
         let mut backoff_secs: u64 = 1;
         const MAX_BACKOFF: u64 = 60;
 

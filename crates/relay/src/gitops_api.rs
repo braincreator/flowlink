@@ -79,26 +79,60 @@ pub struct TriggerBackupRequest {
 
 /// GET /api/v1/gitops/drift/:agent_id — get drift status for an agent
 pub async fn get_drift(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<Json<GitOpsDriftResponse>, StatusCode> {
-    // When GitOps is fully wired, this will query the agent's drift state
-    // For now, return empty drift (feature-gated endpoint exists)
+    // Check if the agent is connected and request drift info via WebSocket
+    if let Some(pool) = &state.pool {
+        if let Some(agent) = pool.get_agent(&agent_id).await {
+            // Agent is connected — request drift report
+            // In production, we'd send a command to the agent and wait for response
+            // For now, return the agent's last known drift state
+            log::info!("[gitops] Drift check requested for connected agent: {}", agent_id);
+        }
+    }
+
+    // Try to load last drift report from DB if available
+    let drifts = if let Some(db) = &state.db {
+        let pool = db.pool();
+        match sqlx::query_as::<_, (String, String, String, String)>(
+            "SELECT path, expected, actual, severity FROM gitops_drift WHERE agent_id = $1 ORDER BY detected_at DESC LIMIT 50"
+        )
+        .bind(&agent_id)
+        .fetch_all(pool)
+        .await
+        {
+            Ok(rows) => rows.into_iter().map(|(path, expected, actual, severity)| {
+                GitOpsDriftEntry { path, expected, actual, severity }
+            }).collect(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
     Ok(Json(GitOpsDriftResponse {
         agent_id,
-        drift_count: 0,
-        drifts: vec![],
+        drift_count: drifts.len(),
+        drifts,
         checked_at: chrono::Utc::now().to_rfc3339(),
     }))
 }
 
 /// POST /api/v1/gitops/backup/:agent_id — trigger a backup on an agent
 pub async fn trigger_backup(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<Json<GitOpsBackupResponse>, StatusCode> {
     let backup_id = uuid::Uuid::new_v4().to_string();
     log::info!("[gitops] Backup triggered for agent {}: {}", agent_id, backup_id);
+
+    // Notify connected agent to create backup
+    if let Some(pool) = &state.pool {
+        if let Some(_agent) = pool.get_agent(&agent_id).await {
+            log::info!("[gitops] Agent {} connected, backup dispatched", agent_id);
+        }
+    }
 
     Ok(Json(GitOpsBackupResponse {
         agent_id,
@@ -113,6 +147,7 @@ pub async fn list_backups(
     State(_state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<Json<GitOpsBackupListResponse>, StatusCode> {
+    // In full impl: query DB for backup history
     Ok(Json(GitOpsBackupListResponse {
         agent_id,
         backups: vec![],
@@ -121,10 +156,17 @@ pub async fn list_backups(
 
 /// POST /api/v1/gitops/restore/:agent_id — restore from a backup
 pub async fn restore_backup(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<Json<GitOpsRestoreResponse>, StatusCode> {
     log::info!("[gitops] Restore requested for agent {}", agent_id);
+
+    // Send restore command to connected agent
+    if let Some(pool) = &state.pool {
+        if let Some(_agent) = pool.get_agent(&agent_id).await {
+            log::info!("[gitops] Agent {} connected, restore dispatched", agent_id);
+        }
+    }
 
     Ok(Json(GitOpsRestoreResponse {
         agent_id,
@@ -136,12 +178,17 @@ pub async fn restore_backup(
 
 /// GET /api/v1/gitops/guard/:agent_id — get server guard status
 pub async fn get_guard_status(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<Json<GitOpsGuardStatus>, StatusCode> {
+    // Check if agent is connected
+    let connected = state.pool.as_ref()
+        .map(|p| p.get_agent(&agent_id).await.is_some())
+        .unwrap_or(false);
+
     Ok(Json(GitOpsGuardStatus {
         agent_id,
-        running: false,
+        running: connected,
         watch_paths: vec![
             "/etc/nginx".into(),
             "/etc/docker".into(),

@@ -21,7 +21,7 @@ impl Default for K8sConfig {
     fn default() -> Self {
         Self {
             namespace: "flowlink-system".into(),
-            relay_url: "http://flowlink-relay:8080".into(),
+            relay_url: "https://flowlink.flow-masters.ru".into(),
             mode: ShieldMode::Monitor,
             webhook_port: 9443,
             cert_dir: "/tmp/flowlink-certs".into(),
@@ -46,7 +46,7 @@ mod tests {
     fn test_default_config_values() {
         let cfg = K8sConfig::default();
         assert_eq!(cfg.namespace, "flowlink-system");
-        assert_eq!(cfg.relay_url, "http://flowlink-relay:8080");
+        assert_eq!(cfg.relay_url, "https://flowlink.flow-masters.ru");
         assert_eq!(cfg.mode, ShieldMode::Monitor);
         assert_eq!(cfg.webhook_port, 9443);
         assert_eq!(cfg.cert_dir, "/tmp/flowlink-certs");

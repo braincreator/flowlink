@@ -1459,6 +1459,7 @@ dependencies = [
  "kube-derive",
  "log",
  "rcgen 0.11.3",
+ "reqwest",
  "schemars 0.8.22",
  "serde",
  "serde_json",

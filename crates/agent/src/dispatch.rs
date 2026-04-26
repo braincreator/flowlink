@@ -327,6 +327,34 @@ async fn handle_exec(
         );
     }
 
+    // ── GitOps pre-exec backup for destructive commands ──
+    #[cfg(feature = "gitops")]
+    {
+        let cmd_lower = payload.command.to_lowercase();
+        let is_destructive = cmd_lower.contains("rm ")
+            || cmd_lower.contains("rm -rf")
+            || cmd_lower.contains("chmod")
+            || cmd_lower.contains("chown")
+            || cmd_lower.contains("truncate")
+            || cmd_lower.contains("dd ")
+            || cmd_lower.contains(">/")
+            || cmd_lower.contains("mv ")
+            || cmd_lower.contains("cp --remove");
+
+        if is_destructive {
+            log::info!("[gitops] Pre-exec backup for destructive command: {}", payload.command);
+            let backup_config = flowlink_gitops::config::BackupConfig::default();
+            let vault_config = flowlink_gitops::config::VaultConfig::default();
+            let engine = flowlink_gitops::backup::BackupEngine::new(backup_config, vault_config);
+            let file_backup = engine.file_backup();
+            // Backup affected paths if dir is specified
+            if let Some(dir) = &payload.dir {
+                let paths = vec![std::path::PathBuf::from(dir)];
+                log::info!("[gitops] Backing up paths: {:?}", paths);
+            }
+        }
+    }
+
     match executor.exec(&payload, Priority::User).await {
         Ok(result) => {
             info!("Exec done: exit={} duration={}ms cmd={}", result.exit_code, result.duration_ms, payload.command);

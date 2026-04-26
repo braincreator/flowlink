@@ -675,6 +675,38 @@ async fn reconcile(
 
     update_status(&crds, &name, &status).await?;
 
+    // ── Report reconciliation to FlowLink Relay ──
+    let relay_url = &config.relay_url;
+    let report = json!({
+        "source": "k8s-operator",
+        "policy_name": name,
+        "namespace": ns,
+        "generation": generation,
+        "mode": match policy.spec.mode {
+            ShieldMode::Monitor => "monitor",
+            ShieldMode::Enforce => "enforce",
+        },
+        "enabled": policy.spec.enabled,
+        "rules_count": policy.spec.rules.len(),
+        "ready": errors.is_empty(),
+        "errors": errors,
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+
+    // Fire-and-forget report to relay audit endpoint
+    let relay_audit_url = format!("{}/api/audit/event", relay_url);
+    tokio::spawn(async move {
+        if let Err(e) = reqwest::Client::new()
+            .post(&relay_audit_url)
+            .json(&report)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
+            log::debug!("Failed to report to relay: {}", e);
+        }
+    });
+
     // Requeue interval based on mode
     let requeue = match policy.spec.mode {
         ShieldMode::Monitor => Duration::from_secs(60),
