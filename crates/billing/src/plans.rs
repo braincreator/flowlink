@@ -57,6 +57,10 @@ pub struct PlanFeatures {
     pub siem_export: bool,
     pub sso: bool,
     pub on_premise: bool,
+    pub forensics: bool,
+    pub service_catalog: bool,
+    pub ai_ops: bool,
+    pub change_management: bool,
 }
 
 /// Plan limits — numeric and structural constraints.
@@ -125,12 +129,17 @@ static FEATURE_MIN_TIER: &[(&str, &str, u32)] = &[
     ("policy_engine", "Starter", 0),
     ("e2ee", "Starter", 0),
     ("audit_log", "Starter", 0),
+    ("webhooks", "Starter", 0),
     ("approval", "Professional", 1),
     ("rbac", "Professional", 1),
-    ("webhooks", "Starter", 0),
     ("siem_export", "Professional", 1),
-    ("pattern_learning", "Pro", 1),
+    ("pattern_learning", "Professional", 1),
+    ("forensics", "Professional", 1),
+    ("service_catalog", "Professional", 1),
+    ("policy_engine", "Professional", 1),
     ("sso", "Business", 2),
+    ("ai_ops", "Business", 2),
+    ("change_management", "Business", 2),
     ("on_premise", "Enterprise", 3),
 ];
 
@@ -183,6 +192,10 @@ impl Plan {
             "siem_export" => self.features.siem_export,
             "sso" => self.features.sso,
             "on_premise" => self.features.on_premise,
+            "forensics" => self.features.forensics,
+            "service_catalog" => self.features.service_catalog,
+            "ai_ops" => self.features.ai_ops,
+            "change_management" => self.features.change_management,
             _ => {
                 // Unknown feature — allow by default (don't break new features)
                 tracing::warn!("Unknown feature check: {}", feature);
@@ -407,6 +420,8 @@ impl PlanRegistry {
                     audit_log: true,
                     webhooks: true,
                     siem_export: true,
+                    forensics: true,
+                    service_catalog: true,
                     ..Default::default()
                 },
                 limits: PlanLimits {
@@ -446,6 +461,10 @@ impl PlanRegistry {
                     webhooks: true,
                     siem_export: true,
                     sso: true,
+                    forensics: true,
+                    service_catalog: true,
+                    ai_ops: true,
+                    change_management: true,
                     ..Default::default()
                 },
                 limits: PlanLimits {
@@ -486,6 +505,10 @@ impl PlanRegistry {
                     siem_export: true,
                     sso: true,
                     on_premise: true,
+                    forensics: true,
+                    service_catalog: true,
+                    ai_ops: true,
+                    change_management: true,
                 },
                 limits: PlanLimits {
                     audit_retention_days: 365,
