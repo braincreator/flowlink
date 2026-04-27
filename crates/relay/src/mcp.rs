@@ -219,6 +219,15 @@ pub async fn handle_mcp(
     headers: HeaderMap,
     Json(req): Json<McpRequest>,
 ) -> axum::response::Response {
+    process_mcp_http(&state, headers, req).await
+}
+
+/// Internal MCP processor (shared between HTTP and Streamable HTTP transports)
+pub async fn process_mcp_http(
+    state: &AppState,
+    headers: HeaderMap,
+    req: McpRequest,
+) -> axum::response::Response {
     // ── Public methods (no auth required) ──
     let public_methods = ["initialize", "notifications/initialized", "tools/list"];
     let is_public = public_methods.contains(&req.method.as_str());
@@ -296,7 +305,7 @@ pub async fn handle_mcp(
             if identity.is_none() {
                 return mcp_err(req.id, -32001, "Unauthorized: API key required for tool calls. Use Authorization: Bearer flk_... or x-api-key header").into_response();
             }
-            handle_tools_call(state, req, identity, plan).await
+            handle_tools_call(state.clone(), req, identity, plan).await
         }
 
         _ => mcp_err(req.id, -32601, format!("method not found: {}", req.method)).into_response(),

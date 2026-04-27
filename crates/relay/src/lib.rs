@@ -17,6 +17,7 @@ pub mod middleware;
 pub mod tls;
 pub mod server;
 pub mod mcp;
+pub mod mcp_transport;
 pub mod devices;
 pub mod rbac_manager;
 pub mod metrics;
