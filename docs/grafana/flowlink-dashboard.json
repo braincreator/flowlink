@@ -1,0 +1,153 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "FlowLink Overview",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+    },
+    {
+      "title": "Relay Uptime",
+      "type": "stat",
+      "targets": [{"expr": "time() - process_start_time_seconds{job=\"flowlink\"}", "legendFormat": "uptime"}],
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "title": "Active WebSocket Connections",
+      "type": "stat",
+      "targets": [{"expr": "flowlink_ws_connections", "legendFormat": "connections"}],
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1}
+    },
+    {
+      "title": "Total Accounts",
+      "type": "stat",
+      "targets": [{"expr": "flowlink_accounts_total", "legendFormat": "accounts"}],
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1}
+    },
+    {
+      "title": "Active Subscriptions",
+      "type": "stat",
+      "targets": [{"expr": "flowlink_subscriptions_active", "legendFormat": "active"}],
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1}
+    },
+    {
+      "title": "API Traffic",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}
+    },
+    {
+      "title": "Requests/sec",
+      "type": "timeseries",
+      "targets": [{"expr": "rate(flowlink_http_requests_total[5m])", "legendFormat": "{{method}} {{path}}"}],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6}
+    },
+    {
+      "title": "Response Time (p99)",
+      "type": "timeseries",
+      "targets": [{"expr": "histogram_quantile(0.99, rate(flowlink_http_request_duration_seconds_bucket[5m]))", "legendFormat": "p99"}],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6}
+    },
+    {
+      "title": "Shield / Security",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}
+    },
+    {
+      "title": "Commands Scanned",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "rate(flowlink_shield_scans_total[5m])", "legendFormat": "scans/sec"},
+        {"expr": "rate(flowlink_shield_blocked_total[5m])", "legendFormat": "blocked/sec"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 15}
+    },
+    {
+      "title": "Threat Level Distribution",
+      "type": "piechart",
+      "targets": [{"expr": "flowlink_shield_threats_by_level", "legendFormat": "{{level}}"}],
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 15}
+    },
+    {
+      "title": "MCP Tool Calls",
+      "type": "timeseries",
+      "targets": [{"expr": "rate(flowlink_mcp_tool_calls_total[5m])", "legendFormat": "{{tool}}"}],
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 15}
+    },
+    {
+      "title": "ServerGuard",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}
+    },
+    {
+      "title": "Events Received",
+      "type": "timeseries",
+      "targets": [{"expr": "rate(flowlink_guard_events_received_total[5m])", "legendFormat": "events/sec"}],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 24}
+    },
+    {
+      "title": "Auto-Fixes vs Escalations",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "rate(flowlink_guard_auto_fixes_succeeded_total[5m])", "legendFormat": "auto-fixed"},
+        {"expr": "rate(flowlink_guard_events_escalated_total[5m])", "legendFormat": "escalated"}
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 24}
+    },
+    {
+      "title": "Alert Delivery",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "rate(flowlink_guard_alerts_sent_total[5m])", "legendFormat": "sent"},
+        {"expr": "rate(flowlink_guard_alerts_failed_total[5m])", "legendFormat": "failed"}
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 24}
+    },
+    {
+      "title": "Billing",
+      "type": "row",
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 32}
+    },
+    {
+      "title": "Revenue (Monthly)",
+      "type": "stat",
+      "targets": [{"expr": "flowlink_billing_revenue_monthly_rub", "legendFormat": "revenue"}],
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 33},
+      "fieldConfig": {"defaults": {"unit": "currencyRUB"}}
+    },
+    {
+      "title": "Payments (24h)",
+      "type": "stat",
+      "targets": [{"expr": "increase(flowlink_billing_payments_total[24h])", "legendFormat": "payments"}],
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 33}
+    },
+    {
+      "title": "Email Queue",
+      "type": "stat",
+      "targets": [{"expr": "flowlink_email_queue_pending", "legendFormat": "pending"}],
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 33}
+    },
+    {
+      "title": "Rate Limits Hit",
+      "type": "stat",
+      "targets": [{"expr": "increase(flowlink_rate_limit_hits_total[1h])", "legendFormat": "hits/hour"}],
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 33}
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["flowlink", "production"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timepicker": {},
+  "timezone": "Europe/Moscow",
+  "title": "FlowLink Production",
+  "uid": "flowlink-prod",
+  "version": 1
+}
