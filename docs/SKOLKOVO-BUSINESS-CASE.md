@@ -36,16 +36,54 @@ FlowLink устанавливается как прокси между AI-аге
 - **E2EE agent-relay:** end-to-end шифрование между агентом и сервером
 - **Open-core архитектура:** 7 публичных библиотек (Rust crates), 6 приватных модулей
 
-### 2.2. Конкурентные преимущества
+### 2.2. Полная функциональность (18 модулей)
+
+**Безопасность (Security):**
+1. **Shield Engine** — real-time анализ и блокировка команд (<5ms, Rust)
+2. **Policy Engine** — настраиваемые политики allow/deny/approve с regex и risk scoring
+3. **Pattern Learning** — ML-based обучение паттернов использования (адаптивные политики)
+4. **Forensics** — криминалистический анализ инцидентов (timeline, evidence chain)
+5. **E2EE** — end-to-end шифрование agent ↔ relay
+6. **Approval Workflow** — двухфакторное подтверждение опасных команд
+7. **Zero Trust Secrets** — внедрение секретов без их раскрытия AI-агенту
+
+**Наблюдаемость (Observability):**
+8. **Audit Trail** — полный лог всех команд (who/what/when/result/risk)
+9. **Command History** — поиск, фильтрация, dry-run против политик
+10. **Agent Health Monitoring** — CPU/RAM/Disk/uptime в реальном времени
+11. **SIEM Export** — интеграция с Splunk, ELK, QRadar (CEF/JSON)
+12. **Service Catalog** — реестр подключённых агентов и их capabilities
+13. **Infrastructure Map** — визуальная карта agent ↔ relay ↔ services
+14. **AI Ops Dashboard** — метрики AI-операций, аномалии, тренды
+
+**Управление (Control):**
+15. **RBAC** — role-based access control с кастомными ролями
+16. **GitOps Bridge** — drift detection, auto-backup, restore, ServerGuard
+17. **Kubernetes Operator** — CRD, webhook, sidecar injection
+18. **Webhooks** — события в real-time (блокировки, подключения, алерты)
+
+**Enterprise:**
+- **SSO/SAML** — интеграция с корпоративными IdP
+- **On-Premise** — развёртывание в закрытом контуре
+- **Compliance** — генерация отчётов ФСТЭК/152-ФЗ
+- **Telegram Bot** — уведомления и управление через Telegram
+- **Interactive Sessions** — WebSocket чат с агентами через dashboard
+
+### 2.3. Конкурентные преимущества
 | Параметр | FlowLink | CalypsoAI (F5) | Lakera | Promptfoo |
 |---|---|---|---|---|
 | MCP Gateway | ✅ | ❌ | ❌ | ❌ |
 | Real-time блокировка | ✅ | ✅ | ✅ | ❌ |
 | GitOps интеграция | ✅ | ❌ | ❌ | ❌ |
-| Secrets Vault | ✅ | ✅ | ❌ | ❌ |
 | K8s Operator | ✅ | ❌ | ❌ | ❌ |
+| Secrets Vault | ✅ | ✅ | ❌ | ❌ |
+| Forensics | ✅ | ❌ | ❌ | ❌ |
+| Pattern Learning | ✅ | ❌ | ✅ | ❌ |
+| SIEM Export | ✅ | ❌ | ❌ | ❌ |
+| Interactive Sessions | ✅ | ❌ | ❌ | ❌ |
 | Open-source ядро | ✅ | ❌ | ❌ | ✅ |
 | Российская юрисдикция | ✅ | ❌ | ❌ | ❌ |
+| 18 модулей из коробки | ✅ | 8-10 | 5-7 | 3-4 |
 
 ### 2.3. Патенты и ИС
 - Заявка на регистрацию ПО (Роспатент) — в планах
