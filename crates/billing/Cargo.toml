@@ -1,6 +1,6 @@
 [package]
 name = "flowlink-billing"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Billing engine for FlowLink: plans, usage tracking, invoices, payments"
 

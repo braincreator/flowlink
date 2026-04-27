@@ -1256,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1282,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-agent"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-billing"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1351,7 +1351,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1367,7 +1367,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-crypto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1387,7 +1387,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-db"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1405,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-gitops"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1440,7 +1440,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-k8s"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "flowlink-shield",
@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-relay"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1542,7 +1542,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-sentinel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1558,7 +1558,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-shield"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
