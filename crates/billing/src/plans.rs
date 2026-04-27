@@ -372,8 +372,8 @@ impl PlanRegistry {
                 name: "Starter".to_string(),
                 description: "For individuals and small projects".to_string(),
                 tier: 0,
-                price_kopecks: 499_000,
-                annual_price_kopecks: Some(4_990_000),
+                price_kopecks: 299_000,
+                annual_price_kopecks: Some(2_990_000),
                 annual_discount_percent: 17,
                 features: PlanFeatures {
                     shield: true,
@@ -386,7 +386,7 @@ impl PlanRegistry {
                     ..Default::default()
                 },
                 limits: PlanLimits {
-                    max_agents: 2,
+                    max_agents: 5,
                     max_users: 2,
                     audit_retention_days: 14,
                     api_rate_limit: 180,
@@ -405,9 +405,9 @@ impl PlanRegistry {
                 name: "Pro".to_string(),
                 description: "For growing teams".to_string(),
                 tier: 1,
-                price_kopecks: 3_999_000,
-                annual_price_kopecks: Some(38_390_400),
-                annual_discount_percent: 20,
+                price_kopecks: 1_999_000,
+                annual_price_kopecks: Some(19_990_000),
+                annual_discount_percent: 17,
                 features: PlanFeatures {
                     shield: true,
                     shield_level: "advanced".to_string(),
@@ -425,7 +425,7 @@ impl PlanRegistry {
                     ..Default::default()
                 },
                 limits: PlanLimits {
-                    max_agents: 10,
+                    max_agents: 15,
                     max_users: 10,
                     audit_retention_days: 90,
                     api_rate_limit: 500,
@@ -445,9 +445,9 @@ impl PlanRegistry {
                 name: "Business".to_string(),
                 description: "For agencies and multi-cluster setups".to_string(),
                 tier: 2,
-                price_kopecks: 7_999_000,
-                annual_price_kopecks: Some(71_991_000),
-                annual_discount_percent: 25,
+                price_kopecks: 4_999_000,
+                annual_price_kopecks: Some(49_990_000),
+                annual_discount_percent: 17,
                 features: PlanFeatures {
                     shield: true,
                     shield_level: "full".to_string(),
@@ -624,7 +624,7 @@ mod tests {
     #[test]
     fn test_starter_limits() {
         let starter = make_registry().get("starter").unwrap();
-        assert_eq!(starter.limits.max_agents, 2);
+        assert_eq!(starter.limits.max_agents, 5);
         assert_eq!(starter.limits.max_users, 2);
         assert_eq!(starter.limits.max_custom_rules, 0);
         assert_eq!(starter.limits.max_policies, 0);
@@ -635,7 +635,7 @@ mod tests {
     #[test]
     fn test_professional_limits() {
         let pro = make_registry().get("professional").unwrap();
-        assert_eq!(pro.limits.max_agents, 10);
+        assert_eq!(pro.limits.max_agents, 15);
         assert_eq!(pro.limits.max_users, 10);
         assert_eq!(pro.limits.max_webhooks, 0);
         assert_eq!(pro.limits.support_tier, "email");
@@ -678,12 +678,12 @@ mod tests {
     #[test]
     fn test_check_limit_exceeded() {
         let starter = make_registry().get("starter").unwrap();
-        let err = starter.check_limit("max_agents", 2).unwrap_err();
+        let err = starter.check_limit("max_agents", 6).unwrap_err();
         match err {
             PlanGateError::LimitExceeded { limit, current, max } => {
                 assert_eq!(limit, "max_agents");
-                assert_eq!(current, 2);
-                assert_eq!(max, 2);
+                assert_eq!(current, 6);
+                assert_eq!(max, 5);
             }
             _ => panic!("Wrong error type"),
         }
@@ -763,9 +763,9 @@ mod tests {
 
     #[test]
     fn test_format_price() {
-        assert_eq!(Plan::format_price(499_000), "4990 ₽");
+        assert_eq!(Plan::format_price(299_000), "2990 ₽");
         assert_eq!(Plan::format_price(0), "0 ₽");
-        assert_eq!(Plan::format_price(3_999_000), "39990 ₽");
+        assert_eq!(Plan::format_price(1_999_000), "19990 ₽");
     }
 
     #[test]
@@ -801,17 +801,17 @@ mod tests {
         let annual = pro.annual_price_kopecks.unwrap();
         let monthly_x12 = pro.price_kopecks * 12;
         assert!(annual < monthly_x12, "Annual should be cheaper than 12 months");
-        assert_eq!(annual, 38_390_400);
-        assert_eq!(monthly_x12, 47_988_000);
-        assert_eq!(pro.annual_discount_percent, 20);
+        assert_eq!(annual, 19_990_000);
+        assert_eq!(monthly_x12, 23_988_000);
+        assert_eq!(pro.annual_discount_percent, 17);
     }
 
     #[test]
     fn test_format_monthly() {
         let starter = make_registry().get("starter").unwrap();
         let pro = make_registry().get("professional").unwrap();
-        assert_eq!(starter.format_monthly(), "4990 ₽");
-        assert_eq!(pro.format_monthly(), "39990 ₽");
+        assert_eq!(starter.format_monthly(), "2990 ₽");
+        assert_eq!(pro.format_monthly(), "19990 ₽");
     }
 
     #[test]

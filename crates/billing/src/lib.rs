@@ -494,10 +494,15 @@ mod tests {
         let engine = test_engine();
         let billing = AccountBilling::new("acc-1");
 
-        // Starter plan: 2 agents (max_agents = 2)
+        // Starter plan: 5 agents (max_agents = 5)
         let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
         assert!(check.allowed);
-
+        let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
+        assert!(check.allowed);
+        let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
+        assert!(check.allowed);
+        let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
+        assert!(check.allowed);
         let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
         assert!(check.allowed);
 

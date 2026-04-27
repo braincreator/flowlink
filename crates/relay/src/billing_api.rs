@@ -243,13 +243,25 @@ pub async fn public_plans(State(state): State<AppState>) -> impl IntoResponse {
     let plans = match &state.billing {
         Some(engine) => engine.plans().list_available(),
         None => {
-            // Fallback: create registry with defaults
             let registry = flowlink_billing::plans::PlanRegistry::new();
             registry.seed_defaults();
             registry.list_available()
         }
     };
-    (StatusCode::OK, Json(plans)).into_response()
+
+    // Fetch active promotions from PostgreSQL
+    let promotions = match &state.db {
+        Some(db) => {
+            flowlink_db::promotions::get_active_promotions(db.pool()).await.unwrap_or_default()
+        }
+        None => vec![],
+    };
+
+    let result = serde_json::json!({
+        "plans": plans,
+        "promotions": promotions,
+    });
+    (StatusCode::OK, Json(result)).into_response()
 }
 
 /// GET /api/billing/plans — list available plans
