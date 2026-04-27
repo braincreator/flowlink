@@ -1266,6 +1266,7 @@ dependencies = [
  "flowlink-api",
  "flowlink-core",
  "flowlink-crypto",
+ "flowlink-gitops",
  "flowlink-mcp",
  "flowlink-relay",
  "flowlink-sentinel",

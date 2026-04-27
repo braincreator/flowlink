@@ -27,6 +27,7 @@ flowlink-mcp = { path = "../mcp" }
 flowlink-api = { path = "../api" }
 flowlink-shield = { path = "../shield" }
 flowlink-sentinel = { path = "../sentinel" }
+flowlink-gitops = { path = "../gitops" }
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
 
