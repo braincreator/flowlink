@@ -18,6 +18,8 @@ use tracing::{debug, info, warn};
 use super::command_runner::CommandRunner;
 use super::event_types::{ActionTier, EventDetail, EventSource, GuardAlert, GuardEvent, Severity};
 use super::guard_mode::GuardKillswitch;
+use super::metrics::GuardMetrics;
+use std::sync::atomic::Ordering;
 
 // ---------------------------------------------------------------------------
 // Pipeline config
@@ -467,6 +469,8 @@ pub struct Pipeline {
     command_runner: Arc<CommandRunner>,
     /// Callback for sending alerts (fire-and-forget)
     alert_callback: Arc<dyn Fn(GuardAlert) + Send + Sync>,
+    /// Optional metrics collector
+    metrics: Option<Arc<GuardMetrics>>,
 }
 
 impl Pipeline {
@@ -476,10 +480,24 @@ impl Pipeline {
         command_runner: Arc<CommandRunner>,
         alert_callback: Arc<dyn Fn(GuardAlert) + Send + Sync>,
     ) -> Self {
+        Self::with_metrics(config, killswitch, command_runner, alert_callback, None)
+    }
+
+    pub fn with_metrics(
+        config: PipelineConfig,
+        killswitch: Arc<GuardKillswitch>,
+        command_runner: Arc<CommandRunner>,
+        alert_callback: Arc<dyn Fn(GuardAlert) + Send + Sync>,
+        metrics: Option<Arc<GuardMetrics>>,
+    ) -> Self {
         let debouncer = Debouncer::new(Duration::from_secs(config.debounce_secs));
         let self_change_filter =
             SelfChangeFilter::new(Duration::from_secs(config.self_change_cooldown_secs));
         let classifier = Classifier::new(config.safe_paths.clone(), config.dangerous_paths.clone());
+
+        if let Some(ref m) = metrics {
+            m.inc(&m.events_received);
+        }
 
         Self {
             config,
@@ -489,6 +507,7 @@ impl Pipeline {
             killswitch,
             command_runner,
             alert_callback,
+            metrics,
         }
     }
 
@@ -496,6 +515,18 @@ impl Pipeline {
     ///
     /// Returns the action taken (for logging/audit)
     pub async fn process(&mut self, event: GuardEvent) -> PipelineOutcome {
+        // Metrics: track event source
+        if let Some(ref m) = self.metrics {
+            m.inc(&m.events_received);
+            match &event.detail {
+                EventDetail::FileChange { .. } => m.inc(&m.file_changes),
+                EventDetail::DockerEvent { .. } => m.inc(&m.docker_events),
+                EventDetail::StateDrift { .. } => m.inc(&m.state_drifts),
+                EventDetail::ProcessCaught { .. } => m.inc(&m.processes_caught),
+                _ => {}
+            }
+        }
+
         // Step 0: Killswitch check
         if self.killswitch.is_emergency() {
             debug!(
@@ -598,6 +629,10 @@ impl Pipeline {
                         let alert = GuardAlert::from_event(&event, "auto-fixed");
                         (self.alert_callback)(alert);
                     }
+                    if let Some(ref m) = self.metrics {
+                        m.inc(&m.auto_fixes_attempted);
+                        m.inc(&m.auto_fixes_succeeded);
+                    }
                     return PipelineOutcome::AutoFixed {
                         command: cmd.join(" "),
                         success: true,
@@ -666,6 +701,10 @@ impl Pipeline {
         // Send alert
         let alert = GuardAlert::from_event(&event, "escalated");
         (self.alert_callback)(alert);
+
+        if let Some(ref m) = self.metrics {
+            m.inc(&m.events_escalated);
+        }
 
         PipelineOutcome::Escalated {
             severity: event.severity,

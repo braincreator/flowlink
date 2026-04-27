@@ -35,6 +35,7 @@
 pub mod command_runner;
 pub mod event_types;
 pub mod guard_mode;
+pub mod metrics;
 pub mod pipeline;
 
 use std::collections::HashMap;
@@ -47,6 +48,7 @@ use tracing::{debug, info, warn};
 use command_runner::CommandRunner;
 use event_types::{GuardAlert, GuardEvent};
 use guard_mode::GuardKillswitch;
+use metrics::GuardMetrics;
 use pipeline::{Pipeline, PipelineConfig, PipelineOutcome};
 
 /// ServerGuard configuration
@@ -128,6 +130,8 @@ pub struct ServerGuard {
     event_rx: Option<mpsc::Receiver<GuardEvent>>,
     /// Background task handles
     tasks: Vec<tokio::task::JoinHandle<()>>,
+    /// Prometheus metrics
+    metrics: Arc<GuardMetrics>,
 }
 
 impl ServerGuard {
@@ -142,7 +146,13 @@ impl ServerGuard {
             event_tx,
             event_rx: Some(event_rx),
             tasks: Vec::new(),
+            metrics: Arc::new(GuardMetrics::new()),
         }
+    }
+
+    /// Get a reference to the metrics
+    pub fn metrics(&self) -> &Arc<GuardMetrics> {
+        &self.metrics
     }
 
     /// Get a clone of the killswitch for external control
@@ -227,7 +237,7 @@ impl ServerGuard {
         }
 
         // Start pipeline processor (main event loop)
-        let mut pipeline = Pipeline::new(config.pipeline, killswitch, command_runner, alert_cb);
+        let mut pipeline = Pipeline::with_metrics(config.pipeline, killswitch, command_runner, alert_cb, Some(self.metrics.clone()));
         let handle = tokio::spawn(async move {
             run_pipeline(event_rx, &mut pipeline).await;
         });
@@ -261,6 +271,9 @@ impl ServerGuard {
         ServerGuardStatus {
             killswitch: self.killswitch.status(),
             tasks_running: self.tasks.len(),
+            events_received: self.metrics.events_received.load(std::sync::atomic::Ordering::Relaxed),
+            events_escalated: self.metrics.events_escalated.load(std::sync::atomic::Ordering::Relaxed),
+            auto_fixes: self.metrics.auto_fixes_succeeded.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
@@ -273,6 +286,9 @@ impl ServerGuard {
 pub struct ServerGuardStatus {
     pub killswitch: guard_mode::KillswitchStatus,
     pub tasks_running: usize,
+    pub events_received: u64,
+    pub events_escalated: u64,
+    pub auto_fixes: u64,
 }
 
 // ---------------------------------------------------------------------------
