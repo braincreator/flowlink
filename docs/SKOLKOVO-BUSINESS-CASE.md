@@ -69,21 +69,39 @@ FlowLink устанавливается как прокси между AI-аге
 - **Telegram Bot** — уведомления и управление через Telegram
 - **Interactive Sessions** — WebSocket чат с агентами через dashboard
 
-### 2.3. Конкурентные преимущества
-| Параметр | FlowLink | CalypsoAI (F5) | Lakera | Promptfoo |
-|---|---|---|---|---|
-| MCP Gateway | ✅ | ❌ | ❌ | ❌ |
-| Real-time блокировка | ✅ | ✅ | ✅ | ❌ |
-| GitOps интеграция | ✅ | ❌ | ❌ | ❌ |
-| K8s Operator | ✅ | ❌ | ❌ | ❌ |
-| Secrets Vault | ✅ | ✅ | ❌ | ❌ |
-| Forensics | ✅ | ❌ | ❌ | ❌ |
-| Pattern Learning | ✅ | ❌ | ✅ | ❌ |
-| SIEM Export | ✅ | ❌ | ❌ | ❌ |
-| Interactive Sessions | ✅ | ❌ | ❌ | ❌ |
-| Open-source ядро | ✅ | ❌ | ❌ | ✅ |
-| Российская юрисдикция | ✅ | ❌ | ❌ | ❌ |
-| 18 модулей из коробки | ✅ | 8-10 | 5-7 | 3-4 |
+### 2.3. Конкурентный ландшафт
+
+MCP Security — быстро растущий рынок. 134+ репозитория на GitHub по теме mcp-security.
+
+**Прямые конкуренты (MCP Gateway + Security):**
+
+| | FlowLink | ToolHive (Stacklok) | Pipelock (PipeLab) | Lunar.dev | MCP Defender |
+|---|---|---|---|---|---|
+| **Язык** | Rust | Go | Go | TypeScript | TypeScript |
+| **MCP Firewall** | ✅ | ❌ (management) | ✅ | ❌ (proxy) | ✅ |
+| **Real-time блокировка** | ✅ | ❌ | ✅ | ❌ | ✅ |
+| **GitOps (drift/backup)** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **K8s Operator** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Secrets Vault** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Forensics** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Pattern Learning** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **SIEM Export** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Interactive Sessions** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **E2EE** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Self-hosted** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Open-source** | ✅ (core) | ✅ | ✅ | ✅ | ✅ |
+| **Российская юрисдикция** | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+**Ключевые дифференциаторы FlowLink:**
+1. **Комбинация MCP Gateway + Firewall + GitOps + K8s** — никто другой не объединяет все четыре
+2. **Rust** — <5ms latency, память-безопасность, подходит для security-critical систем
+3. **Российская юрисдикция** — 152-ФЗ, 242-ФЗ, ФСТЭК compliance из коробки
+4. **18 модулей** — самый широкий функционал среди конкурентов
+
+**Где конкуренты сильнее:**
+- ToolHive: лучше K8s ecosystem (CNCF, OTel, IdP), больше funding (Stacklok — vc-backed)
+- Pipelock: CNCF Landscape, action receipts (нотаризация), 48 credential patterns
+- Lunar: лучше cost optimization и traffic management
 
 ### 2.3. Патенты и ИС
 - Заявка на регистрацию ПО (Роспатент) — в планах
