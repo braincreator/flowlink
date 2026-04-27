@@ -28,6 +28,7 @@ pub mod subscriptions;
 pub mod orgs;
 pub mod usage;
 pub mod promotions;
+pub mod waitlist;
 pub mod webhooks;
 
 pub use pool::DbPool;

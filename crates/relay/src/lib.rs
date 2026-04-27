@@ -637,6 +637,7 @@ async fn shutdown_signal() {
     info!("Shutting down...");
 }
 pub mod playground;
+pub mod waitlist_api;
 pub mod policy_db;
 pub mod api_keys;
 pub mod saml;

@@ -2134,6 +2134,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         // Playground — public, no auth
         .route("/api/playground/scan", axum::routing::post(crate::playground::playground_scan))
+        .route("/api/waitlist", axum::routing::post(crate::waitlist_api::waitlist_signup))
+        .route("/api/admin/waitlist", axum::routing::get(crate::waitlist_api::admin_waitlist_list))
+        .route("/api/admin/waitlist/notify", axum::routing::post(crate::waitlist_api::admin_waitlist_notify))
         // Auth endpoints
         .route("/api/auth/email/send-code", axum::routing::post(crate::email_auth::send_code))
             .route_layer(axum::middleware::from_fn_with_state(state.clone(), crate::auth_rate_middleware::email_auth_rate_limit))
@@ -2464,7 +2467,7 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(axum::middleware::from_fn(rate_limit_layer(
             rate_limiter,
-            vec!["/healthz".to_string(), "/ws".to_string(), "/api/playground/scan".to_string()],
+            vec!["/healthz".to_string(), "/ws".to_string(), "/api/playground/scan".to_string(), "/api/waitlist".to_string()],
         )))
         .layer(cors_layer(cors_origins))
         .layer(axum::middleware::from_fn(security_headers_middleware))
