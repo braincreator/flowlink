@@ -49,7 +49,7 @@ use tracing::{debug, info, warn};
 use command_runner::CommandRunner;
 use event_types::{GuardAlert, GuardEvent};
 use guard_mode::GuardKillswitch;
-use metrics::GuardMetrics;
+use metrics::{GuardMetrics, spawn_metrics_server};
 use pipeline::{Pipeline, PipelineConfig, PipelineOutcome};
 
 /// ServerGuard configuration
@@ -236,6 +236,16 @@ impl ServerGuard {
             });
             self.tasks.push(handle);
         }
+
+        // Start metrics server for Prometheus scraping
+        let metrics_addr: std::net::SocketAddr = "0.0.0.0:9082".parse().unwrap();
+        let sg_metrics = self.metrics.clone();
+        let metrics_handle = tokio::spawn(async move {
+            if let Err(e) = spawn_metrics_server(metrics_addr, sg_metrics).await {
+                tracing::error!("Failed to start ServerGuard metrics server: {e}");
+            }
+        });
+        self.tasks.push(metrics_handle);
 
         // Start pipeline processor (main event loop)
         let mut pipeline = Pipeline::with_metrics(config.pipeline, killswitch, command_runner, alert_cb, Some(self.metrics.clone()));
