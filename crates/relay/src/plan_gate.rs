@@ -156,8 +156,8 @@ pub fn check_limit(plan: &Option<Plan>, limit: &str, current: u64, required_plan
 /// Get the minimum plan tier required for a feature.
 pub fn feature_min_tier(feature: &str) -> &'static str {
     match feature {
-        "shield" | "e2ee" | "policy_engine" | "audit_log" | "redaction" => "starter",
-        "approval" | "rbac" | "serverguard" | "forensics" | "service_catalog" | "ai_ops" => "professional",
+        "shield" | "e2ee" | "policy_engine" | "audit_log" | "redaction" | "approval" => "starter",
+        "rbac" | "serverguard" | "forensics" | "service_catalog" | "ai_ops" => "professional",
         "pattern_learning" | "siem_export" | "webhooks" | "change_management" => "scale",
         "sso" | "on_premise" => "enterprise",
         _ => "professional",
@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(feature_min_tier("policy_engine"), "starter");
         assert_eq!(feature_min_tier("audit_log"), "starter");
         // Professional features
-        assert_eq!(feature_min_tier("approval"), "professional");
+        assert_eq!(feature_min_tier("approval"), "starter");
         assert_eq!(feature_min_tier("rbac"), "professional");
         assert_eq!(feature_min_tier("serverguard"), "professional");
         assert_eq!(feature_min_tier("forensics"), "professional");

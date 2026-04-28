@@ -132,8 +132,8 @@ static FEATURE_MIN_TIER: &[(&str, &str, u32)] = &[
     ("policy_engine", "Starter", 0),
     ("e2ee", "Starter", 0),
     ("audit_log", "Starter", 0),
-    ("webhooks", "Starter", 0),
-    ("approval", "Professional", 1),
+    ("redaction", "Starter", 0),
+    ("approval", "Starter", 0),
     ("rbac", "Professional", 1),
     ("siem_export", "Professional", 1),
     ("pattern_learning", "Professional", 1),
@@ -388,6 +388,7 @@ impl PlanRegistry {
                     e2ee: true,
                     audit_log: true,
                     redaction: true,
+                    approval: true,
                     webhooks: true,
                     ..Default::default()
                 },
@@ -601,7 +602,7 @@ mod tests {
         assert!(starter.features.shield);
         assert!(starter.features.mcp_gateway);
         assert!(starter.features.policy_engine);
-        assert!(!starter.features.approval);
+        assert!(starter.features.approval);
         assert!(!starter.features.rbac);
         assert!(!starter.features.pattern_learning);
         assert!(starter.features.webhooks);
@@ -674,10 +675,10 @@ mod tests {
     #[test]
     fn test_require_feature_rejected() {
         let starter = make_registry().get("starter").unwrap();
-        let err = starter.require_feature("approval").unwrap_err();
+        let err = starter.require_feature("rbac").unwrap_err();
         match err {
             PlanGateError::FeatureNotAvailable { feature, min_plan, .. } => {
-                assert_eq!(feature, "approval");
+                assert_eq!(feature, "rbac");
                 assert_eq!(min_plan, "Professional");
             }
             _ => panic!("Wrong error type"),
@@ -730,7 +731,7 @@ mod tests {
         let ent = make_registry().get("enterprise").unwrap();
 
         // Features are NOT identical — that's the whole point
-        assert_ne!(starter.features.approval, pro.features.approval);
+        assert_ne!(starter.features.rbac, pro.features.rbac);
         assert_ne!(starter.features.pattern_learning, pro.features.pattern_learning);
         assert_ne!(scale.features.on_premise, ent.features.on_premise);
     }

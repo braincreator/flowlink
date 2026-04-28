@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn test_feature_min_tier() {
         // Now delegates to plan_gate::feature_min_tier (single source of truth)
-        assert_eq!(feature_min_tier("approval"), "professional");
+        assert_eq!(feature_min_tier("approval"), "starter");
         assert_eq!(feature_min_tier("shield"), "starter");
         assert_eq!(feature_min_tier("policy_engine"), "starter");
         assert_eq!(feature_min_tier("sso"), "enterprise");
