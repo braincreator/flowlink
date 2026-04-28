@@ -2376,7 +2376,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/admin/shield/alerts", axum::routing::get(shield_list_alerts))
         .route("/api/admin/audit/query", axum::routing::get(audit_query))
         .route("/api/audit/stats", axum::routing::get(audit_stats_handler))
-        .route("/api/trace/:correlation_id", axum::routing::get(trace_correlation))
+        .route("/api/trace/{correlation_id}", axum::routing::get(trace_correlation))
         .route("/api/admin/audit/stats", axum::routing::get(audit_stats_handler))
         .route("/api/admin/audit/export", axum::routing::get(audit_export))
         .route("/api/admin/clients", axum::routing::get(list_clients))
