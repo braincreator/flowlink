@@ -87,6 +87,10 @@ pub struct ServerGuardConfig {
 
     /// Agent token for relay authentication
     pub agent_token: Option<String>,
+
+    /// Metrics server port (default: 9092)
+    #[serde(default = "default_metrics_port")]
+    pub metrics_port: u16,
 }
 
 fn default_watch_paths() -> Vec<String> {
@@ -100,6 +104,10 @@ fn default_watch_paths() -> Vec<String> {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_metrics_port() -> u16 {
+    9092
 }
 fn default_state_interval() -> u64 {
     300
@@ -117,6 +125,7 @@ impl Default for ServerGuardConfig {
             relay_url: None,
             agent_id: None,
             agent_token: None,
+            metrics_port: default_metrics_port(),
         }
     }
 }
@@ -238,7 +247,8 @@ impl ServerGuard {
         }
 
         // Start metrics server for Prometheus scraping
-        let metrics_addr: std::net::SocketAddr = "0.0.0.0:9082".parse().unwrap();
+        let metrics_port = self.config.metrics_port;
+        let metrics_addr: std::net::SocketAddr = format!("0.0.0.0:{}", metrics_port).parse().unwrap();
         let sg_metrics = self.metrics.clone();
         let metrics_handle = tokio::spawn(async move {
             if let Err(e) = spawn_metrics_server(metrics_addr, sg_metrics).await {
