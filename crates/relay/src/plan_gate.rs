@@ -156,8 +156,9 @@ pub fn check_limit(plan: &Option<Plan>, limit: &str, current: u64, required_plan
 /// Get the minimum plan tier required for a feature.
 pub fn feature_min_tier(feature: &str) -> &'static str {
     match feature {
-        "approval" | "rbac" => "professional",
-        "pattern_learning" | "siem_export" | "webhooks" => "scale",
+        "shield" | "e2ee" | "policy_engine" | "audit_log" => "starter",
+        "approval" | "rbac" | "serverguard" | "forensics" | "service_catalog" | "ai_ops" => "professional",
+        "pattern_learning" | "siem_export" | "webhooks" | "change_management" => "scale",
         "sso" | "on_premise" => "enterprise",
         _ => "professional",
     }
@@ -354,10 +355,27 @@ mod tests {
 
     #[test]
     fn test_feature_min_tier() {
+        // Starter features
+        assert_eq!(feature_min_tier("shield"), "starter");
+        assert_eq!(feature_min_tier("e2ee"), "starter");
+        assert_eq!(feature_min_tier("policy_engine"), "starter");
+        assert_eq!(feature_min_tier("audit_log"), "starter");
+        // Professional features
         assert_eq!(feature_min_tier("approval"), "professional");
         assert_eq!(feature_min_tier("rbac"), "professional");
+        assert_eq!(feature_min_tier("serverguard"), "professional");
+        assert_eq!(feature_min_tier("forensics"), "professional");
+        assert_eq!(feature_min_tier("service_catalog"), "professional");
+        assert_eq!(feature_min_tier("ai_ops"), "professional");
+        // Scale features
         assert_eq!(feature_min_tier("pattern_learning"), "scale");
+        assert_eq!(feature_min_tier("siem_export"), "scale");
+        assert_eq!(feature_min_tier("webhooks"), "scale");
+        assert_eq!(feature_min_tier("change_management"), "scale");
+        // Enterprise features
         assert_eq!(feature_min_tier("sso"), "enterprise");
+        assert_eq!(feature_min_tier("on_premise"), "enterprise");
+        // Unknown defaults to professional
         assert_eq!(feature_min_tier("unknown_feature"), "professional");
     }
 

@@ -1593,6 +1593,27 @@ async fn audit_stats_handler(
     Json(state.audit_store.stats())
 }
 
+/// GET /api/trace/:correlation_id — Tool Call Tracing: get all events for a correlated request chain
+async fn trace_correlation(
+    State(state): State<AppState>,
+    axum::extract::Path(correlation_id): axum::extract::Path<String>,
+    _claims: axum::extract::Extension<crate::auth::Claims>,
+) -> axum::Json<serde_json::Value> {
+    let events = state.audit_store.query_by_correlation(&correlation_id);
+    let count = events.len();
+    Json(json!({
+        "correlation_id": correlation_id,
+        "event_count": count,
+        "events": events,
+        "timeline": events.iter().map(|e| json!({
+            "id": e.id,
+            "timestamp": e.timestamp_iso,
+            "agent_id": e.agent_id,
+            "event_type": format!("{:?}", e.event_type).split('(').next().unwrap_or("unknown"),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 async fn audit_export(
     State(state): State<AppState>,
     Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
@@ -2331,6 +2352,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/admin/shield/alerts", axum::routing::get(shield_list_alerts))
         .route("/api/admin/audit/query", axum::routing::get(audit_query))
         .route("/api/audit/stats", axum::routing::get(audit_stats_handler))
+        .route("/api/trace/:correlation_id", axum::routing::get(trace_correlation))
         .route("/api/admin/audit/stats", axum::routing::get(audit_stats_handler))
         .route("/api/admin/audit/export", axum::routing::get(audit_export))
         .route("/api/admin/clients", axum::routing::get(list_clients))

@@ -328,6 +328,12 @@ async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<Ke
 
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
+    // Derive correlation_id from MCP request ID for tool call tracing
+    let correlation_id = req.id.as_ref()
+        .and_then(|v| v.as_str())
+        .or_else(|| req.id.as_ref().and_then(|v| v.as_u64().map(|n| Box::leak(n.to_string().into_boxed_str()) as &str)))
+        .map(|s| format!("mcp:{}", s));
+
     // Prompt injection detection on tool call arguments
     {
         use flowlink_shield::InjectionDetector;

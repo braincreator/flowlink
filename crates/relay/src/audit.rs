@@ -190,6 +190,21 @@ impl AuditStore {
         }
     }
 
+    /// Query all events with a specific correlation_id (tool call tracing)
+    pub fn query_by_correlation(&self, correlation_id: &str) -> Vec<AuditEvent> {
+        let cid = correlation_id.to_lowercase();
+        let mut results: Vec<AuditEvent> = self.events
+            .iter()
+            .filter(|e| {
+                let ev = e.value();
+                ev.correlation_id.as_ref().map_or(false, |c| c.to_lowercase() == cid)
+            })
+            .map(|e| e.value().clone())
+            .collect();
+        results.sort_by(|a, b| a.timestamp_nanos.cmp(&b.timestamp_nanos));
+        results
+    }
+
     pub fn stats(&self) -> AuditStats {
         let now_nanos = Utc::now().timestamp_nanos_opt().unwrap_or(0) as u64;
         let one_day = 24 * 60 * 60 * 1_000_000_000u64;

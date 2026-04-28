@@ -13,6 +13,9 @@ pub struct AuditEvent {
     pub event_type: AuditEventType,
     pub timestamp_nanos: u64,
     pub timestamp_iso: String,
+    /// Correlation ID linking related events (e.g., MCP request → tool calls → results)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forensic: Option<ForensicSummary>,
     #[serde(default)]
@@ -186,9 +189,16 @@ impl AuditEvent {
             event_type,
             timestamp_nanos: now.timestamp_nanos_opt().unwrap_or(0) as u64,
             timestamp_iso: now.to_rfc3339(),
+            correlation_id: None,
             forensic: None,
             metadata: HashMap::new(),
         }
+    }
+
+    /// Set correlation ID for request tracing
+    pub fn with_correlation(mut self, cid: impl Into<String>) -> Self {
+        self.correlation_id = Some(cid.into());
+        self
     }
 
     pub fn with_forensic(mut self, forensic: ForensicSummary) -> Self {

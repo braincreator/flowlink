@@ -199,6 +199,7 @@ pub async fn start_discovery(
             .unwrap_or_default()
             .as_nanos() as u64,
         timestamp_iso: chrono::Utc::now().to_rfc3339(),
+        correlation_id: None,
         forensic: None,
         metadata: {
             let mut m = std::collections::HashMap::new();
@@ -354,6 +355,7 @@ pub async fn approve_discovery(
             .unwrap_or_default()
             .as_nanos() as u64,
         timestamp_iso: chrono::Utc::now().to_rfc3339(),
+        correlation_id: None,
         forensic: None,
         metadata: {
             let mut m = std::collections::HashMap::new();
