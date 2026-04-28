@@ -185,6 +185,7 @@ impl AuditStore {
         match format {
             SiemFormat::Cef => events.iter().map(|e| self.to_cef(e)).collect::<Vec<_>>().join("\n"),
             SiemFormat::Leef => events.iter().map(|e| self.to_leef(e)).collect::<Vec<_>>().join("\n"),
+            SiemFormat::Syslog => events.iter().map(|e| self.to_syslog(e)).collect::<Vec<_>>().join("\n"),
             SiemFormat::Json => serde_json::to_string(&events).unwrap_or_else(|_| "[]".into()),
         }
     }
@@ -295,6 +296,31 @@ impl AuditStore {
             event.event_type.as_str(),
         )
     }
+
+    /// Format as RFC 5424 syslog message
+    fn to_syslog(&self, event: &AuditEvent) -> String {
+        let severity = match event.event_type.as_str() {
+            s if s.contains("blocked") || s.contains("rejected") || s.contains("canary") => 2, // critical
+            s if s.contains("intercept") || s.contains("escalat") => 3, // error
+            s if s.contains("approv") => 5, // notice
+            _ => 6, // info
+        };
+        let facility = 1; // user-level
+        let pri = facility * 8 + severity;
+        let version = 1;
+        // Escape any double quotes in event type for structured data
+        let escaped_type = event.event_type.as_str().replace('"', "\\\"");
+        format!(
+            "<{}>{} {} FlowLink {} - - [flowlink event=\"{}\" agentId=\"{}\"] {}",
+            pri,
+            version,
+            event.timestamp_iso,
+            event.agent_id,
+            event.event_type.as_str(),
+            escaped_type,
+            event.agent_id,
+        )
+    }
 }
 
 // ═══════════════════════════════════════════════
@@ -315,6 +341,7 @@ pub struct AuditFilter {
 pub enum SiemFormat {
     Cef,
     Leef,
+    Syslog,
     Json,
 }
 
@@ -550,6 +577,17 @@ mod tests {
         store.record(make_event("a1", 1000)).unwrap();
         let leef = store.export_siem(&SiemFormat::Leef, &AuditFilter::default());
         assert!(leef.contains("LEEF:1.0"));
+    }
+
+    #[test]
+    fn test_export_siem_syslog() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = make_store(&dir.path().join("audit.jsonl"));
+        store.record(make_event("a1", 1000)).unwrap();
+        let syslog = store.export_siem(&SiemFormat::Syslog, &AuditFilter::default());
+        assert!(syslog.contains("FlowLink"));
+        assert!(syslog.contains("<")); // PRI field
+        assert!(syslog.contains("agentId")); // structured data
     }
 
     #[test]

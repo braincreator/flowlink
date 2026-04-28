@@ -1593,7 +1593,11 @@ async fn audit_stats_handler(
     Json(state.audit_store.stats())
 }
 
-async fn audit_export(State(state): State<AppState>, Query(params): Query<AuditExportParams>) -> impl IntoResponse {
+async fn audit_export(
+    State(state): State<AppState>,
+    Extension(_claims): axum::extract::Extension<crate::auth::Claims>,
+    Query(params): Query<AuditExportParams>,
+) -> impl IntoResponse {
     let filter = AuditFilter {
         agent_id: params.agent_id,
         event_type: params.event_type,
@@ -1605,12 +1609,14 @@ async fn audit_export(State(state): State<AppState>, Query(params): Query<AuditE
     let format = match params.format.as_deref() {
         Some("cef") => SiemFormat::Cef,
         Some("leef") => SiemFormat::Leef,
+        Some("syslog") => SiemFormat::Syslog,
         _ => SiemFormat::Json,
     };
     let body = state.audit_store.export_siem(&format, &filter);
     let content_type = match format {
-        SiemFormat::Cef => "text/plain",
-        SiemFormat::Leef => "text/plain",
+        SiemFormat::Cef => "application/x-cef",
+        SiemFormat::Leef => "application/x-leef",
+        SiemFormat::Syslog => "text/plain",
         SiemFormat::Json => "application/json",
     };
     ([(axum::http::header::CONTENT_TYPE, content_type)], body).into_response()
@@ -2229,6 +2235,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/shield/resolve", post(shield_resolve))
         // Audit (user-facing query only, stats/export in admin)
         .route("/api/audit", get(audit_query))
+        .route("/api/audit/export", get(audit_export))
         // Config (view only, reload in admin)
         .route("/api/config", get(config_get))
         .route("/api/config/push/{agent_id}", post(config_push_agent))

@@ -226,6 +226,8 @@ mod tests {
                 service_catalog: false,
                 ai_ops: false,
                 change_management: false,
+                serverguard: false,
+                serverguard_level: String::new(),
             },
             limits: PlanLimits {
                 max_agents: 5,
@@ -275,6 +277,8 @@ mod tests {
                 service_catalog: false,
                 ai_ops: false,
                 change_management: false,
+                serverguard: false,
+                serverguard_level: String::new(),
             },
             limits: PlanLimits {
                 max_agents: 1,
