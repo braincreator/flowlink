@@ -383,21 +383,21 @@ mod tests {
 
     fn make_pro() -> flowlink_billing::plans::Plan {
         flowlink_billing::plans::Plan {
-            id: "professional".into(),
-            name: "Professional".into(),
-            description: "Pro".into(),
-            tier: 1,
+            id: "team".into(),
+            name: "Team".into(),
+            description: "For dev teams".into(),
+            tier: 2,
             price_kopecks: 199000,
             annual_price_kopecks: Some(1910400),
             annual_discount_percent: 20,
             features: PlanFeatures {
                 shield: true, shield_level: "advanced".into(),
                 mcp_gateway: true, policy_engine: true,
-                approval: true, rbac: true, pattern_learning: false,
+                approval: true, rbac: true, pattern_learning: true,
                 e2ee: true, audit_log: true, webhooks: true,
                 siem_export: true, sso: false, on_premise: false,
-                forensics: true, service_catalog: true,
-                ai_ops: true, change_management: false, redaction: false,
+                forensics: true, service_catalog: false,
+                ai_ops: false, change_management: false, redaction: true,
                 serverguard: true,
                 serverguard_level: "basic".into(),
             },
@@ -435,16 +435,16 @@ mod tests {
     #[test]
     fn test_has_feature_pro() {
         let plan = make_pro();
-        // Professional features
+        // Team features
         assert!(has_feature(&plan, "approval"));
         assert!(has_feature(&plan, "rbac"));
         assert!(has_feature(&plan, "serverguard"));
         assert!(has_feature(&plan, "forensics"));
-        assert!(has_feature(&plan, "service_catalog"));
-        assert!(has_feature(&plan, "ai_ops"));
-        // Not pro
-        assert!(!has_feature(&plan, "pattern_learning"));
+        assert!(has_feature(&plan, "pattern_learning"));
+        // Not team
         assert!(!has_feature(&plan, "sso"));
+        assert!(!has_feature(&plan, "service_catalog"));
+        assert!(!has_feature(&plan, "ai_ops"));
     }
 
     #[test]
@@ -461,9 +461,9 @@ mod tests {
         assert_eq!(feature_min_tier("approval"), "starter");
         assert_eq!(feature_min_tier("shield"), "starter");
         assert_eq!(feature_min_tier("policy_engine"), "starter");
-        assert_eq!(feature_min_tier("sso"), "enterprise");
-        assert_eq!(feature_min_tier("ai_ops"), "professional");
-        assert_eq!(feature_min_tier("serverguard"), "professional");
+        assert_eq!(feature_min_tier("sso"), "business");
+        assert_eq!(feature_min_tier("ai_ops"), "business");
+        assert_eq!(feature_min_tier("serverguard"), "team");
     }
 
     #[test]
@@ -491,12 +491,12 @@ mod tests {
             error: "feature_not_available",
             feature: Some("approval"),
             limit: None,
-            required_plan: Some("professional"),
-            upgrade_url: Some("/pricing?upgrade=professional".into()),
+            required_plan: Some("team"),
+            upgrade_url: Some("/pricing?upgrade=team".into()),
             message: "Feature 'approval' not available".into(),
         };
         let json = serde_json::to_string(&blocked).unwrap();
         assert!(json.contains("\"error\":\"feature_not_available\""));
-        assert!(json.contains("\"upgrade_url\":\"/pricing?upgrade=professional\""));
+        assert!(json.contains("\"upgrade_url\":\"/pricing?upgrade=team\""));
     }
 }

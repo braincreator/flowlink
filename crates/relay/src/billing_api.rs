@@ -155,7 +155,7 @@ pub async fn get_billing_info(
     // Ensure account exists in DB
     if let Some(db) = &state.db {
         if let Err(e) = flowlink_db::accounts::AccountRepo::get_or_create(
-            db.pool(), &claims.0.account_id, flowlink_billing::plans::PlanId::Starter.as_str(),
+            db.pool(), &claims.0.account_id, flowlink_billing::plans::PlanId::Free.as_str(),
         ).await {
             log::warn!("DB account lookup failed: {e}");
         }

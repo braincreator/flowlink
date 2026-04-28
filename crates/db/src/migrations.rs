@@ -817,6 +817,48 @@ fn get_migrations() -> Vec<(&'static str, &'static str)> {
             CREATE INDEX IF NOT EXISTS idx_secret_mappings_secret ON secret_mappings(secret_id);
             "#,
         ),
+        (
+            "046_plans_seed_v3",
+            r#"
+            -- Clear old plans and seed new 5-tier system
+            DELETE FROM plans;
+
+            INSERT INTO plans (id, name, description, tier, price_kopecks, annual_price_kopecks, period, currency, limits, features, is_active, sort_order, trial_days, annual_discount_percent) VALUES
+            ('free', 'Free', 'Get started with AI agent security', 0, 0, NULL, 'month', 'RUB',
+             '{"max_agents":1,"max_users":1,"audit_retention_days":7,"api_rate_limit":60,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"approval_channels":["telegram"],"siem_formats":[],"allowed_shield_levels":["basic"],"support_tier":"community"}',
+             '{"shield":true,"shield_level":"basic","mcp_gateway":true,"approval":true,"audit_log":true,"webhooks":true}',
+             true, 0, 0, 0),
+
+            ('starter', 'Starter', 'For freelancers and small teams', 1, 499000, 4990000, 'month', 'RUB',
+             '{"max_agents":3,"max_users":3,"audit_retention_days":30,"api_rate_limit":180,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"max_webhooks":5,"approval_channels":["telegram","email"],"siem_formats":[],"allowed_shield_levels":["basic"],"support_tier":"community"}',
+             '{"shield":true,"shield_level":"basic","mcp_gateway":true,"policy_engine":true,"approval":true,"e2ee":true,"audit_log":true,"redaction":true,"webhooks":true}',
+             true, 1, 14, 17),
+
+            ('team', 'Team', 'For dev teams', 2, 1499000, 14990000, 'month', 'RUB',
+             '{"max_agents":10,"max_users":10,"audit_retention_days":90,"api_rate_limit":500,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"approval_channels":["telegram","email"],"siem_formats":["json"],"allowed_shield_levels":["basic","advanced"],"support_tier":"email"}',
+             '{"shield":true,"shield_level":"advanced","mcp_gateway":true,"policy_engine":true,"approval":true,"rbac":true,"pattern_learning":true,"e2ee":true,"audit_log":true,"redaction":true,"webhooks":true,"siem_export":true,"serverguard":true,"serverguard_level":"basic","forensics":true}',
+             true, 2, 14, 17),
+
+            ('business', 'Business', 'For agencies and growing companies', 3, 3999000, 39990000, 'month', 'RUB',
+             '{"max_agents":30,"max_users":30,"audit_retention_days":365,"api_rate_limit":2000,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"approval_channels":["telegram","email","slack"],"siem_formats":["json","cef","leef"],"allowed_shield_levels":["basic","advanced","full"],"support_tier":"priority"}',
+             '{"shield":true,"shield_level":"full","mcp_gateway":true,"policy_engine":true,"approval":true,"rbac":true,"pattern_learning":true,"e2ee":true,"audit_log":true,"redaction":true,"webhooks":true,"siem_export":true,"sso":true,"serverguard":true,"serverguard_level":"full","forensics":true,"service_catalog":true,"ai_ops":true,"change_management":true}',
+             true, 3, 0, 17),
+
+            ('enterprise', 'Enterprise', 'For large organizations with dedicated support', 4, 0, NULL, 'month', 'RUB',
+             '{"max_agents":0,"max_users":0,"audit_retention_days":365,"api_rate_limit":0,"api_rate_window_secs":60,"max_custom_rules":0,"max_policies":0,"approval_channels":["telegram","email","slack","webhook"],"siem_formats":["json","cef","leef","syslog"],"allowed_shield_levels":["basic","advanced","full","ebpf"],"support_tier":"dedicated"}',
+             '{"shield":true,"shield_level":"full","mcp_gateway":true,"policy_engine":true,"approval":true,"rbac":true,"pattern_learning":true,"e2ee":true,"audit_log":true,"redaction":true,"webhooks":true,"siem_export":true,"sso":true,"on_premise":true,"serverguard":true,"serverguard_level":"full","forensics":true,"service_catalog":true,"ai_ops":true,"change_management":true}',
+             true, 4, 0, 0)
+            ON CONFLICT (id) DO NOTHING;
+
+            -- Map old plan IDs to new ones
+            UPDATE accounts SET plan_id = 'free' WHERE plan_id = 'trial' OR plan_id = 'starter' AND plan_id != 'free';
+            UPDATE accounts SET plan_id = 'team' WHERE plan_id = 'professional' OR plan_id = 'pro';
+            UPDATE accounts SET plan_id = 'business' WHERE plan_id = 'scale';
+            UPDATE organizations SET plan_id = 'free' WHERE plan_id = 'trial' OR plan_id = 'starter' AND plan_id != 'free';
+            UPDATE organizations SET plan_id = 'team' WHERE plan_id = 'professional' OR plan_id = 'pro';
+            UPDATE organizations SET plan_id = 'business' WHERE plan_id = 'scale';
+            "#,
+        ),
     ]
 }
 
@@ -827,7 +869,7 @@ mod tests {
     #[test]
     fn get_migrations_returns_expected_count() {
         let migrations = get_migrations();
-        assert_eq!(migrations.len(), 45);
+        assert_eq!(migrations.len(), 46);
     }
 
     #[test]
@@ -879,6 +921,7 @@ mod tests {
             "043_plans_features_enhanced",
             "044_plans_seed_v2",
             "045_secret_mappings",
+            "046_plans_seed_v3",
         ];
         for (i, (name, _sql)) in migrations.iter().enumerate() {
             assert_eq!(

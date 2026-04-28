@@ -16,18 +16,20 @@ use std::sync::RwLock;
 /// Built-in plan IDs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlanId {
+    Free,
     Starter,
-    Professional,
-    Scale,
+    Team,
+    Business,
     Enterprise,
 }
 
 impl PlanId {
     pub fn as_str(&self) -> &'static str {
         match self {
+            PlanId::Free => "free",
             PlanId::Starter => "starter",
-            PlanId::Professional => "professional",
-            PlanId::Scale => "scale",
+            PlanId::Team => "team",
+            PlanId::Business => "business",
             PlanId::Enterprise => "enterprise",
         }
     }
@@ -126,25 +128,30 @@ pub enum PlanGateError {
 /// If a plan's features don't include the key → FeatureNotAvailable.
 /// The "min_plan" hint tells the user what to upgrade to.
 static FEATURE_MIN_TIER: &[(&str, &str, u32)] = &[
-    ("shield", "Starter", 0),
-    ("shield_level", "Starter", 0),
-    ("mcp_gateway", "Starter", 0),
-    ("policy_engine", "Starter", 0),
-    ("e2ee", "Starter", 0),
-    ("audit_log", "Starter", 0),
-    ("redaction", "Starter", 0),
-    ("approval", "Starter", 0),
-    ("rbac", "Professional", 1),
-    ("siem_export", "Professional", 1),
-    ("pattern_learning", "Professional", 1),
-    ("forensics", "Professional", 1),
-    ("service_catalog", "Professional", 1),
-    ("policy_engine", "Professional", 1),
-    ("serverguard", "Professional", 1),
-    ("sso", "Business", 2),
-    ("ai_ops", "Business", 2),
-    ("change_management", "Business", 2),
-    ("on_premise", "Enterprise", 3),
+    // Free (tier 0)
+    ("shield", "Starter", 1),
+    ("shield_level", "Starter", 1),
+    ("mcp_gateway", "Starter", 1),
+    ("approval", "Starter", 1),
+    ("audit_log", "Starter", 1),
+    ("webhooks", "Starter", 1),
+    // Starter (tier 1)
+    ("policy_engine", "Starter", 1),
+    ("e2ee", "Starter", 1),
+    ("redaction", "Starter", 1),
+    // Team (tier 2)
+    ("rbac", "Team", 2),
+    ("pattern_learning", "Team", 2),
+    ("siem_export", "Team", 2),
+    ("serverguard", "Team", 2),
+    ("forensics", "Team", 2),
+    // Business (tier 3)
+    ("sso", "Business", 3),
+    ("ai_ops", "Business", 3),
+    ("change_management", "Business", 3),
+    ("service_catalog", "Business", 3),
+    // Enterprise (tier 4)
+    ("on_premise", "Enterprise", 4),
 ];
 
 /// A billing plan
@@ -217,7 +224,7 @@ impl Plan {
             .iter()
             .find(|(f, _, _)| *f == feature)
             .map(|(_, p, _)| (*p, true))
-            .unwrap_or(("Professional", true));
+            .unwrap_or(("Team", true));
 
         Err(PlanGateError::FeatureNotAvailable {
             feature: feature.to_string(),
@@ -271,7 +278,7 @@ impl Plan {
             return Err(PlanGateError::FeatureNotAvailable {
                 feature: limit.to_string(),
                 plan_id: self.id.clone(),
-                min_plan: "Professional".to_string(),
+                min_plan: "Team".to_string(),
             });
         }
 
@@ -281,7 +288,7 @@ impl Plan {
             Err(PlanGateError::FeatureNotAvailable {
                 feature: format!("{}:{}", limit, value),
                 plan_id: self.id.clone(),
-                min_plan: "Professional".to_string(),
+                min_plan: "Team".to_string(),
             })
         }
     }
@@ -372,33 +379,66 @@ impl PlanRegistry {
     pub fn seed_defaults(&self) {
         let mut plans = self.plans.write().unwrap();
         if plans.is_empty() {
+            plans.insert(PlanId::Free.as_str().to_string(), Plan {
+                id: PlanId::Free.as_str().to_string(),
+                name: "Free".to_string(),
+                description: "Get started with AI agent security".to_string(),
+                tier: 0,
+                price_kopecks: 0,
+                annual_price_kopecks: None,
+                annual_discount_percent: 0,
+                features: PlanFeatures {
+                    shield: true,
+                    shield_level: "basic".to_string(),
+                    mcp_gateway: true,
+                    approval: true,
+                    audit_log: true,
+                    webhooks: true,
+                    ..Default::default()
+                },
+                limits: PlanLimits {
+                    max_agents: 1,
+                    max_users: 1,
+                    audit_retention_days: 7,
+                    api_rate_limit: 60,
+                    api_rate_window_secs: 60,
+                    approval_channels: vec!["telegram".to_string()],
+                    support_tier: "community".to_string(),
+                    ..Default::default()
+                },
+                available: true,
+                legacy: false,
+                trial_days: None,
+                billing_period: "month".to_string(),
+            });
             plans.insert(PlanId::Starter.as_str().to_string(), Plan {
                 id: PlanId::Starter.as_str().to_string(),
                 name: "Starter".to_string(),
-                description: "For individuals and small projects".to_string(),
-                tier: 0,
-                price_kopecks: 299_000,
-                annual_price_kopecks: Some(2_990_000),
+                description: "For freelancers and small teams".to_string(),
+                tier: 1,
+                price_kopecks: 499_000,
+                annual_price_kopecks: Some(4_990_000),
                 annual_discount_percent: 17,
                 features: PlanFeatures {
                     shield: true,
                     shield_level: "basic".to_string(),
                     mcp_gateway: true,
                     policy_engine: true,
+                    approval: true,
                     e2ee: true,
                     audit_log: true,
                     redaction: true,
-                    approval: true,
                     webhooks: true,
                     ..Default::default()
                 },
                 limits: PlanLimits {
-                    max_agents: 5,
-                    max_users: 2,
-                    audit_retention_days: 14,
+                    max_agents: 3,
+                    max_users: 3,
+                    audit_retention_days: 30,
                     api_rate_limit: 180,
                     api_rate_window_secs: 60,
-                    approval_channels: vec!["telegram".to_string()],
+                    approval_channels: vec!["telegram".to_string(), "email".to_string()],
+                    max_webhooks: 5,
                     support_tier: "community".to_string(),
                     ..Default::default()
                 },
@@ -407,13 +447,13 @@ impl PlanRegistry {
                 trial_days: Some(14),
                 billing_period: "month".to_string(),
             });
-            plans.insert(PlanId::Professional.as_str().to_string(), Plan {
-                id: PlanId::Professional.as_str().to_string(),
-                name: "Pro".to_string(),
-                description: "For growing teams".to_string(),
-                tier: 1,
-                price_kopecks: 1_999_000,
-                annual_price_kopecks: Some(19_990_000),
+            plans.insert(PlanId::Team.as_str().to_string(), Plan {
+                id: PlanId::Team.as_str().to_string(),
+                name: "Team".to_string(),
+                description: "For dev teams".to_string(),
+                tier: 2,
+                price_kopecks: 1_499_000,
+                annual_price_kopecks: Some(14_990_000),
                 annual_discount_percent: 17,
                 features: PlanFeatures {
                     shield: true,
@@ -431,11 +471,10 @@ impl PlanRegistry {
                     serverguard: true,
                     serverguard_level: "basic".to_string(),
                     forensics: true,
-                    service_catalog: true,
                     ..Default::default()
                 },
                 limits: PlanLimits {
-                    max_agents: 15,
+                    max_agents: 10,
                     max_users: 10,
                     audit_retention_days: 90,
                     api_rate_limit: 500,
@@ -450,13 +489,13 @@ impl PlanRegistry {
                 trial_days: Some(14),
                 billing_period: "month".to_string(),
             });
-            plans.insert(PlanId::Scale.as_str().to_string(), Plan {
-                id: PlanId::Scale.as_str().to_string(),
+            plans.insert(PlanId::Business.as_str().to_string(), Plan {
+                id: PlanId::Business.as_str().to_string(),
                 name: "Business".to_string(),
-                description: "For agencies and multi-cluster setups".to_string(),
-                tier: 2,
-                price_kopecks: 4_999_000,
-                annual_price_kopecks: Some(49_990_000),
+                description: "For agencies and growing companies".to_string(),
+                tier: 3,
+                price_kopecks: 3_999_000,
+                annual_price_kopecks: Some(39_990_000),
                 annual_discount_percent: 17,
                 features: PlanFeatures {
                     shield: true,
@@ -481,8 +520,8 @@ impl PlanRegistry {
                     ..Default::default()
                 },
                 limits: PlanLimits {
-                    max_agents: 50,
-                    max_users: 50,
+                    max_agents: 30,
+                    max_users: 30,
                     audit_retention_days: 365,
                     api_rate_limit: 2000,
                     api_rate_window_secs: 60,
@@ -499,8 +538,8 @@ impl PlanRegistry {
             plans.insert(PlanId::Enterprise.as_str().to_string(), Plan {
                 id: PlanId::Enterprise.as_str().to_string(),
                 name: "Enterprise".to_string(),
-                description: "For large orgs with dedicated support".to_string(),
-                tier: 3,
+                description: "For large organizations with dedicated support".to_string(),
+                tier: 4,
                 price_kopecks: 0,
                 annual_price_kopecks: None,
                 annual_discount_percent: 0,
@@ -590,10 +629,25 @@ mod tests {
     #[test]
     fn test_default_plans() {
         let registry = make_registry();
+        assert!(registry.get("free").is_some());
         assert!(registry.get("starter").is_some());
-        assert!(registry.get("professional").is_some());
-        assert!(registry.get("scale").is_some());
+        assert!(registry.get("team").is_some());
+        assert!(registry.get("business").is_some());
         assert!(registry.get("enterprise").is_some());
+    }
+
+    #[test]
+    fn test_free_features() {
+        let free = make_registry().get("free").unwrap();
+        assert!(free.features.shield);
+        assert!(free.features.mcp_gateway);
+        assert!(free.features.approval);
+        assert!(free.features.audit_log);
+        assert!(free.features.webhooks);
+        assert!(!free.features.policy_engine);
+        assert!(!free.features.rbac);
+        assert!(!free.features.pattern_learning);
+        assert!(!free.features.sso);
     }
 
     #[test]
@@ -603,29 +657,37 @@ mod tests {
         assert!(starter.features.mcp_gateway);
         assert!(starter.features.policy_engine);
         assert!(starter.features.approval);
+        assert!(starter.features.e2ee);
+        assert!(starter.features.redaction);
+        assert!(starter.features.webhooks);
         assert!(!starter.features.rbac);
         assert!(!starter.features.pattern_learning);
-        assert!(starter.features.webhooks);
         assert!(!starter.features.sso);
     }
 
     #[test]
-    fn test_professional_features() {
-        let pro = make_registry().get("professional").unwrap();
-        assert!(pro.features.approval);
-        assert!(pro.features.rbac);
-        assert!(pro.features.webhooks);
-        assert!(pro.features.siem_export);
-        assert!(pro.features.pattern_learning);
-        assert!(!pro.features.sso);
+    fn test_team_features() {
+        let team = make_registry().get("team").unwrap();
+        assert!(team.features.approval);
+        assert!(team.features.rbac);
+        assert!(team.features.webhooks);
+        assert!(team.features.siem_export);
+        assert!(team.features.pattern_learning);
+        assert!(team.features.forensics);
+        assert!(team.features.serverguard);
+        assert!(!team.features.sso);
+        assert!(!team.features.on_premise);
     }
 
     #[test]
-    fn test_scale_features() {
-        let scale = make_registry().get("scale").unwrap();
-        assert!(scale.features.pattern_learning);
-        assert!(scale.features.sso);
-        assert!(!scale.features.on_premise);
+    fn test_business_features() {
+        let business = make_registry().get("business").unwrap();
+        assert!(business.features.pattern_learning);
+        assert!(business.features.sso);
+        assert!(business.features.ai_ops);
+        assert!(business.features.service_catalog);
+        assert!(business.features.change_management);
+        assert!(!business.features.on_premise);
     }
 
     #[test]
@@ -638,23 +700,30 @@ mod tests {
     }
 
     #[test]
+    fn test_free_limits() {
+        let free = make_registry().get("free").unwrap();
+        assert_eq!(free.limits.max_agents, 1);
+        assert_eq!(free.limits.max_users, 1);
+        assert_eq!(free.limits.audit_retention_days, 7);
+        assert_eq!(free.limits.api_rate_limit, 60);
+        assert_eq!(free.limits.support_tier, "community");
+    }
+
+    #[test]
     fn test_starter_limits() {
         let starter = make_registry().get("starter").unwrap();
-        assert_eq!(starter.limits.max_agents, 5);
-        assert_eq!(starter.limits.max_users, 2);
-        assert_eq!(starter.limits.max_custom_rules, 0);
-        assert_eq!(starter.limits.max_policies, 0);
-        assert_eq!(starter.limits.max_webhooks, 0);
+        assert_eq!(starter.limits.max_agents, 3);
+        assert_eq!(starter.limits.max_users, 3);
+        assert_eq!(starter.limits.max_webhooks, 5);
         assert_eq!(starter.limits.support_tier, "community");
     }
 
     #[test]
-    fn test_professional_limits() {
-        let pro = make_registry().get("professional").unwrap();
-        assert_eq!(pro.limits.max_agents, 15);
-        assert_eq!(pro.limits.max_users, 10);
-        assert_eq!(pro.limits.max_webhooks, 0);
-        assert_eq!(pro.limits.support_tier, "email");
+    fn test_team_limits() {
+        let team = make_registry().get("team").unwrap();
+        assert_eq!(team.limits.max_agents, 10);
+        assert_eq!(team.limits.max_users, 10);
+        assert_eq!(team.limits.support_tier, "email");
     }
 
     #[test]
@@ -667,9 +736,9 @@ mod tests {
 
     #[test]
     fn test_require_feature_ok() {
-        let pro = make_registry().get("professional").unwrap();
-        assert!(pro.require_feature("approval").is_ok());
-        assert!(pro.require_feature("rbac").is_ok());
+        let team = make_registry().get("team").unwrap();
+        assert!(team.require_feature("approval").is_ok());
+        assert!(team.require_feature("rbac").is_ok());
     }
 
     #[test]
@@ -679,7 +748,7 @@ mod tests {
         match err {
             PlanGateError::FeatureNotAvailable { feature, min_plan, .. } => {
                 assert_eq!(feature, "rbac");
-                assert_eq!(min_plan, "Professional");
+                assert_eq!(min_plan, "Team");
             }
             _ => panic!("Wrong error type"),
         }
@@ -694,12 +763,12 @@ mod tests {
     #[test]
     fn test_check_limit_exceeded() {
         let starter = make_registry().get("starter").unwrap();
-        let err = starter.check_limit("max_agents", 6).unwrap_err();
+        let err = starter.check_limit("max_agents", 4).unwrap_err();
         match err {
             PlanGateError::LimitExceeded { limit, current, max } => {
                 assert_eq!(limit, "max_agents");
-                assert_eq!(current, 6);
-                assert_eq!(max, 5);
+                assert_eq!(current, 4);
+                assert_eq!(max, 3);
             }
             _ => panic!("Wrong error type"),
         }
@@ -713,34 +782,36 @@ mod tests {
 
     #[test]
     fn test_check_allowed_ok() {
-        let pro = make_registry().get("professional").unwrap();
-        assert!(pro.check_allowed("approval_channels", "telegram").is_ok());
+        let team = make_registry().get("team").unwrap();
+        assert!(team.check_allowed("approval_channels", "telegram").is_ok());
     }
 
     #[test]
     fn test_check_allowed_rejected() {
-        let pro = make_registry().get("professional").unwrap();
-        assert!(pro.check_allowed("approval_channels", "slack").is_err());
+        let team = make_registry().get("team").unwrap();
+        assert!(team.check_allowed("approval_channels", "slack").is_err());
     }
 
     #[test]
     fn test_features_differ_between_plans() {
+        let free = make_registry().get("free").unwrap();
         let starter = make_registry().get("starter").unwrap();
-        let pro = make_registry().get("professional").unwrap();
-        let scale = make_registry().get("scale").unwrap();
+        let team = make_registry().get("team").unwrap();
+        let business = make_registry().get("business").unwrap();
         let ent = make_registry().get("enterprise").unwrap();
 
         // Features are NOT identical — that's the whole point
-        assert_ne!(starter.features.rbac, pro.features.rbac);
-        assert_ne!(starter.features.pattern_learning, pro.features.pattern_learning);
-        assert_ne!(scale.features.on_premise, ent.features.on_premise);
+        assert_ne!(free.features.policy_engine, starter.features.policy_engine);
+        assert_ne!(starter.features.rbac, team.features.rbac);
+        assert_ne!(starter.features.pattern_learning, team.features.pattern_learning);
+        assert_ne!(business.features.on_premise, ent.features.on_premise);
     }
 
     #[test]
     fn test_list_available() {
         let registry = make_registry();
         let available = registry.list_available();
-        assert_eq!(available.len(), 4);
+        assert_eq!(available.len(), 5);
     }
 
     #[test]
@@ -763,32 +834,33 @@ mod tests {
         };
         registry.register(custom);
         assert!(registry.get("custom-1").is_some());
-        assert_eq!(registry.list_available().len(), 5);
+        assert_eq!(registry.list_available().len(), 6);
     }
 
     #[test]
     fn test_deprecate_plan() {
         let registry = make_registry();
-        registry.deprecate("professional");
+        registry.deprecate("team");
         let available = registry.list_available();
-        assert_eq!(available.len(), 3); // Starter + Scale + Enterprise
-        let pro = registry.get("professional").unwrap();
-        assert!(!pro.available);
-        assert!(pro.legacy);
+        assert_eq!(available.len(), 4); // Free + Starter + Business + Enterprise
+        let team = registry.get("team").unwrap();
+        assert!(!team.available);
+        assert!(team.legacy);
     }
 
     #[test]
     fn test_format_price() {
-        assert_eq!(Plan::format_price(299_000), "2990 ₽");
+        assert_eq!(Plan::format_price(499_000), "4990 ₽");
         assert_eq!(Plan::format_price(0), "0 ₽");
-        assert_eq!(Plan::format_price(1_999_000), "19990 ₽");
+        assert_eq!(Plan::format_price(1_499_000), "14990 ₽");
     }
 
     #[test]
     fn test_plan_id_display() {
+        assert_eq!(PlanId::Free.to_string(), "free");
         assert_eq!(PlanId::Starter.to_string(), "starter");
-        assert_eq!(PlanId::Professional.to_string(), "professional");
-        assert_eq!(PlanId::Scale.to_string(), "scale");
+        assert_eq!(PlanId::Team.to_string(), "team");
+        assert_eq!(PlanId::Business.to_string(), "business");
         assert_eq!(PlanId::Enterprise.to_string(), "enterprise");
     }
 
@@ -802,32 +874,34 @@ mod tests {
 
     #[test]
     fn test_tier_ordering() {
+        let free = make_registry().get("free").unwrap();
         let starter = make_registry().get("starter").unwrap();
-        let pro = make_registry().get("professional").unwrap();
-        let scale = make_registry().get("scale").unwrap();
+        let team = make_registry().get("team").unwrap();
+        let business = make_registry().get("business").unwrap();
         let ent = make_registry().get("enterprise").unwrap();
-        assert!(starter.tier < pro.tier);
-        assert!(pro.tier < scale.tier);
-        assert!(scale.tier < ent.tier);
+        assert!(free.tier < starter.tier);
+        assert!(starter.tier < team.tier);
+        assert!(team.tier < business.tier);
+        assert!(business.tier < ent.tier);
     }
 
     #[test]
     fn test_annual_discount() {
-        let pro = make_registry().get("professional").unwrap();
-        let annual = pro.annual_price_kopecks.unwrap();
-        let monthly_x12 = pro.price_kopecks * 12;
+        let starter = make_registry().get("starter").unwrap();
+        let annual = starter.annual_price_kopecks.unwrap();
+        let monthly_x12 = starter.price_kopecks * 12;
         assert!(annual < monthly_x12, "Annual should be cheaper than 12 months");
-        assert_eq!(annual, 19_990_000);
-        assert_eq!(monthly_x12, 23_988_000);
-        assert_eq!(pro.annual_discount_percent, 17);
+        assert_eq!(annual, 4_990_000);
+        assert_eq!(monthly_x12, 5_988_000);
+        assert_eq!(starter.annual_discount_percent, 17);
     }
 
     #[test]
     fn test_format_monthly() {
         let starter = make_registry().get("starter").unwrap();
-        let pro = make_registry().get("professional").unwrap();
-        assert_eq!(starter.format_monthly(), "2990 ₽");
-        assert_eq!(pro.format_monthly(), "19990 ₽");
+        let team = make_registry().get("team").unwrap();
+        assert_eq!(starter.format_monthly(), "4990 ₽");
+        assert_eq!(team.format_monthly(), "14990 ₽");
     }
 
     #[test]
@@ -836,6 +910,6 @@ mod tests {
         // Initially empty, seed_defaults must be called
         assert_eq!(registry.list_available().len(), 0);
         registry.seed_defaults();
-        assert_eq!(registry.list_available().len(), 4);
+        assert_eq!(registry.list_available().len(), 5);
     }
 }

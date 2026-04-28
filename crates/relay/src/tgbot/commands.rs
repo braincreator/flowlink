@@ -214,10 +214,11 @@ pub async fn cmd_servers(bot: Bot, msg: Message, ctx: BotContext) -> ResponseRes
 /// /plans — available plans (dynamic from DB)
 pub async fn cmd_plans(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult<()> {
     const PLAN_DESC: &[(&str, &str)] = &[
-        ("plan_starter_desc", "Режим наблюдения — 1 агент, базовые щиты, движок политик"),
-        ("plan_professional_desc", "Согласование команд, RBAC, вебхуки, экспорт SIEM"),
-        ("plan_scale_desc", "Обучение паттернам, безлимитные правила и политики, приоритетная поддержка"),
-        ("plan_enterprise_desc", "Безлимит — SSO/SAML, on-premise, SLA, выделенная поддержка"),
+        ("plan_free_desc", "Базовая защита — 1 агент, щиты, согласование, логи"),
+        ("plan_starter_desc", "Для фрилансеров и небольших команд — 3 агента"),
+        ("plan_team_desc", "Для команд разработчиков — RBAC, обучение паттернам, SIEM"),
+        ("plan_business_desc", "Для агентств — SSO, AI Ops, каталог сервисов"),
+        ("plan_enterprise_desc", "Безлимит — on-premise, SLA, выделенная поддержка"),
     ];
     fn resolve_desc(key: &str) -> &str {
         PLAN_DESC.iter().find(|(k, _)| *k == key).map(|(_, v)| *v).unwrap_or(key)
@@ -763,8 +764,8 @@ pub async fn cmd_shield(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResu
             if !plan.features.shield {
                 let kb = InlineKeyboardMarkup::new(vec![
                     vec![InlineKeyboardButton::url(
-                        format!("\u{1f680} Перейти на Professional"),
-                        reqwest::Url::parse(&format!("{}/pricing?upgrade=professional", crate::server_base_url())).unwrap(),
+                        format!("\u{1f680} Перейти на Starter"),
+                        reqwest::Url::parse(&format!("{}/pricing?upgrade=starter", crate::server_base_url())).unwrap(),
                     )],
                 ]);
                 bot.send_message(msg.chat.id,
@@ -798,12 +799,12 @@ pub async fn cmd_logs(bot: Bot, msg: Message, ctx: BotContext) -> ResponseResult
             if !plan.features.audit_log {
                 let kb = InlineKeyboardMarkup::new(vec![
                     vec![InlineKeyboardButton::url(
-                        format!("\u{1f680} Перейти на Professional"),
-                        reqwest::Url::parse(&format!("{}/pricing?upgrade=professional", crate::server_base_url())).unwrap(),
+                        format!("\u{1f680} Перейти на Free"),
+                        reqwest::Url::parse(&format!("{}/pricing?upgrade=free", crate::server_base_url())).unwrap(),
                     )],
                 ]);
                 bot.send_message(msg.chat.id,
-                    "\u{1f512} <b>Функция недоступна</b>\n\nAudit log доступен на тарифе Professional и выше."
+                    "\u{1f512} <b>Функция недоступна</b>\n\nAudit log доступен на тарифе Free и выше."
                 ).parse_mode(ParseMode::Html).reply_markup(kb).await?;
                 return Ok(());
             }
@@ -845,12 +846,12 @@ pub async fn cmd_approvals(bot: Bot, msg: Message, ctx: BotContext) -> ResponseR
             if !plan.features.approval {
                 let kb = InlineKeyboardMarkup::new(vec![
                     vec![InlineKeyboardButton::url(
-                        format!("\u{1f680} Перейти на Professional"),
-                        reqwest::Url::parse(&format!("{}/pricing?upgrade=professional", crate::server_base_url())).unwrap(),
+                        format!("\u{1f680} Перейти на Free"),
+                        reqwest::Url::parse(&format!("{}/pricing?upgrade=free", crate::server_base_url())).unwrap(),
                     )],
                 ]);
                 bot.send_message(msg.chat.id,
-                    "\u{1f512} <b>Функция недоступна</b>\n\nApproval workflow доступен на тарифе Professional и выше."
+                    "\u{1f512} <b>Функция недоступна</b>\n\nApproval workflow доступен на тарифе Free и выше."
                 ).parse_mode(ParseMode::Html).reply_markup(kb).await?;
                 return Ok(());
             }

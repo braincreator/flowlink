@@ -7,10 +7,11 @@
 //! - Subscriptions API (рекуррентные автосписания)
 //!
 //! # Plans
-//! - Starter (Free): 1 agent, basic shield, policy engine
-//! - Professional: 5 agents, approval, RBAC, webhooks
-//! - Scale: 25 agents, pattern learning, SIEM, priority support
-//! - Enterprise: unlimited, SSO, on-prem, dedicated support
+//! - Free: 1 agent, basic shield, approval, audit log, webhooks
+//! - Starter: 3 agents, policy engine, e2ee, redaction
+//! - Team: 10 agents, RBAC, pattern learning, SIEM, forensics
+//! - Business: 30 agents, SSO, AI ops, service catalog, change management
+//! - Enterprise: unlimited, on-prem, dedicated support
 
 pub mod invoice;
 pub mod payment;
@@ -78,7 +79,7 @@ impl AccountBilling {
         let now = Utc::now();
         Self {
             account_id: account_id.to_string(),
-            plan_id: plans::PlanId::Starter.as_str().to_string(),
+            plan_id: plans::PlanId::Free.as_str().to_string(),
             activated_at: now,
             expires_at: None,
             active: true,
@@ -488,7 +489,7 @@ mod tests {
     #[test]
     fn test_account_billing_new() {
         let billing = AccountBilling::new("acc-1");
-        assert_eq!(billing.plan_id, "starter");
+        assert_eq!(billing.plan_id, "free");
         assert!(billing.active);
         assert!(billing.payment_method.is_none());
         assert!(!billing.is_trial);
@@ -509,19 +510,11 @@ mod tests {
     }
 
     #[test]
-    fn test_check_agent_connect_starter() {
+    fn test_check_agent_connect_free() {
         let engine = test_engine();
         let billing = AccountBilling::new("acc-1");
 
-        // Starter plan: 5 agents (max_agents = 5)
-        let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
-        assert!(check.allowed);
-        let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
-        assert!(check.allowed);
-        let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
-        assert!(check.allowed);
-        let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
-        assert!(check.allowed);
+        // Free plan: 1 agent (max_agents = 1)
         let check = engine.check_and_track(&billing, usage::UsageOperation::AgentConnect);
         assert!(check.allowed);
 
@@ -535,9 +528,9 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        // Upgrade from starter to professional — Pro has 14-day trial
-        engine.upgrade_plan(&mut billing, "professional").unwrap();
-        assert_eq!(billing.plan_id, "professional");
+        // Upgrade from free to starter — Starter has 14-day trial
+        engine.upgrade_plan(&mut billing, "starter").unwrap();
+        assert_eq!(billing.plan_id, "starter");
         assert!(billing.expires_at.is_some());
         assert!(billing.is_trial);
         assert!(billing.trial_start.is_some());
@@ -549,10 +542,10 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "professional").unwrap();
-        let result = engine.upgrade_plan(&mut billing, "starter");
+        engine.upgrade_plan(&mut billing, "starter").unwrap();
+        let result = engine.upgrade_plan(&mut billing, "free");
         assert!(result.is_err());
-        assert_eq!(billing.plan_id, "professional"); // unchanged
+        assert_eq!(billing.plan_id, "starter"); // unchanged
     }
 
     #[test]
@@ -560,9 +553,9 @@ mod tests {
         let engine = test_engine();
         let mut billing = AccountBilling::new("acc-1");
 
-        engine.upgrade_plan(&mut billing, "professional").unwrap();
-        engine.change_plan(&mut billing, "starter").unwrap();
-        assert_eq!(billing.plan_id, "starter");
+        engine.upgrade_plan(&mut billing, "starter").unwrap();
+        engine.change_plan(&mut billing, "free").unwrap();
+        assert_eq!(billing.plan_id, "free");
     }
 
     #[test]

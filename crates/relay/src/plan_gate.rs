@@ -156,20 +156,21 @@ pub fn check_limit(plan: &Option<Plan>, limit: &str, current: u64, required_plan
 /// Get the minimum plan tier required for a feature.
 pub fn feature_min_tier(feature: &str) -> &'static str {
     match feature {
-        "shield" | "e2ee" | "policy_engine" | "audit_log" | "redaction" | "approval" => "starter",
-        "rbac" | "serverguard" | "forensics" | "service_catalog" | "ai_ops" => "professional",
-        "pattern_learning" | "siem_export" | "webhooks" | "change_management" => "scale",
-        "sso" | "on_premise" => "enterprise",
-        _ => "professional",
+        "shield" | "mcp_gateway" | "approval" | "audit_log" | "webhooks" => "starter",
+        "policy_engine" | "e2ee" | "redaction" => "starter",
+        "rbac" | "pattern_learning" | "siem_export" | "serverguard" | "forensics" => "team",
+        "sso" | "ai_ops" | "change_management" | "service_catalog" => "business",
+        "on_premise" => "enterprise",
+        _ => "team",
     }
 }
 
 /// Get the minimum plan tier required when a limit is exceeded.
 pub fn limit_min_tier(limit: &str) -> &'static str {
     match limit {
-        "max_agents" | "max_users" | "max_custom_rules" => "professional",
-        "max_policies" | "max_webhooks" => "scale",
-        _ => "professional",
+        "max_agents" | "max_users" | "max_custom_rules" => "starter",
+        "max_policies" | "max_webhooks" => "team",
+        _ => "team",
     }
 }
 
@@ -202,13 +203,13 @@ mod tests {
 
     fn make_plan() -> Plan {
         Plan {
-            id: "professional".into(),
-            name: "Professional".into(),
-            description: "Pro plan".into(),
-            tier: 1,
-            price_kopecks: 199000,
-            annual_price_kopecks: Some(1910400),
-            annual_discount_percent: 20,
+            id: "team".into(),
+            name: "Team".into(),
+            description: "For dev teams".into(),
+            tier: 2,
+            price_kopecks: 1_499_000,
+            annual_price_kopecks: Some(14_990_000),
+            annual_discount_percent: 17,
             features: PlanFeatures {
                 shield: true,
                 shield_level: "advanced".into(),
@@ -311,10 +312,10 @@ mod tests {
     #[test]
     fn test_require_feature_disabled() {
         let plan = Some(make_starter_plan());
-        let err = require_feature(&plan, "approval", Some("professional")).unwrap_err();
+        let err = require_feature(&plan, "approval", Some("team")).unwrap_err();
         assert_eq!(err.error, "feature_not_available");
         assert_eq!(err.feature.as_deref(), Some("approval"));
-        assert_eq!(err.required_plan.as_deref(), Some("professional"));
+        assert_eq!(err.required_plan.as_deref(), Some("team"));
         assert!(err.upgrade_url.is_some());
     }
 
@@ -333,7 +334,7 @@ mod tests {
     #[test]
     fn test_check_limit_exceeded() {
         let plan = Some(make_plan());
-        let err = check_limit(&plan, "max_agents", 7, Some("scale")).unwrap_err();
+        let err = check_limit(&plan, "max_agents", 7, Some("team")).unwrap_err();
         assert_eq!(err.error, "limit_exceeded");
         assert_eq!(err.current, Some(7));
         assert_eq!(err.maximum, Some(5));
@@ -360,29 +361,31 @@ mod tests {
         assert_eq!(feature_min_tier("e2ee"), "starter");
         assert_eq!(feature_min_tier("policy_engine"), "starter");
         assert_eq!(feature_min_tier("audit_log"), "starter");
-        // Professional features
         assert_eq!(feature_min_tier("approval"), "starter");
-        assert_eq!(feature_min_tier("rbac"), "professional");
-        assert_eq!(feature_min_tier("serverguard"), "professional");
-        assert_eq!(feature_min_tier("forensics"), "professional");
-        assert_eq!(feature_min_tier("service_catalog"), "professional");
-        assert_eq!(feature_min_tier("ai_ops"), "professional");
-        // Scale features
-        assert_eq!(feature_min_tier("pattern_learning"), "scale");
-        assert_eq!(feature_min_tier("siem_export"), "scale");
-        assert_eq!(feature_min_tier("webhooks"), "scale");
-        assert_eq!(feature_min_tier("change_management"), "scale");
+        assert_eq!(feature_min_tier("mcp_gateway"), "starter");
+        assert_eq!(feature_min_tier("webhooks"), "starter");
+        assert_eq!(feature_min_tier("redaction"), "starter");
+        // Team features
+        assert_eq!(feature_min_tier("rbac"), "team");
+        assert_eq!(feature_min_tier("serverguard"), "team");
+        assert_eq!(feature_min_tier("forensics"), "team");
+        assert_eq!(feature_min_tier("pattern_learning"), "team");
+        assert_eq!(feature_min_tier("siem_export"), "team");
+        // Business features
+        assert_eq!(feature_min_tier("sso"), "business");
+        assert_eq!(feature_min_tier("ai_ops"), "business");
+        assert_eq!(feature_min_tier("change_management"), "business");
+        assert_eq!(feature_min_tier("service_catalog"), "business");
         // Enterprise features
-        assert_eq!(feature_min_tier("sso"), "enterprise");
         assert_eq!(feature_min_tier("on_premise"), "enterprise");
-        // Unknown defaults to professional
-        assert_eq!(feature_min_tier("unknown_feature"), "professional");
+        // Unknown defaults to team
+        assert_eq!(feature_min_tier("unknown_feature"), "team");
     }
 
     #[test]
     fn test_limit_min_tier() {
-        assert_eq!(limit_min_tier("max_agents"), "professional");
-        assert_eq!(limit_min_tier("max_policies"), "scale");
+        assert_eq!(limit_min_tier("max_agents"), "starter");
+        assert_eq!(limit_min_tier("max_policies"), "team");
     }
 
     #[test]
@@ -395,10 +398,10 @@ mod tests {
 
     #[test]
     fn test_limit_exceeded_serialization() {
-        let err = PlanGateError::limit_exceeded("max_agents", 10, 5, Some("professional"));
+        let err = PlanGateError::limit_exceeded("max_agents", 10, 5, Some("team"));
         let json = serde_json::to_string(&err).unwrap();
         assert!(json.contains("\"current\":10"));
         assert!(json.contains("\"maximum\":5"));
-        assert!(json.contains("\"message\":\"Limit 'max_agents' exceeded (10 of 5). Requires professional plan\""));
+        assert!(json.contains("\"message\":\"Limit 'max_agents' exceeded (10 of 5). Requires team plan\""));
     }
 }

@@ -574,14 +574,14 @@ mod tests {
 
     #[test]
     fn payment_success_ru() {
-        let html = format_payment_success_html("Маша", "Professional", "1 990 ₽", "ru");
+        let html = format_payment_success_html("Маша", "Starter", "4 990 ₽", "ru");
         assert!(html.contains("Оплата прошла успешно"));
         assert!(html.contains("Сумма"));
     }
 
     #[test]
     fn payment_success_en() {
-        let html = format_payment_success_html("Alice", "Scale", "$49", "en");
+        let html = format_payment_success_html("Alice", "Team", "$149", "en");
         assert!(html.contains("Payment successful"));
         assert!(html.contains("Amount"));
         assert!(!html.contains("Оплата"));
@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn payment_failed_ru() {
-        let html = format_payment_failed_html("Петр", "Scale", "ru");
+        let html = format_payment_failed_html("Петр", "Business", "ru");
         assert!(html.contains("Проблема с оплатой"));
     }
 
@@ -602,14 +602,14 @@ mod tests {
 
     #[test]
     fn renewal_reminder_ru() {
-        let html = format_renewal_reminder_html("Анна", "Professional", "2025-02-01", "ru");
+        let html = format_renewal_reminder_html("Анна", "Starter", "2025-02-01", "ru");
         assert!(html.contains("Продление подписки"));
         assert!(html.contains("Дата продления"));
     }
 
     #[test]
     fn renewal_reminder_en() {
-        let html = format_renewal_reminder_html("Tom", "Scale", "2025-03-15", "en");
+        let html = format_renewal_reminder_html("Tom", "Business", "2025-03-15", "en");
         assert!(html.contains("Subscription renewal"));
         assert!(html.contains("Renewal date"));
         assert!(!html.contains("Продление"));
@@ -730,14 +730,14 @@ mod tests {
 
     #[test]
     fn plan_changed_ru() {
-        let html = format_plan_changed_html("Женя", "Starter", "Professional", "ru");
+        let html = format_plan_changed_html("Женя", "Free", "Starter", "ru");
         assert!(html.contains("Тарифный план изменён"));
         assert!(html.contains("→"));
     }
 
     #[test]
     fn plan_changed_en() {
-        let html = format_plan_changed_html("Chris", "Professional", "Scale", "en");
+        let html = format_plan_changed_html("Chris", "Starter", "Team", "en");
         assert!(html.contains("Plan changed"));
         assert!(!html.contains("Тарифный план"));
     }
