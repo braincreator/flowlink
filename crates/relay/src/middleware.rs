@@ -168,10 +168,17 @@ pub async fn jwt_auth(
         }
     };
 
+    // Skip auth for metrics endpoint (Prometheus scraping)
+    let path = req.uri().path();
+    if path == "/metrics" {
+        return next.run(req).await;
+    }
+
     let token = match extract_token_from_request(&req) {
         Some(t) => t,
         None => return json_error(StatusCode::UNAUTHORIZED, "token_missing", "Missing Authorization header or cookie"),
     };
+
 
     match auth_engine.validate_access_token(&token) {
         Ok(claims) => {
