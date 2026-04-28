@@ -92,7 +92,9 @@ impl Registry {
             last_activity: None,
         };
         self.clients.insert(client.id.clone(), client.clone());
-        self.save_clients();
+        if let Err(e) = self.save_clients_sync() {
+            log::error!("Failed to save clients after register: {e}");
+        }
         Ok(client)
     }
 
@@ -114,7 +116,9 @@ impl Registry {
         if let Some(mut c) = self.clients.get_mut(id) {
             c.active = false;
             drop(c); // Release guard before iterating the map
-            self.save_clients();
+            if let Err(e) = self.save_clients_sync() {
+                log::error!("Failed to save clients after deactivate: {e}");
+            }
             true
         } else {
             false
