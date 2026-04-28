@@ -323,6 +323,9 @@ async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<Ke
         None => return mcp_err(req.id, -32602, "missing tool name").into_response(),
     };
 
+    // Track MCP tool calls
+    let _ = state.metrics.mcp_tool_calls_total.with_label_values(&[name]).inc();
+
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
     match name {

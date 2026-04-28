@@ -214,7 +214,7 @@ impl Relay {
                 std::path::Path::new(&shellexpand::tilde("~/.flowlink/audit.jsonl").to_string()),
                 db.clone(),
             )),
-            metrics,
+            metrics: metrics.clone(),
             tg_bot: std::sync::OnceLock::new(),
             billing: if self.config.billing.enabled {
                 let payment_config = {
@@ -246,6 +246,12 @@ impl Relay {
                 }
                 // Load all account billing data from DB
                 engine.load_all().await.ok();
+                // Set billing gauges from loaded data
+                let account_count = engine.list_accounts().len();
+                metrics.accounts_total.set(account_count as f64);
+                // subscriptions_active and revenue require plan lookup — updated periodically
+                metrics.subscriptions_active.set(0.0);
+                metrics.billing_revenue_monthly.set(0.0);
                 Some(engine)
             } else {
                 None

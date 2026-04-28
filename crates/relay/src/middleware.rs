@@ -519,6 +519,14 @@ pub async fn prometheus_middleware(
         let m = &state.metrics;
         let _ = m.http_requests_total.with_label_values(&[method.as_str(), &normalized, &status]).inc();
         let _ = m.http_request_duration_ms.with_label_values(&[method.as_str(), &normalized]).observe(duration);
+
+        // Track rate limit hits (429 responses)
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            let _ = m.rate_limit_hits_total.with_label_values(&[&normalized]).inc();
+        }
+
+        // Update uptime gauge
+        let _ = m.uptime_seconds.set(state.start_time.elapsed().as_secs_f64());
     }
 
     response
