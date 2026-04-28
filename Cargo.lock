@@ -1572,6 +1572,7 @@ dependencies = [
  "flowlink-gitops",
  "libc",
  "log",
+ "once_cell",
  "prometheus",
  "regex",
  "reqwest",

@@ -404,12 +404,31 @@ impl McpServer {
             }
         };
 
+        // Redact any sensitive data from tool results before returning
+        let redacted_result = if result.contains("password")
+            || result.contains("secret")
+            || result.contains("token")
+            || result.contains("key=")
+            || result.contains("Bearer ")
+            || result.contains("postgresql://")
+            || result.contains("-----BEGIN")
+            || result.contains("AKIA")
+            || result.contains("sk_live_")
+            || result.contains("ghp_")
+            || result.contains("glpat-")
+            || result.contains("xoxb-")
+        {
+            flowlink_shield::redaction::redact(&result).redacted
+        } else {
+            result
+        };
+
         json!({
             "jsonrpc": "2.0",
             "id": id,
             "result": {
                 "content": [
-                    { "type": "text", "text": result }
+                    { "type": "text", "text": redacted_result }
                 ]
             }
         })
@@ -1406,7 +1425,7 @@ mod tests {
     async fn tools_list() {
         let s = server();
         let resp = s.handle_request(json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}})).await;
-        assert_eq!(resp["result"]["tools"].as_array().unwrap().len(), 19);
+        assert_eq!(resp["result"]["tools"].as_array().unwrap().len(), 20);
     }
 
     #[tokio::test]

@@ -21,6 +21,7 @@ mod guard;
 mod guard_hybrid;
 mod interceptor;
 pub mod metrics;
+pub mod redaction;
 mod notifier;
 mod policy_dsl;
 mod relay_client;

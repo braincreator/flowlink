@@ -953,6 +953,23 @@ async fn exec_agent(
     }
 }
 
+/// Redact sensitive data from SSE event payloads for exec channels.
+/// Only processes exec_output and exec_done events; passes others through unchanged.
+fn redact_sse_data(channel: &str, data: &str) -> String {
+    match channel {
+        "exec_output" | "exec_done" => {
+            let result = flowlink_shield::redaction::redact(data);
+            if result.found {
+                log::info!("[REDACTION] {} event: {} secrets redacted ({} categories)", channel, result.matches.len(), result.categories);
+                result.redacted
+            } else {
+                data.to_string()
+            }
+        }
+        _ => data.to_string(),
+    }
+}
+
 /// SSE endpoint — streams events from EventBus.
 /// Auth via `?token=<agent_id>` query param.
 async fn sse_events(
@@ -994,6 +1011,8 @@ async fn sse_events(
         tokio::spawn(async move {
             let mut sub = eventbus.subscribe(&ch);
             while let Ok(data) = sub.recv().await {
+                // Redact sensitive data from exec_output/exec_done events
+                let data = redact_sse_data(&ch, &data);
                 if tx.send(Event::default().data(data)).await.is_err() {
                     break;
                 }
