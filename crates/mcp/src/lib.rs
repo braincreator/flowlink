@@ -356,6 +356,18 @@ impl McpServer {
                             },
                             "required": ["prompt"]
                         }
+                    },
+                    {
+                        "name": "red_team_scan",
+                        "description": "Run LLM red team security scan: config audit, attack surface mapping, and adversarial prompt generation. Returns structured findings with severity and remediation.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "scan_type": { "type": "string", "enum": ["full", "prompt_generation", "config_audit", "surface_scan"], "description": "Type of scan to run" },
+                                "prompts_per_category": { "type": "integer", "description": "Number of attack prompts per category (default 5)" }
+                            },
+                            "required": []
+                        }
                     }
                 ]
             }
@@ -386,6 +398,7 @@ impl McpServer {
             "set_threshold" => self.set_threshold(arguments),
             "system_info" => self.system_info(),
             "detect_injection" => self.detect_injection(arguments),
+            "red_team_scan" => self.red_team_scan(arguments),
             _ => {
                 return error_response(id, -32602, &format!("Unknown tool: {}", tool_name));
             }
@@ -997,6 +1010,63 @@ impl McpServer {
             args: rest.iter().map(|s| s.to_string()).collect(),
             raw: cmd_str.to_string(),
         }
+    }
+
+    fn red_team_scan(&self, args: &Value) -> String {
+        use flowlink_shield::{RedTeamScanner, RedTeamScanType, ConfigSnapshot};
+
+        let scan_type_str = args["scan_type"].as_str().unwrap_or("full");
+        let scan_type = match scan_type_str {
+            "prompt_generation" => RedTeamScanType::PromptGeneration,
+            "config_audit" => RedTeamScanType::ConfigAudit,
+            "surface_scan" => RedTeamScanType::SurfaceScan,
+            _ => RedTeamScanType::Full,
+        };
+
+        let prompts_per_cat = args["prompts_per_category"].as_u64().unwrap_or(5) as usize;
+
+        let config = ConfigSnapshot {
+            shield_mode: self.mode.lock().unwrap().clone(),
+            shield_threshold: *self.threshold.lock().unwrap() as u8,
+            ast_enabled: self.engine.enable_ast,
+            interpreter_enabled: self.engine.enable_interpreter,
+            blocked_commands: self.blocked_commands.lock().unwrap().iter().cloned().collect(),
+            protected_paths: self.protected_paths.lock().unwrap().iter().cloned().collect(),
+            approval_required: true,
+            rbac_enabled: true,
+            mcp_tools_exposed: vec!["scan_command".to_string(), "scan_script".to_string(), "scan_file".to_string(), "scan_url".to_string(),
+                "detect_injection".to_string(), "red_team_scan".to_string(), "get_policy".to_string(), "explain_risk".to_string(),
+                "audit_log".to_string(), "system_info".to_string(), "policy_status".to_string()],
+            rate_limit_enabled: true,
+            audit_logging: true,
+        };
+
+        let scanner = RedTeamScanner::new().with_prompts_per_category(prompts_per_cat);
+        let report = scanner.scan(scan_type, &config);
+
+        self.audit("red_team_scan", &format!("type={}" , scan_type_str), &serde_json::to_string(&report).unwrap_or_default());
+
+        serde_json::to_string_pretty(&json!({
+            "scan_id": report.scan_id,
+            "overall_risk_score": report.overall_risk_score,
+            "vulnerability_count": report.vulnerability_count,
+            "severity_breakdown": {
+                "critical": report.critical_count,
+                "high": report.high_count,
+                "medium": report.medium_count,
+                "low": report.low_count,
+            },
+            "categories_tested": report.categories_tested,
+            "findings": report.findings.iter().map(|f| json!({
+                "severity": f.severity.as_str(),
+                "category": f.category,
+                "title": f.title,
+                "description": f.description,
+                "cvss_score": f.cvss_score,
+                "remediation": f.remediation,
+            })).collect::<Vec<_>>(),
+            "recommendations": report.recommendations,
+        })).unwrap_or_default()
     }
 
     fn detect_injection(&self, args: &Value) -> String {

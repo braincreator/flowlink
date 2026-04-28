@@ -3,6 +3,7 @@
 #[cfg(feature = "gitops")]
 mod gitops_integration;
 mod injection;
+mod red_team;
 
 mod audit;
 mod canary;
@@ -32,6 +33,7 @@ pub use ebpf_kernel::{default_patterns, DangerousPattern, KernelEvent};
 pub use engine::{AnalysisEngine, AnalysisResult, Command, Threat, ThreatLevel};
 pub use forensic::ForensicContext;
 pub use injection::{InjectionCategory, InjectionDetector, InjectionResult};
+pub use red_team::{ConfigSnapshot, RedTeamFinding, RedTeamReport, RedTeamScanType, RedTeamScanner, Severity};
 pub use guard::{ApprovalRequest, InterceptResult, ShieldGuard, ShieldGuardConfig, ShieldStats};
 pub use guard_hybrid::{HybridConfig, HybridGuard, HybridHandle};
 pub use interceptor::{sigcont, sigkill, sigstop, ProcessInfo};
