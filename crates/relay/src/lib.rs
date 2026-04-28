@@ -248,10 +248,11 @@ impl Relay {
                 engine.load_all().await.ok();
                 // Set billing gauges from loaded data
                 let account_count = engine.list_accounts().len();
+                let active_subs = engine.active_subscription_count();
+                let revenue = engine.monthly_revenue_rub();
                 metrics.accounts_total.set(account_count as f64);
-                // subscriptions_active and revenue require plan lookup — updated periodically
-                metrics.subscriptions_active.set(0.0);
-                metrics.billing_revenue_monthly.set(0.0);
+                metrics.subscriptions_active.set(active_subs as f64);
+                metrics.billing_revenue_monthly.set(revenue);
                 Some(engine)
             } else {
                 None

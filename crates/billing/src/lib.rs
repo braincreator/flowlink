@@ -237,6 +237,25 @@ impl BillingEngine {
         self.accounts.iter().map(|r| r.key().clone()).collect()
     }
 
+    /// Count accounts with active billing
+    pub fn active_subscription_count(&self) -> usize {
+        self.accounts.iter().filter(|r| r.value().active).count()
+    }
+
+    /// Calculate monthly revenue in RUB from active subscriptions
+    pub fn monthly_revenue_rub(&self) -> f64 {
+        let mut total_kopecks: i64 = 0;
+        for entry in self.accounts.iter() {
+            let billing = entry.value();
+            if billing.active {
+                if let Some(plan) = self.plans.get(&billing.plan_id) {
+                    total_kopecks += plan.price_kopecks as i64;
+                }
+            }
+        }
+        total_kopecks as f64 / 100.0
+    }
+
     /// Check if an operation is allowed under the current plan
     ///
     /// Returns BillingCheck with allowed/denied status.

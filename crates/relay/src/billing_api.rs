@@ -1170,6 +1170,13 @@ pub async fn tochka_webhook(
                                             "\u{1f4b0} Payment approved: account={}, plan={}, order={}, op={}",
                                             order.account_id, plan_id, order_id, operation_id
                                         );
+                                        // Track payment metric
+                                        let _ = state.metrics.billing_payments_total.with_label_values(&["approved"]).inc();
+                                        // Update billing gauges
+                                        if let Some(ref billing_engine) = state.billing {
+                                            let _ = state.metrics.subscriptions_active.set(billing_engine.active_subscription_count() as f64);
+                                            let _ = state.metrics.billing_revenue_monthly.set(billing_engine.monthly_revenue_rub());
+                                        }
                                         if let Some(email_service) = &state.email_service {
                                             if let Ok(Some(account)) = flowlink_db::accounts::AccountRepo::get(db.pool(), &order.account_id).await {
                                                 if let Some(ref email) = account.email {
@@ -1196,6 +1203,7 @@ pub async fn tochka_webhook(
                         "DECLINED" | "REJECTED" | "ERROR" => {
                             // Payment failed
                             log::warn!("Payment failed: order={}, status={}, op={}", order_id, status, operation_id);
+                            let _ = state.metrics.billing_payments_total.with_label_values(&["failed"]).inc();
                             if let Err(e) = flowlink_db::orders::OrderRepo::update_failed(db.pool(), order_id).await {
                                 log::warn!("Failed to mark order {order_id} as failed: {e}");
                             }
