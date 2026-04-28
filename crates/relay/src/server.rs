@@ -1092,6 +1092,8 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
         capabilities: vec![],
         online: true,
     });
+    let _ = state.metrics.ws_connections.set(state.pool.count() as f64);
+    let _ = state.metrics.agents_registered.set(state.pool.count() as f64);
 
     // Notify via Telegram
     if let Some(tg_bot) = state.tg_bot.get() {
@@ -1180,6 +1182,12 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
                                 eventbus.publish("exec_output", &text_str);
                             }
                             flowlink_core::MessageType::NeedsApproval => {
+                                // Track shield scans and blocks
+                                let _ = state.metrics.shield_scans_total.with_label_values(&["scan"]).inc();
+                                if let Some(ref payload) = msg.payload {
+                                    let risk = payload.get("risk").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                    let _ = state.metrics.shield_threats_by_level.with_label_values(&[risk]).inc();
+                                }
                                 log::info!("Agent {aid}: approval requested");
                                 // Plan gate: check if account has approval feature
                                 if let Some(ref billing_engine) = state.billing {
@@ -1378,6 +1386,8 @@ async fn handle_ws(socket: WebSocket, agent_id: String, client_id: String, state
         billing_engine.usage().release_agent(&client_id);
     }
     eventbus.publish("agent_disconnect", &serde_json::to_string(&serde_json::json!({"agent_id": aid})).unwrap_or_default());
+    let _ = state.metrics.ws_connections.set(state.pool.count() as f64);
+    let _ = state.metrics.agents_registered.set(state.pool.count() as f64);
 }
 
 // ═══════════════════════════════════════════════
@@ -1408,6 +1418,9 @@ async fn shield_reject(
 ) -> Json<SimpleResponse> {
     if !claims.is_admin { return Json(SimpleResponse { ok: false, message: Some("Admin required".into()) }); }
     let ok = state.shield_alerts.resolve_by_pid(pid, false);
+    if ok {
+        let _ = state.metrics.shield_blocked_total.with_label_values(&["blocked"]).inc();
+    }
     Json(SimpleResponse {
         ok,
         message: if ok { Some(format!("PID {} rejected", pid)) } else { Some("No active alert for this PID".into()) },
