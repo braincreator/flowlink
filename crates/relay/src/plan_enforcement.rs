@@ -61,10 +61,35 @@ pub static ROUTE_REQUIREMENTS: &[(&str, Require)] = &[
     ("/api/v1/policies", Require::Feature("policy_engine")),
     // Patterns
     ("/api/v1/patterns/apply", Require::Feature("pattern_learning")),
+    // Pattern suggestions (read-only, but feature-gated)
+    ("/api/v1/patterns", Require::Feature("pattern_learning")),
     // SIEM export
     ("/api/v1/siem", Require::Feature("siem_export")),
+    ("/api/audit/export", Require::Feature("siem_export")),
     // SAML/SSO
     ("/auth/saml", Require::SSO),
+    // Forensics
+    ("/api/v1/forensics", Require::Feature("forensics")),
+    // Service catalog
+    ("/api/v1/catalog", Require::Feature("service_catalog")),
+    // AI Ops assistant
+    ("/api/v1/ops", Require::Feature("ai_ops")),
+    // Change management
+    ("/api/v1/changes", Require::Feature("change_management")),
+    // GitOps (drift, backup, restore, guard)
+    ("/api/v1/gitops", Require::Feature("change_management")),
+    // Compliance reports
+    ("/api/v1/compliance", Require::Feature("forensics")),
+    // Tool call tracing
+    ("/api/trace", Require::Feature("audit_log")),
+    // Discovery
+    ("/api/v1/discovery", Require::Feature("forensics")),
+    // Secrets / vault injection (e2ee)
+    ("/api/v1/secrets", Require::Feature("e2ee")),
+    ("/api/v1/secret-mappings", Require::Feature("e2ee")),
+    // Shield dry-run and alerts (requires shield)
+    ("/api/v1/shield", Require::Feature("shield")),
+    ("/api/v1/commands/stats", Require::Feature("shield")),
 ];
 
 /// Error response for plan gate violations via middleware.
@@ -85,19 +110,13 @@ impl IntoResponse for GateBlocked {
 }
 
 /// Feature → minimum plan tier mapping.
-/// This is the SINGLE SOURCE OF TRUTH for upgrade hints.
-pub fn feature_min_tier(feature: &str) -> &'static str {
-    match feature {
-        "approval" | "rbac" => "professional",
-        "pattern_learning" | "siem_export" | "webhooks" | "policy_engine" => "scale",
-        "sso" | "on_premise" => "enterprise",
-        _ => "professional",
-    }
-}
+/// Delegates to plan_gate (single source of truth).
+pub use crate::plan_gate::feature_min_tier;
 
 /// Check if a feature is enabled on the plan.
 fn has_feature(plan: &flowlink_billing::plans::Plan, feature: &str) -> bool {
     match feature {
+        // Boolean features
         "shield" => plan.features.shield,
         "mcp_gateway" => plan.features.mcp_gateway,
         "policy_engine" => plan.features.policy_engine,
@@ -110,6 +129,14 @@ fn has_feature(plan: &flowlink_billing::plans::Plan, feature: &str) -> bool {
         "siem_export" => plan.features.siem_export,
         "sso" => plan.features.sso,
         "on_premise" => plan.features.on_premise,
+        "serverguard" => plan.features.serverguard,
+        "forensics" => plan.features.forensics,
+        "service_catalog" => plan.features.service_catalog,
+        "ai_ops" => plan.features.ai_ops,
+        "change_management" => plan.features.change_management,
+        // Level features — enabled if level is not "none"
+        "serverguard_level" => plan.features.serverguard_level != "none",
+        "shield_level" => plan.features.shield_level != "none",
         _ => false,
     }
 }
@@ -368,10 +395,10 @@ mod tests {
                 approval: true, rbac: true, pattern_learning: false,
                 e2ee: true, audit_log: true, webhooks: true,
                 siem_export: true, sso: false, on_premise: false,
-                forensics: false, service_catalog: false,
-                ai_ops: false, change_management: false,
-                serverguard: false,
-                serverguard_level: String::new(),
+                forensics: true, service_catalog: true,
+                ai_ops: true, change_management: false,
+                serverguard: true,
+                serverguard_level: "basic".into(),
             },
             limits: PlanLimits {
                 max_agents: 5, max_users: 5, audit_retention_days: 60,
@@ -389,21 +416,32 @@ mod tests {
     #[test]
     fn test_has_feature_starter() {
         let plan = make_starter();
+        // Starter features
         assert!(has_feature(&plan, "shield"));
         assert!(has_feature(&plan, "policy_engine"));
+        assert!(has_feature(&plan, "audit_log"));
+        assert!(has_feature(&plan, "e2ee"));
+        // Not starter
         assert!(!has_feature(&plan, "approval"));
         assert!(!has_feature(&plan, "rbac"));
         assert!(!has_feature(&plan, "webhooks"));
         assert!(!has_feature(&plan, "sso"));
+        assert!(!has_feature(&plan, "serverguard"));
+        assert!(!has_feature(&plan, "forensics"));
+        assert!(!has_feature(&plan, "ai_ops"));
     }
 
     #[test]
     fn test_has_feature_pro() {
         let plan = make_pro();
+        // Professional features
         assert!(has_feature(&plan, "approval"));
         assert!(has_feature(&plan, "rbac"));
-        assert!(has_feature(&plan, "webhooks"));
-        assert!(has_feature(&plan, "siem_export"));
+        assert!(has_feature(&plan, "serverguard"));
+        assert!(has_feature(&plan, "forensics"));
+        assert!(has_feature(&plan, "service_catalog"));
+        assert!(has_feature(&plan, "ai_ops"));
+        // Not pro
         assert!(!has_feature(&plan, "pattern_learning"));
         assert!(!has_feature(&plan, "sso"));
     }
@@ -418,9 +456,13 @@ mod tests {
 
     #[test]
     fn test_feature_min_tier() {
+        // Now delegates to plan_gate::feature_min_tier (single source of truth)
         assert_eq!(feature_min_tier("approval"), "professional");
-        assert_eq!(feature_min_tier("policy_engine"), "scale");
+        assert_eq!(feature_min_tier("shield"), "starter");
+        assert_eq!(feature_min_tier("policy_engine"), "starter");
         assert_eq!(feature_min_tier("sso"), "enterprise");
+        assert_eq!(feature_min_tier("ai_ops"), "professional");
+        assert_eq!(feature_min_tier("serverguard"), "professional");
     }
 
     #[test]
