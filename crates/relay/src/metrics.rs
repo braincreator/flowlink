@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use prometheus::{CounterVec, Encoder, Gauge, GaugeVec, HistogramVec, Opts, Registry, TextEncoder};
+use prometheus::{CounterVec, Encoder, Gauge, GaugeVec, HistogramOpts, HistogramVec, Opts, Registry, TextEncoder};
 
 /// Prometheus metrics for FlowLink Relay.
 #[derive(Clone)]
@@ -28,6 +28,8 @@ pub struct Metrics {
     pub eventbus_events_total: CounterVec,
     pub ws_connections: Gauge,
     pub mcp_tool_calls_total: CounterVec,
+    pub injection_detections_total: CounterVec,
+    pub injection_risk_score: HistogramVec,
     pub rate_limit_hits_total: CounterVec,
 
     // ServerGuard metrics
@@ -150,6 +152,16 @@ impl Metrics {
             &["tool_name"],
         ).unwrap();
 
+        let injection_detections_total = CounterVec::new(
+            Opts::new("flowlink_injection_detections_total", "Prompt injection detections by category"),
+            &["category"],
+        ).unwrap();
+
+        let injection_risk_score = HistogramVec::new(
+            HistogramOpts::new("flowlink_injection_risk_score", "Risk scores of detected prompt injections"),
+            &["category"],
+        ).unwrap();
+
         let rate_limit_hits_total = CounterVec::new(
             Opts::new("flowlink_rate_limit_hits_total", "Total rate limit rejections"),
             &["path"],
@@ -240,6 +252,8 @@ impl Metrics {
         registry.register(Box::new(eventbus_events_total.clone())).unwrap();
         registry.register(Box::new(ws_connections.clone())).unwrap();
         registry.register(Box::new(mcp_tool_calls_total.clone())).unwrap();
+        registry.register(Box::new(injection_detections_total.clone())).unwrap();
+        registry.register(Box::new(injection_risk_score.clone())).unwrap();
         registry.register(Box::new(rate_limit_hits_total.clone())).unwrap();
         registry.register(Box::new(guard_events_total.clone())).unwrap();
         registry.register(Box::new(guard_auto_fixes_total.clone())).unwrap();
@@ -273,6 +287,8 @@ impl Metrics {
             eventbus_events_total,
             ws_connections,
             mcp_tool_calls_total,
+            injection_detections_total,
+            injection_risk_score,
             rate_limit_hits_total,
             guard_events_total,
             guard_auto_fixes_total,

@@ -345,6 +345,17 @@ impl McpServer {
                         "name": "system_info",
                         "description": "Get system information for security context: OS, arch, FlowLink version, policy stats.",
                         "inputSchema": { "type": "object", "properties": {} }
+                    },
+                    {
+                        "name": "detect_injection",
+                        "description": "Scan a prompt for LLM prompt injection attacks (jailbreak, role confusion, data exfiltration, delimiter escape, encoding obfuscation). Returns risk score, category, and recommendations.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "prompt": { "type": "string", "description": "The prompt text to scan for injection patterns" }
+                            },
+                            "required": ["prompt"]
+                        }
                     }
                 ]
             }
@@ -374,6 +385,7 @@ impl McpServer {
             "set_mode" => self.set_mode(arguments),
             "set_threshold" => self.set_threshold(arguments),
             "system_info" => self.system_info(),
+            "detect_injection" => self.detect_injection(arguments),
             _ => {
                 return error_response(id, -32602, &format!("Unknown tool: {}", tool_name));
             }
@@ -986,6 +998,32 @@ impl McpServer {
             raw: cmd_str.to_string(),
         }
     }
+
+    fn detect_injection(&self, args: &Value) -> String {
+        use flowlink_shield::InjectionDetector;
+
+        let prompt = args["prompt"].as_str().unwrap_or("");
+        if prompt.is_empty() {
+            return serde_json::to_string_pretty(&json!({
+                "error": "Missing 'prompt' parameter"
+            })).unwrap_or_default();
+        }
+
+        let detector = InjectionDetector::new();
+        let result = detector.scan(prompt);
+
+        // Audit the scan
+        self.audit("detect_injection", prompt, &serde_json::to_string(&result).unwrap_or_default());
+
+        serde_json::to_string_pretty(&json!({
+            "detected": result.detected,
+            "risk_score": result.risk_score,
+            "category": result.category.to_string(),
+            "description": result.description,
+            "matched_patterns": result.matched_patterns,
+            "recommendations": result.recommendations,
+        })).unwrap_or_default()
+    }
 }
 
 fn threat_to_response(threat: &Option<flowlink_shield::Threat>, level_used: u8) -> String {
@@ -1298,7 +1336,7 @@ mod tests {
     async fn tools_list() {
         let s = server();
         let resp = s.handle_request(json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}})).await;
-        assert_eq!(resp["result"]["tools"].as_array().unwrap().len(), 18);
+        assert_eq!(resp["result"]["tools"].as_array().unwrap().len(), 19);
     }
 
     #[tokio::test]

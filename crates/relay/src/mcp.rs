@@ -328,6 +328,33 @@ async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<Ke
 
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
+    // Prompt injection detection on tool call arguments
+    {
+        use flowlink_shield::InjectionDetector;
+        let detector = InjectionDetector::new();
+
+        // Check text-heavy arguments for injection patterns
+        for (key, val) in args.as_object().iter().flat_map(|o| o.iter()) {
+            if let Some(text) = val.as_str() {
+                if text.len() > 20 { // Skip trivially short values
+                    let result = detector.scan(text);
+                    if result.detected && result.risk_score >= 50 {
+                        let cat = result.category.to_string();
+                        let _ = state.metrics.injection_detections_total.with_label_values(&[&cat]).inc();
+                        let _ = state.metrics.injection_risk_score
+                            .with_label_values(&[&cat])
+                            .observe(result.risk_score as f64);
+                        log::warn!(
+                            "[INJECTION] tool={} arg={} risk={} category={} patterns={:?} agent={}",
+                            name, key, result.risk_score, cat, result.matched_patterns,
+                            identity.as_ref().map(|i| i.account_id.as_str()).unwrap_or("unknown")
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     match name {
         "flowlink_agents" => mcp_agents(&state, req.id, &args),
         "flowlink_exec" => {
