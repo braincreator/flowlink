@@ -194,15 +194,34 @@ make docker       # Build Docker images
 
 ## Deployment
 
+### Self-Host (Your Server)
+
 ```bash
-# VPS (flowlink.flow-masters.ru)
+# Quick install (agent + ServerGuard + shield config)
+curl -fsSL https://raw.githubusercontent.com/braincreator/flowlink/main/scripts/install.sh | bash
+
+# Strict mode for production
+curl -fsSL ... | bash -s -- --shield-mode strict
+```
+
+📖 **Full guide:** [docs/SELF-HOST.md](docs/SELF-HOST.md) — step-by-step for every feature
+
+### VPS (flowlink.flow-masters.ru)
+
+```bash
 ./scripts/deploy.sh              # Full deploy
 ./scripts/deploy-website-only.sh # Website only
+```
 
-# Docker
+### Docker
+
+```bash
 docker compose up -d
+```
 
-# Kubernetes
+### Kubernetes
+
+```bash
 kubectl apply -f config/crd.yaml
 kubectl apply -f config/policy.yaml
 ```

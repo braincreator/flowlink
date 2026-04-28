@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# FlowLink Agent Installer
-# Устанавливает FlowLink агент на Linux (x86_64/aarch64) и macOS (arm64)
+# FlowLink Self-Host Installer
+# Устанавливает FlowLink agent + ServerGuard + shield config на Linux/macOS
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/braincreator/flowlink/main/scripts/install.sh | bash
-#   ./install.sh [--relay URL] [--label NAME] [--no-systemd]
+#   ./install.sh [--relay URL] [--label NAME] [--shield-mode MODE] [--no-systemd] [--no-guard]
 #
 set -euo pipefail
 
 # ── Colors ──
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
 
 # ── Defaults ──
 GITHUB_REPO="braincreator/flowlink"
@@ -18,30 +18,41 @@ INSTALL_DIR="/opt/flowlink"
 BIN_DIR="$INSTALL_DIR/bin"
 AGENT_DIR="$INSTALL_DIR/agent"
 CONFIG_DIR="$INSTALL_DIR"
+DATA_DIR="$INSTALL_DIR/data"
 FLOWLINK_HOME="${FLOWLINK_HOME:-$HOME/.flowlink}"
 RELAY_URL="${RELAY_URL:-wss://relay.flow-masters.ru:9093}"
 RELAY_API="${RELAY_API:-http://127.0.0.1:9081}"
 LABEL=""
+SHIELD_MODE="${SHIELD_MODE:-moderate}"
 NO_SYSTEMD=0
 NO_GUARD=0
 
 # ── Parse arguments ──
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --relay)    RELAY_URL="$2"; shift 2 ;;
-        --relay-api) RELAY_API="$2"; shift 2 ;;
-        --label)    LABEL="$2"; shift 2 ;;
+        --relay)      RELAY_URL="$2"; shift 2 ;;
+        --relay-api)  RELAY_API="$2"; shift 2 ;;
+        --label)      LABEL="$2"; shift 2 ;;
+        --shield-mode) SHIELD_MODE="$2"; shift 2 ;;
         --no-systemd) NO_SYSTEMD=1; shift ;;
-        --no-guard) NO_GUARD=1; shift ;;
+        --no-guard)   NO_GUARD=1; shift ;;
         --help|-h)
-            echo "Usage: $0 [--relay URL] [--relay-api URL] [--label NAME] [--no-systemd] [--no-guard]"
+            echo "Usage: $0 [OPTIONS]"
+            echo ""
+            echo "FlowLink Self-Host Installer — agent + ServerGuard + shield config"
             echo ""
             echo "Options:"
-            echo "  --relay URL      WSS relay URL (default: wss://relay.flow-masters.ru:9093)"
-            echo "  --relay-api URL  HTTP relay API (default: http://127.0.0.1:9081)"
-            echo "  --label NAME     Agent label (default: hostname)"
-            echo "  --no-systemd     Skip systemd service installation"
-            echo "  --no-guard       Skip ServerGuard installation (file/Docker monitoring)"
+            echo "  --relay URL       WSS relay URL (default: wss://relay.flow-masters.ru:9093)"
+            echo "  --relay-api URL   HTTP relay API (default: http://127.0.0.1:9081)"
+            echo "  --label NAME      Agent label (default: hostname)"
+            echo "  --shield-mode M   Shield mode: strict|moderate|permissive (default: moderate)"
+            echo "  --no-systemd      Skip systemd service installation"
+            echo "  --no-guard        Skip ServerGuard installation"
+            echo ""
+            echo "Shield modes:"
+            echo "  strict      Block all suspicious commands (highest security)"
+            echo "  moderate    Warn on medium/high risk, block critical (recommended)"
+            echo "  permissive  Only block critical threats (development only)"
             exit 0 ;;
         *) echo -e "${RED}Unknown option: $1${NC}"; exit 1 ;;
     esac
@@ -73,8 +84,78 @@ check_prereqs() {
 # ── Create directories ──
 create_dirs() {
     log_info "Creating directories..."
-    mkdir -p "$BIN_DIR" "$AGENT_DIR" "$CONFIG_DIR"
+    mkdir -p "$BIN_DIR" "$AGENT_DIR" "$CONFIG_DIR" "$DATA_DIR"/audit "$DATA_DIR"/forensics
     log_ok "Directories created"
+}
+
+# ── Write shield config ──
+write_shield_config() {
+    log_info "Configuring shield (mode: $SHIELD_MODE)..."
+    local shield_file="$CONFIG_DIR/shield.json"
+
+    # Validate mode
+    case "$SHIELD_MODE" in strict|moderate|permissive) ;; *)
+        log_warn "Invalid shield mode: $SHIELD_MODE, using moderate"
+        SHIELD_MODE="moderate"
+    esac
+
+    # Set threshold based on mode
+    local threshold
+    case "$SHIELD_MODE" in
+        strict)      threshold=25 ;;
+        moderate)    threshold=50 ;;
+        permissive)  threshold=75 ;;
+    esac
+
+    cat > "$shield_file" <<EOF
+{
+  "mode": "$SHIELD_MODE",
+  "threshold": $threshold,
+  "ast_enabled": true,
+  "interpreter_enabled": true,
+  "protected_paths": [
+    "/etc/shadow", "/etc/passwd", "/etc/sudoers",
+    "/root", "/var/log", "/boot",
+    "/opt/flowlink/config",
+    "$CONFIG_DIR"
+  ],
+  "blocked_commands": [
+    "rm -rf /", "mkfs", "dd if=/dev/zero",
+    "chmod -R 777 /", "chown -R",
+    "> /dev/sda", ":(){ :|:& };:",
+    "curl | sh", "wget | sh", "curl | bash", "wget | bash"
+  ]
+}
+EOF
+    chmod 600 "$shield_file"
+    log_ok "Shield config: $shield_file (mode=$SHIELD_MODE, threshold=$threshold)"
+}
+
+# ── Write environment file ──
+write_env_file() {
+    local env_file="$CONFIG_DIR/.env"
+    cat > "$env_file" <<EOF
+# FlowLink Environment
+# Edit these values to configure your agent
+AGENT_ID=$AGENT_ID
+RELAY_URL=$RELAY_URL
+RELAY_API=$RELAY_API
+SHIELD_MODE=$SHIELD_MODE
+DATA_DIR=$DATA_DIR
+
+# Logging
+RUST_LOG=info
+
+# Vault (optional — set VAULT_ADDR and VAULT_TOKEN for secret injection)
+# VAULT_ADDR=https://vault.example.com:8200
+# VAULT_TOKEN=
+
+# SSO/SAML (optional — Enterprise plan required)
+# SAML_IDP_METADATA_URL=
+# SAML_SP_ENTITY_ID=
+EOF
+    chmod 600 "$env_file"
+    log_ok "Environment file: $env_file"
 }
 
 # ── Signup via relay API ──
@@ -181,6 +262,7 @@ StartLimitBurst=20
 [Service]
 Type=simple
 WorkingDirectory=$AGENT_DIR
+EnvironmentFile=$CONFIG_DIR/.env
 ExecStart=$BIN_DIR/flowlink agent -c $AGENT_DIR/%i.json
 Restart=always
 RestartSec=2
@@ -190,7 +272,6 @@ KillMode=mixed
 KillSignal=SIGTERM
 FinalKillSignal=SIGKILL
 SendSIGKILL=yes
-Environment=RUST_LOG=info
 StandardOutput=append:/var/log/flowlink-agent-%i.log
 StandardError=append:/var/log/flowlink-agent-%i.log
 LimitNOFILE=65536
@@ -286,27 +367,65 @@ EOF
 # ── Show status ──
 show_status() {
     echo ""
-    echo -e "${GREEN}═══════════════════════════════════════${NC}"
-    echo -e "${GREEN}  FlowLink Agent Installed!${NC}"
-    echo -e "${GREEN}═══════════════════════════════════════${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  FlowLink Installed Successfully!${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════${NC}"
     echo ""
-    echo "  Agent ID:  $AGENT_ID"
-    echo "  Config:    $CONFIG_FILE"
-    echo "  Binary:    $BIN_DIR/flowlink"
-    echo "  Relay:     $RELAY_URL"
-    echo "  Label:     $LABEL"
+    echo -e "  Agent ID:     ${CYAN}$AGENT_ID${NC}"
+    echo -e "  Config:       $CONFIG_DIR/${AGENT_ID}.json"
+    echo -e "  Shield:       $CONFIG_DIR/shield.json (mode: $SHIELD_MODE)"
+    echo -e "  Binary:       $BIN_DIR/flowlink"
+    echo -e "  Relay:        $RELAY_URL"
+    echo -e "  Label:        $LABEL"
+    echo ""
+    echo -e "${YELLOW}Next Steps:${NC}"
+    echo ""
+    echo "  1. Add to your AI agent config (e.g. ~/.claude/mcp.json):"
+    echo ""
+    echo -e "     ${CYAN}{${NC}"
+    echo -e "     ${CYAN}  \"mcpServers\": {${NC}"
+    echo -e "     ${CYAN}    \"flowlink\": {${NC}"
+    echo -e "     ${CYAN}      \"url\": \"${RELAY_API}/mcp/stream\",${NC}"
+    echo -e "     ${CYAN}      \"headers\": { \"Authorization\": \"Bearer $TOKEN\" }${NC}"
+    echo -e "     ${CYAN}    }${NC}"
+    echo -e "     ${CYAN}  }${NC}"
+    echo -e "     ${CYAN}}${NC}"
+    echo ""
+    echo "  2. Verify connection:"
+    echo "     $BIN_DIR/flowlink agent -c $CONFIG_DIR/${AGENT_ID}.json status"
+    echo ""
+    echo "  3. Configure features in relay dashboard:"
+    echo "     https://flowlink.flow-masters.ru"
+    echo ""
+    echo -e "  ${YELLOW}Available features by plan:${NC}"
+    echo -e "    Starter (free):    Shield, Policy Engine, Audit Log, E2EE"
+    echo -e "    Professional:      + Approval, RBAC, ServerGuard, Forensics, AI Ops, Service Catalog"
+    echo -e "    Business:          + Pattern Learning, SIEM Export, Webhooks, Change Management"
+    echo -e "    Enterprise:       + SSO/SAML, On-Premise"
     echo ""
 
     if [[ "$OS_TYPE" == "linux" ]] && [[ "$NO_SYSTEMD" -eq 0 ]]; then
-        echo "  Commands:"
+        echo -e "  ${YELLOW}Service management:${NC}"
         echo "    sudo systemctl status flowlink-agent@${AGENT_ID}"
         echo "    sudo systemctl restart flowlink-agent@${AGENT_ID}"
         echo "    sudo journalctl -u flowlink-agent@${AGENT_ID} -f"
+        if [[ "$NO_GUARD" -eq 0 ]]; then
+            echo "    sudo systemctl status flowlink-guard@${AGENT_ID}"
+        fi
+        echo ""
     elif [[ "$OS_TYPE" == "darwin" ]]; then
-        echo "  Commands:"
+        echo -e "  ${YELLOW}Service management:${NC}"
         echo "    launchctl list | grep flowlink"
         echo "    tail -f $FLOWLINK_HOME/flowlink.log"
+        echo ""
     fi
+
+    echo -e "  ${YELLOW}Configuration files:${NC}"
+    echo "    Agent config:  $CONFIG_DIR/${AGENT_ID}.json"
+    echo "    Shield config: $CONFIG_DIR/shield.json"
+    echo "    Environment:   $CONFIG_DIR/.env"
+    echo "    Audit logs:    $DATA_DIR/audit/"
+    echo "    Forensics:     $DATA_DIR/forensics/"
     echo ""
     echo -e "${GREEN}Agent will auto-reconnect on any network interruption.${NC}"
     if [[ "$OS_TYPE" == "linux" ]] && [[ "$NO_GUARD" -eq 0 ]]; then
@@ -328,6 +447,8 @@ main() {
     create_dirs
     signup
     write_config
+    write_shield_config
+    write_env_file
     download_binary
     install_systemd
     install_guard
