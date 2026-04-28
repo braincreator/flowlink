@@ -955,11 +955,14 @@ async fn exec_agent(
 
 /// Redact sensitive data from SSE event payloads for exec channels.
 /// Only processes exec_output and exec_done events; passes others through unchanged.
-fn redact_sse_data(channel: &str, data: &str) -> String {
+fn redact_sse_data(channel: &str, data: &str, metrics: &Metrics) -> String {
     match channel {
         "exec_output" | "exec_done" => {
             let result = flowlink_shield::redaction::redact(data);
             if result.found {
+                for m in &result.matches {
+                    let _ = metrics.redaction_total.with_label_values(&[&m.category.to_string()]).inc();
+                }
                 log::info!("[REDACTION] {} event: {} secrets redacted ({} categories)", channel, result.matches.len(), result.categories);
                 result.redacted
             } else {
@@ -1005,14 +1008,16 @@ async fn sse_events(
     let (tx, rx) = tokio::sync::mpsc::channel::<Event>(256);
 
     // Spawn forwarders for each channel
+    let metrics = state.metrics.clone();
     for ch in channels {
         let eventbus = eventbus.clone();
         let tx = tx.clone();
+        let metrics = metrics.clone();
         tokio::spawn(async move {
             let mut sub = eventbus.subscribe(&ch);
             while let Ok(data) = sub.recv().await {
                 // Redact sensitive data from exec_output/exec_done events
-                let data = redact_sse_data(&ch, &data);
+                let data = redact_sse_data(&ch, &data, &metrics);
                 if tx.send(Event::default().data(data)).await.is_err() {
                     break;
                 }

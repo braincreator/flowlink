@@ -63,6 +63,7 @@ pub struct PlanFeatures {
     pub service_catalog: bool,
     pub ai_ops: bool,
     pub change_management: bool,
+    pub redaction: bool,
 }
 
 /// Plan limits — numeric and structural constraints.
@@ -386,6 +387,7 @@ impl PlanRegistry {
                     policy_engine: true,
                     e2ee: true,
                     audit_log: true,
+                    redaction: true,
                     webhooks: true,
                     ..Default::default()
                 },
@@ -422,6 +424,7 @@ impl PlanRegistry {
                     pattern_learning: true,
                     e2ee: true,
                     audit_log: true,
+                    redaction: true,
                     webhooks: true,
                     siem_export: true,
                     serverguard: true,
@@ -464,6 +467,7 @@ impl PlanRegistry {
                     pattern_learning: true,
                     e2ee: true,
                     audit_log: true,
+                    redaction: true,
                     webhooks: true,
                     siem_export: true,
                     sso: true,
@@ -509,6 +513,7 @@ impl PlanRegistry {
                     pattern_learning: true,
                     e2ee: true,
                     audit_log: true,
+                    redaction: true,
                     webhooks: true,
                     siem_export: true,
                     sso: true,

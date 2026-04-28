@@ -30,6 +30,7 @@ pub struct Metrics {
     pub mcp_tool_calls_total: CounterVec,
     pub injection_detections_total: CounterVec,
     pub injection_risk_score: HistogramVec,
+    pub redaction_total: CounterVec,
     pub rate_limit_hits_total: CounterVec,
 
     // ServerGuard metrics
@@ -162,6 +163,11 @@ impl Metrics {
             &["category"],
         ).unwrap();
 
+        let redaction_total = CounterVec::new(
+            Opts::new("flowlink_redaction_total", "Total redaction events by category"),
+            &["category"],
+        ).unwrap();
+
         let rate_limit_hits_total = CounterVec::new(
             Opts::new("flowlink_rate_limit_hits_total", "Total rate limit rejections"),
             &["path"],
@@ -254,6 +260,7 @@ impl Metrics {
         registry.register(Box::new(mcp_tool_calls_total.clone())).unwrap();
         registry.register(Box::new(injection_detections_total.clone())).unwrap();
         registry.register(Box::new(injection_risk_score.clone())).unwrap();
+        registry.register(Box::new(redaction_total.clone())).unwrap();
         registry.register(Box::new(rate_limit_hits_total.clone())).unwrap();
         registry.register(Box::new(guard_events_total.clone())).unwrap();
         registry.register(Box::new(guard_auto_fixes_total.clone())).unwrap();
@@ -289,6 +296,7 @@ impl Metrics {
             mcp_tool_calls_total,
             injection_detections_total,
             injection_risk_score,
+            redaction_total,
             rate_limit_hits_total,
             guard_events_total,
             guard_auto_fixes_total,

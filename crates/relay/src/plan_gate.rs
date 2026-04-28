@@ -156,7 +156,7 @@ pub fn check_limit(plan: &Option<Plan>, limit: &str, current: u64, required_plan
 /// Get the minimum plan tier required for a feature.
 pub fn feature_min_tier(feature: &str) -> &'static str {
     match feature {
-        "shield" | "e2ee" | "policy_engine" | "audit_log" => "starter",
+        "shield" | "e2ee" | "policy_engine" | "audit_log" | "redaction" => "starter",
         "approval" | "rbac" | "serverguard" | "forensics" | "service_catalog" | "ai_ops" => "professional",
         "pattern_learning" | "siem_export" | "webhooks" | "change_management" => "scale",
         "sso" | "on_premise" => "enterprise",
@@ -226,7 +226,7 @@ mod tests {
                 forensics: false,
                 service_catalog: false,
                 ai_ops: false,
-                change_management: false,
+                change_management: false, redaction: false,
                 serverguard: false,
                 serverguard_level: String::new(),
             },
@@ -277,7 +277,7 @@ mod tests {
                 forensics: false,
                 service_catalog: false,
                 ai_ops: false,
-                change_management: false,
+                change_management: false, redaction: false,
                 serverguard: false,
                 serverguard_level: String::new(),
             },
