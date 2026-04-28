@@ -144,7 +144,7 @@ impl McpServer {
             "jsonrpc": "2.0",
             "id": id,
             "result": {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": "2025-03-26",
                 "capabilities": { "tools": {} },
                 "serverInfo": {
                     "name": "flowlink-security",
@@ -954,7 +954,7 @@ impl McpServer {
         serde_json::to_string_pretty(&json!({
             "flowlink_version": "0.1.0",
             "mcp_server": "flowlink-security",
-            "protocol_version": "2024-11-05",
+            "protocol_version": "2025-03-26",
             "analysis_engine": {
                 "levels": ["L1_pattern", "L1.5_raw_string", "L2_ast", "L3_interpreter"],
                 "ast_enabled": self.engine.enable_ast,
