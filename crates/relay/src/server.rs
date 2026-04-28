@@ -25,7 +25,7 @@ use crate::handler::RelayHandler;
 use crate::llm::{LlmProxy, LlmRequest};
 use crate::metrics::Metrics;
 use axum::middleware;
-use crate::middleware::{rate_limit_layer, request_id_middleware, logging_middleware, cors_layer, security_headers_middleware};
+use crate::middleware::{rate_limit_layer, request_id_middleware, logging_middleware, cors_layer, security_headers_middleware, prometheus_middleware};
 use crate::ratelimit::RateLimiter;
 use crate::pool::{AgentInfo, AgentPool};
 use crate::registry::Registry;
@@ -2444,7 +2444,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/dashboard", get(crate::dashboard::serve_dashboard_root))
         .route("/dashboard/", get(crate::dashboard::serve_dashboard_root))
         .route("/dashboard/{*path}", get(crate::dashboard::serve_dashboard))
-        .with_state(state)
+        .with_state(state.clone())
         // API versioning: rewrite /api/v1/* → /api/*
         .layer(axum::middleware::from_fn(
             |req: axum::extract::Request, next: axum::middleware::Next| async move {
@@ -2467,6 +2467,7 @@ pub fn build_router(state: AppState) -> Router {
         ))
         // Middleware layers (innermost first)
         .layer(axum::middleware::from_fn(logging_middleware))
+        .layer(axum::middleware::from_fn_with_state(std::sync::Arc::new(state.clone()), prometheus_middleware))
         .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(axum::middleware::from_fn(rate_limit_layer(
             rate_limiter,

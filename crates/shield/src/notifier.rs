@@ -34,6 +34,7 @@ impl Notifier {
     }
 
     /// Send alert to webhook (FlowLink relay → Telegram)
+    #[allow(clippy::too_many_arguments)]
     pub async fn alert(
         &self,
         pid: u32,

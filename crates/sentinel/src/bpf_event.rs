@@ -114,7 +114,7 @@ mod tests {
         buf
     }
 
-    fn set_str(buf: &mut Vec<u8>, offset: usize, s: &str) {
+    fn set_str(buf: &mut [u8], offset: usize, s: &str) {
         let bytes = format!("{}\0", s).into_bytes();
         buf[offset..offset+bytes.len()].copy_from_slice(&bytes);
     }

@@ -1,3 +1,4 @@
+#![allow(clippy::ptr_arg)]
 //! ServerGuard Pipeline — debounce, classify, decide, act
 //!
 //! Processes GuardEvents through:
@@ -19,7 +20,6 @@ use super::command_runner::CommandRunner;
 use super::event_types::{ActionTier, EventDetail, EventSource, GuardAlert, GuardEvent, Severity};
 use super::guard_mode::GuardKillswitch;
 use super::metrics::GuardMetrics;
-use std::sync::atomic::Ordering;
 
 // ---------------------------------------------------------------------------
 // Pipeline config

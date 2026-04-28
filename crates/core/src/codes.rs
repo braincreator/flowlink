@@ -2,7 +2,6 @@
 // Port of internal/protocol/codes.go
 // NEVER change existing codes — only add new ones.
 
-pub mod codes {
     // General
     pub const OK: &str = "OK";
     pub const UNKNOWN_ERROR: &str = "UNKNOWN_ERROR";
@@ -97,11 +96,10 @@ pub mod codes {
     pub const SHIELD_PROCESS_KILLED: &str = "SHIELD_PROCESS_KILLED";
     pub const SHIELD_TIMEOUT: &str = "SHIELD_TIMEOUT";
     pub const SHIELD_ALERT_SENT: &str = "SHIELD_ALERT_SENT";
-}
 
 #[cfg(test)]
 mod tests {
-    use super::codes::*;
+    use super::*;
 
     fn all_codes() -> Vec<&'static str> {
         vec![

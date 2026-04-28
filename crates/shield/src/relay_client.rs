@@ -44,6 +44,7 @@ impl RelayClient {
     }
 
     /// Report an interception to the relay's `/api/shield/ingest` endpoint.
+    #[allow(clippy::too_many_arguments)]
     pub async fn report_interception(
         &self,
         alert_id: &str,

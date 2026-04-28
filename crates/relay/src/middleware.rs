@@ -470,6 +470,53 @@ pub async fn security_headers_middleware(req: Request, next: Next) -> Response {
     response
 }
 
+// ── Prometheus HTTP Metrics Middleware ──
+
+/// Normalize a URL path for Prometheus labels — strip UUIDs and numeric IDs
+/// to avoid cardinality explosion. E.g. /api/v1/accounts/abc-123 → /api/v1/accounts/:id
+fn normalize_path(path: &str) -> String {
+    let segments: Vec<&str> = path.split('/').collect();
+    let mut out = Vec::with_capacity(segments.len());
+    for seg in &segments {
+        if seg.is_empty() {
+            out.push(*seg);
+        } else if seg.len() >= 32 && seg.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+            out.push(":id");
+        } else if seg.parse::<u64>().is_ok() && out.last().map_or(false, |&p| p == ":id" || p.starts_with("api")) {
+            out.push(":id");
+        } else {
+            out.push(*seg);
+        }
+    }
+    out.join("/")
+}
+
+/// Prometheus middleware — records HTTP request count, duration, and errors.
+/// Must be layered with State (from_fn_with_state).
+pub async fn prometheus_middleware(
+    State(state): State<Arc<AppState>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let normalized = normalize_path(&path);
+
+    let start = std::time::Instant::now();
+    let response = next.run(req).await;
+    let duration = start.elapsed().as_secs_f64();
+    let status = response.status().as_u16().to_string();
+
+    // Skip noisy paths from metrics
+    if !path.starts_with("/health") && !path.starts_with("/metrics") && !path.starts_with("/api/events") {
+        let m = &state.metrics;
+        let _ = m.http_requests_total.with_label_values(&[method.as_str(), &normalized, &status]).inc();
+        let _ = m.http_request_duration_ms.with_label_values(&[method.as_str(), &normalized]).observe(duration);
+    }
+
+    response
+}
+
 // ── Logging Middleware ──
 
 pub async fn logging_middleware(req: Request, next: Next) -> Response {

@@ -1,3 +1,4 @@
+#![allow(clippy::if_same_then_else)]
 use super::collector::{ApplyResult, ComponentType, StateCollector};
 use crate::types::{ComponentState, DriftAction, SemanticDrift};
 use anyhow::{anyhow, Result};

@@ -25,13 +25,13 @@ impl FileOps {
 
     fn validate_path(&self, path: &str) -> Result<PathBuf, &'static str> {
         if path.is_empty() {
-            return Err(flowlink_core::codes::codes::FILE_EMPTY_PATH);
+            return Err(flowlink_core::codes::FILE_EMPTY_PATH);
         }
         let p = Path::new(path);
         if p.components()
             .any(|c| matches!(c, std::path::Component::ParentDir))
         {
-            return Err(flowlink_core::codes::codes::FILE_INVALID_PATH);
+            return Err(flowlink_core::codes::FILE_INVALID_PATH);
         }
         let canonical = match p.canonicalize() {
             Ok(c) => c,
@@ -46,7 +46,7 @@ impl FileOps {
                             .unwrap_or_else(|_| PathBuf::from(path))
                     }
                 } else {
-                    return Err(flowlink_core::codes::codes::FILE_INVALID_PATH);
+                    return Err(flowlink_core::codes::FILE_INVALID_PATH);
                 }
             }
         };
@@ -56,7 +56,7 @@ impl FileOps {
                 .iter()
                 .any(|dir| canonical.starts_with(dir));
             if !allowed {
-                return Err(flowlink_core::codes::codes::FILE_INVALID_PATH);
+                return Err(flowlink_core::codes::FILE_INVALID_PATH);
             }
         }
         Ok(canonical)
@@ -65,27 +65,27 @@ impl FileOps {
     pub fn read(&self, path: &str) -> Result<Vec<u8>, String> {
         let resolved = self.validate_path(path).map_err(|e| e.to_string())?;
         let metadata = std::fs::metadata(&resolved)
-            .map_err(|_| flowlink_core::codes::codes::FILE_NOT_FOUND.to_string())?;
+            .map_err(|_| flowlink_core::codes::FILE_NOT_FOUND.to_string())?;
         if metadata.len() > self.max_file_size {
             return Err(format!(
                 "{}: {} bytes > {} limit",
-                flowlink_core::codes::codes::FILE_TOO_LARGE,
+                flowlink_core::codes::FILE_TOO_LARGE,
                 metadata.len(),
                 self.max_file_size
             ));
         }
         if metadata.is_dir() {
-            return Err(flowlink_core::codes::codes::FILE_READ_ERROR.to_string());
+            return Err(flowlink_core::codes::FILE_READ_ERROR.to_string());
         }
         std::fs::read(&resolved)
-            .map_err(|e| format!("{}: {}", flowlink_core::codes::codes::FILE_READ_ERROR, e))
+            .map_err(|e| format!("{}: {}", flowlink_core::codes::FILE_READ_ERROR, e))
     }
 
     pub fn write(&self, path: &str, data: &[u8]) -> Result<(), String> {
         if data.len() as u64 > self.max_file_size {
             return Err(format!(
                 "{}: {} bytes > {} limit",
-                flowlink_core::codes::codes::FILE_TOO_LARGE,
+                flowlink_core::codes::FILE_TOO_LARGE,
                 data.len(),
                 self.max_file_size
             ));
@@ -93,16 +93,16 @@ impl FileOps {
         let resolved = self.validate_path(path).map_err(|e| e.to_string())?;
         if let Some(parent) = resolved.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| format!("{}: {}", flowlink_core::codes::codes::FILE_WRITE_ERROR, e))?;
+                .map_err(|e| format!("{}: {}", flowlink_core::codes::FILE_WRITE_ERROR, e))?;
         }
         std::fs::write(&resolved, data)
-            .map_err(|e| format!("{}: {}", flowlink_core::codes::codes::FILE_WRITE_ERROR, e))
+            .map_err(|e| format!("{}: {}", flowlink_core::codes::FILE_WRITE_ERROR, e))
     }
 
     pub fn list(&self, dir: &str, recursive: bool) -> Result<Vec<DirEntry>, String> {
         let resolved = self.validate_path(dir).map_err(|e| e.to_string())?;
         if !resolved.is_dir() {
-            return Err(flowlink_core::codes::codes::FILE_NOT_FOUND.to_string());
+            return Err(flowlink_core::codes::FILE_NOT_FOUND.to_string());
         }
         let mut entries = Vec::new();
         self.list_dir(&resolved, &resolved, recursive, &mut entries)?;
@@ -117,7 +117,7 @@ impl FileOps {
         out: &mut Vec<DirEntry>,
     ) -> Result<(), String> {
         let read_dir = std::fs::read_dir(current)
-            .map_err(|e| format!("{}: {}", flowlink_core::codes::codes::FILE_READ_ERROR, e))?;
+            .map_err(|e| format!("{}: {}", flowlink_core::codes::FILE_READ_ERROR, e))?;
         for entry in read_dir.flatten() {
             let path = entry.path();
             let metadata = match entry.metadata() {

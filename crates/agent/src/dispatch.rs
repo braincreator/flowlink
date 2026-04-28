@@ -405,7 +405,7 @@ fn handle_file_read(msg: &Message, fileops: &FileOps) -> Option<Message> {
     if payload.path.is_empty() {
         return Some(error_response(
             msg,
-            flowlink_core::codes::codes::FILE_EMPTY_PATH,
+            flowlink_core::codes::FILE_EMPTY_PATH,
             "Path is empty",
         ));
     }
@@ -603,7 +603,7 @@ async fn handle_backup_create(msg: &Message, backup: &BackupManager) -> Option<M
         ),
         Err(e) => Some(error_response(
             msg,
-            codes::codes::BACKUP_CREATE_ERROR,
+            codes::BACKUP_CREATE_ERROR,
             &e.to_string(),
         )),
     }
@@ -635,7 +635,7 @@ async fn handle_backup_list(msg: &Message, backup: &BackupManager) -> Option<Mes
         }
         Err(e) => Some(error_response(
             msg,
-            codes::codes::BACKUP_CREATE_ERROR,
+            codes::BACKUP_CREATE_ERROR,
             &e.to_string(),
         )),
     }
@@ -662,7 +662,7 @@ async fn handle_backup_restore(msg: &Message, backup: &BackupManager) -> Option<
                 .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
                 .with_payload(serde_json::json!({ "request_id": payload.request_id, "snapshot_id": payload.snapshot_id })),
         ),
-        Err(e) => Some(error_response(msg, codes::codes::BACKUP_RESTORE_ERROR, &e.to_string())),
+        Err(e) => Some(error_response(msg, codes::BACKUP_RESTORE_ERROR, &e.to_string())),
     }
 }
 
@@ -687,7 +687,7 @@ async fn handle_backup_delete(msg: &Message, backup: &BackupManager) -> Option<M
                 .with_agent_id(msg.agent_id.as_deref().unwrap_or(""))
                 .with_payload(serde_json::json!({ "request_id": payload.request_id, "snapshot_id": payload.snapshot_id })),
         ),
-        Err(e) => Some(error_response(msg, codes::codes::BACKUP_DELETE_ERROR, &e.to_string())),
+        Err(e) => Some(error_response(msg, codes::BACKUP_DELETE_ERROR, &e.to_string())),
     }
 }
 

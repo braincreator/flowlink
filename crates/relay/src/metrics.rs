@@ -12,6 +12,9 @@ pub struct Metrics {
     pub interception_duration_ns: HistogramVec,
     pub false_positives: CounterVec,
     pub active_pending_approvals: Gauge,
+    pub shield_scans_total: CounterVec,
+    pub shield_blocked_total: CounterVec,
+    pub shield_threats_by_level: GaugeVec,
 
     // Agent metrics
     pub agents_registered: Gauge,
@@ -24,6 +27,23 @@ pub struct Metrics {
     pub sse_connections: Gauge,
     pub eventbus_events_total: CounterVec,
     pub ws_connections: Gauge,
+    pub mcp_tool_calls_total: CounterVec,
+    pub rate_limit_hits_total: CounterVec,
+
+    // ServerGuard metrics
+    pub guard_events_total: CounterVec,
+    pub guard_auto_fixes_total: CounterVec,
+    pub guard_escalations_total: CounterVec,
+    pub guard_alerts_total: CounterVec,
+
+    // Billing metrics
+    pub accounts_total: Gauge,
+    pub subscriptions_active: Gauge,
+    pub billing_revenue_monthly: Gauge,
+    pub billing_payments_total: CounterVec,
+
+    // Email metrics
+    pub email_queue_pending: Gauge,
 
     // Crypto metrics
     pub crypto_operations_total: CounterVec,
@@ -60,6 +80,21 @@ impl Metrics {
         let active_pending_approvals = Gauge::new(
             "flowlink_active_pending_approvals",
             "Number of currently pending approvals",
+        ).unwrap();
+
+        let shield_scans_total = CounterVec::new(
+            Opts::new("flowlink_shield_scans_total", "Total shield command scans"),
+            &["action"],
+        ).unwrap();
+
+        let shield_blocked_total = CounterVec::new(
+            Opts::new("flowlink_shield_blocked_total", "Total blocked commands by shield"),
+            &["level"],
+        ).unwrap();
+
+        let shield_threats_by_level = GaugeVec::new(
+            Opts::new("flowlink_shield_threats_by_level", "Current threat counts by severity level"),
+            &["level"],
         ).unwrap();
 
         let agents_registered = Gauge::new(
@@ -110,6 +145,61 @@ impl Metrics {
             "Number of active WebSocket connections",
         ).unwrap();
 
+        let mcp_tool_calls_total = CounterVec::new(
+            Opts::new("flowlink_mcp_tool_calls_total", "Total MCP tool invocations"),
+            &["tool_name"],
+        ).unwrap();
+
+        let rate_limit_hits_total = CounterVec::new(
+            Opts::new("flowlink_rate_limit_hits_total", "Total rate limit rejections"),
+            &["path"],
+        ).unwrap();
+
+        let guard_events_total = CounterVec::new(
+            Opts::new("flowlink_guard_events_received_total", "Total ServerGuard events received"),
+            &["event_type"],
+        ).unwrap();
+
+        let guard_auto_fixes_total = CounterVec::new(
+            Opts::new("flowlink_guard_auto_fixes_succeeded_total", "Total ServerGuard auto-fixes by status"),
+            &["status"],
+        ).unwrap();
+
+        let guard_escalations_total = CounterVec::new(
+            Opts::new("flowlink_guard_events_escalated_total", "Total ServerGuard escalations"),
+            &[],
+        ).unwrap();
+
+        let guard_alerts_total = CounterVec::new(
+            Opts::new("flowlink_guard_alerts_total", "Total ServerGuard alerts by status"),
+            &["status"],
+        ).unwrap();
+
+        let accounts_total = Gauge::new(
+            "flowlink_accounts_total",
+            "Total registered accounts",
+        ).unwrap();
+
+        let subscriptions_active = Gauge::new(
+            "flowlink_subscriptions_active",
+            "Number of active subscriptions",
+        ).unwrap();
+
+        let billing_revenue_monthly = Gauge::new(
+            "flowlink_billing_revenue_monthly_rub",
+            "Monthly revenue in RUB",
+        ).unwrap();
+
+        let billing_payments_total = CounterVec::new(
+            Opts::new("flowlink_billing_payments_total", "Total payments processed"),
+            &["status"],
+        ).unwrap();
+
+        let email_queue_pending = Gauge::new(
+            "flowlink_email_queue_pending",
+            "Number of pending emails in queue",
+        ).unwrap();
+
         let crypto_operations_total = CounterVec::new(
             Opts::new("flowlink_crypto_operations_total", "Total cryptographic operations"),
             &["operation"],
@@ -138,6 +228,9 @@ impl Metrics {
         registry.register(Box::new(interception_duration_ns.clone())).unwrap();
         registry.register(Box::new(false_positives.clone())).unwrap();
         registry.register(Box::new(active_pending_approvals.clone())).unwrap();
+        registry.register(Box::new(shield_scans_total.clone())).unwrap();
+        registry.register(Box::new(shield_blocked_total.clone())).unwrap();
+        registry.register(Box::new(shield_threats_by_level.clone())).unwrap();
         registry.register(Box::new(agents_registered.clone())).unwrap();
         registry.register(Box::new(agent_commands_total.clone())).unwrap();
         registry.register(Box::new(agent_heartbeat_lag_ms.clone())).unwrap();
@@ -146,6 +239,17 @@ impl Metrics {
         registry.register(Box::new(sse_connections.clone())).unwrap();
         registry.register(Box::new(eventbus_events_total.clone())).unwrap();
         registry.register(Box::new(ws_connections.clone())).unwrap();
+        registry.register(Box::new(mcp_tool_calls_total.clone())).unwrap();
+        registry.register(Box::new(rate_limit_hits_total.clone())).unwrap();
+        registry.register(Box::new(guard_events_total.clone())).unwrap();
+        registry.register(Box::new(guard_auto_fixes_total.clone())).unwrap();
+        registry.register(Box::new(guard_escalations_total.clone())).unwrap();
+        registry.register(Box::new(guard_alerts_total.clone())).unwrap();
+        registry.register(Box::new(accounts_total.clone())).unwrap();
+        registry.register(Box::new(subscriptions_active.clone())).unwrap();
+        registry.register(Box::new(billing_revenue_monthly.clone())).unwrap();
+        registry.register(Box::new(billing_payments_total.clone())).unwrap();
+        registry.register(Box::new(email_queue_pending.clone())).unwrap();
         registry.register(Box::new(crypto_operations_total.clone())).unwrap();
         registry.register(Box::new(crypto_duration_ns.clone())).unwrap();
         registry.register(Box::new(uptime_seconds.clone())).unwrap();
@@ -157,6 +261,9 @@ impl Metrics {
             interception_duration_ns,
             false_positives,
             active_pending_approvals,
+            shield_scans_total,
+            shield_blocked_total,
+            shield_threats_by_level,
             agents_registered,
             agent_commands_total,
             agent_heartbeat_lag_ms,
@@ -165,6 +272,17 @@ impl Metrics {
             sse_connections,
             eventbus_events_total,
             ws_connections,
+            mcp_tool_calls_total,
+            rate_limit_hits_total,
+            guard_events_total,
+            guard_auto_fixes_total,
+            guard_escalations_total,
+            guard_alerts_total,
+            accounts_total,
+            subscriptions_active,
+            billing_revenue_monthly,
+            billing_payments_total,
+            email_queue_pending,
             crypto_operations_total,
             crypto_duration_ns,
             uptime_seconds,

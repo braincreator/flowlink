@@ -285,7 +285,7 @@ pub async fn process_mcp_http(
     match req.method.as_str() {
         "initialize" => {
             let result = json!({
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": "2025-03-26",
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "flowlink-relay", "version": "0.2.0" }
             });

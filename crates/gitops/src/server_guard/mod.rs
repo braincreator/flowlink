@@ -1,3 +1,4 @@
+#![allow(clippy::match_single_binding)]
 //! ServerGuard — autonomous server protection system
 //!
 //! Runs locally on the host (not through relay). Combines:

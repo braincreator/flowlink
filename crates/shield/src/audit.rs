@@ -39,6 +39,7 @@ impl AuditLog {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_entry(
         &self,
         pid: u32,

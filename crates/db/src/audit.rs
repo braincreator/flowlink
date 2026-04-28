@@ -37,7 +37,8 @@ pub struct AuditFilter {
 pub struct AuditRepo;
 
 /// High-level helper: log an org-scoped audit event.
-pub async fn log_event(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn log_event(
     pool: &PgPool,
     org_id: Option<&str>,
     account_id: &str,
@@ -156,6 +157,7 @@ pub fn build_where_clause(filter: &AuditFilter) -> (String, u32) {
 
 impl AuditRepo {
     /// Insert an audit entry
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert(
         pool: &PgPool,
         level: &str,
