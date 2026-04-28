@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sha2::Digest;
 
-use flowlink_core::channels::{AuditEvent, AuditEventType};
+pub use flowlink_core::channels::{AuditEvent, AuditEventType};
 
 // ═══════════════════════════════════════════════
 // Audit Store

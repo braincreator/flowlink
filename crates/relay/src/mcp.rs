@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 use crate::api_keys::{ApiKeyRepo, KeyIdentity};
 use crate::approval::ApprovalDecision;
+use crate::audit::{AuditEvent, AuditEventType};
 use crate::server::AppState;
 
 // ═══════════════════════════════════════════════
@@ -355,6 +356,29 @@ async fn handle_tools_call(state: AppState, req: McpRequest, identity: Option<Ke
                             name, key, result.risk_score, cat, result.matched_patterns,
                             identity.as_ref().map(|i| i.account_id.as_str()).unwrap_or("unknown")
                         );
+
+                        // Write to audit store for SIEM export coverage
+                        let agent_id = identity.as_ref().map(|i| i.account_id.clone()).unwrap_or_default();
+                        let event = AuditEvent::new(
+                            &agent_id,
+                            AuditEventType::PolicyViolation {
+                                rule: format!("injection:{}", cat),
+                                command: format!("mcp_tool:{} arg:{}", name, key),
+                                user: agent_id.clone(),
+                            },
+                        )
+                        .with_metadata("risk_score", result.risk_score.to_string())
+                        .with_metadata("category", cat.clone())
+                        .with_metadata("matched_patterns", result.matched_patterns.join(","))
+                        .with_metadata("tool_name", name.to_string());
+                        let event = if let Some(cid) = correlation_id.clone() {
+                            event.with_correlation(cid)
+                        } else {
+                            event
+                        };
+                        if let Err(e) = state.audit_store.record(event) {
+                            log::error!("[INJECTION] Failed to write audit event: {}", e);
+                        }
                     }
                 }
             }
