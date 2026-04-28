@@ -23,6 +23,7 @@ RELAY_URL="${RELAY_URL:-wss://relay.flow-masters.ru:9093}"
 RELAY_API="${RELAY_API:-http://127.0.0.1:9081}"
 LABEL=""
 NO_SYSTEMD=0
+NO_GUARD=0
 
 # ── Parse arguments ──
 while [[ $# -gt 0 ]]; do
@@ -31,14 +32,16 @@ while [[ $# -gt 0 ]]; do
         --relay-api) RELAY_API="$2"; shift 2 ;;
         --label)    LABEL="$2"; shift 2 ;;
         --no-systemd) NO_SYSTEMD=1; shift ;;
+        --no-guard) NO_GUARD=1; shift ;;
         --help|-h)
-            echo "Usage: $0 [--relay URL] [--relay-api URL] [--label NAME] [--no-systemd]"
+            echo "Usage: $0 [--relay URL] [--relay-api URL] [--label NAME] [--no-systemd] [--no-guard]"
             echo ""
             echo "Options:"
             echo "  --relay URL      WSS relay URL (default: wss://relay.flow-masters.ru:9093)"
             echo "  --relay-api URL  HTTP relay API (default: http://127.0.0.1:9081)"
             echo "  --label NAME     Agent label (default: hostname)"
             echo "  --no-systemd     Skip systemd service installation"
+            echo "  --no-guard       Skip ServerGuard installation (file/Docker monitoring)"
             exit 0 ;;
         *) echo -e "${RED}Unknown option: $1${NC}"; exit 1 ;;
     esac
@@ -210,6 +213,48 @@ EOF
     fi
 }
 
+# ── Install ServerGuard systemd service ──
+install_guard() {
+    [[ "$OS_TYPE" != "linux" ]] || [[ "$NO_SYSTEMD" -eq 1 ]] || [[ "$NO_GUARD" -eq 1 ]] && return 0
+
+    log_info "Installing ServerGuard service..."
+
+    cat > /etc/systemd/system/flowlink-guard@.service <<EOF
+[Unit]
+Description=FlowLink ServerGuard (%i)
+After=network-online.target flowlink-agent@%i.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$AGENT_DIR
+ExecStart=$BIN_DIR/flowlink guard --relay ${RELAY_API} --agent ${AGENT_ID} --key ${TOKEN} start --foreground --docker --watch /etc,$AGENT_DIR
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=10
+Environment=RUST_LOG=info
+StandardOutput=append:/var/log/flowlink-guard-%i.log
+StandardError=append:/var/log/flowlink-guard-%i.log
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable "flowlink-guard@${AGENT_ID}"
+    systemctl start "flowlink-guard@${AGENT_ID}"
+    sleep 2
+
+    if systemctl is-active --quiet "flowlink-guard@${AGENT_ID}"; then
+        log_ok "ServerGuard started: flowlink-guard@${AGENT_ID}"
+    else
+        log_warn "ServerGuard failed to start (non-critical, agent works without it)"
+        journalctl -u "flowlink-guard@${AGENT_ID}" -n 10 --no-pager
+    fi
+}
+
 # ── Install LaunchAgent (macOS) ──
 install_launchagent() {
     [[ "$OS_TYPE" != "darwin" ]] && return 0
@@ -264,6 +309,9 @@ show_status() {
     fi
     echo ""
     echo -e "${GREEN}Agent will auto-reconnect on any network interruption.${NC}"
+    if [[ "$OS_TYPE" == "linux" ]] && [[ "$NO_GUARD" -eq 0 ]]; then
+        echo -e "${GREEN}ServerGuard monitors file/Docker changes on this host.${NC}"
+    fi
     echo ""
 }
 
@@ -282,6 +330,7 @@ main() {
     write_config
     download_binary
     install_systemd
+    install_guard
     install_launchagent
     show_status
 }
