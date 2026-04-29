@@ -1041,7 +1041,16 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
 dependencies = [
- "derive_more-impl",
+ "derive_more-impl 1.0.0",
+]
+
+[[package]]
+name = "derive_more"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134"
+dependencies = [
+ "derive_more-impl 2.1.1",
 ]
 
 [[package]]
@@ -1054,6 +1063,18 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "unicode-xid",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1611,9 +1632,9 @@ dependencies = [
  "futures",
  "http",
  "hyper",
- "k8s-openapi",
+ "k8s-openapi 0.22.0",
  "kube",
- "kube-core",
+ "kube-core 3.1.0",
  "kube-derive",
  "log",
  "rcgen 0.11.3",
@@ -2755,6 +2776,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "k8s-openapi"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51b326f5219dd55872a72c1b6ddd1b830b8334996c667449c29391d657d78d5e"
+dependencies = [
+ "base64 0.22.1",
+ "jiff",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kqueue"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2780,9 +2813,9 @@ version = "0.93.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0365920075af1a2d23619c1ca801c492f2400157de42627f041a061716e76416"
 dependencies = [
- "k8s-openapi",
+ "k8s-openapi 0.22.0",
  "kube-client",
- "kube-core",
+ "kube-core 0.93.1",
  "kube-derive",
  "kube-runtime",
 ]
@@ -2808,8 +2841,8 @@ dependencies = [
  "hyper-timeout",
  "hyper-util",
  "jsonpath-rust",
- "k8s-openapi",
- "kube-core",
+ "k8s-openapi 0.22.0",
+ "kube-core 0.93.1",
  "pem",
  "rustls",
  "rustls-pemfile",
@@ -2835,11 +2868,28 @@ dependencies = [
  "form_urlencoded",
  "http",
  "json-patch",
- "k8s-openapi",
+ "k8s-openapi 0.22.0",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "kube-core"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f126d2db7a8b532ec1d839ece2a71e2485dc3bbca6cc3c3f929becaa810e719e"
+dependencies = [
+ "derive_more 2.1.1",
+ "form_urlencoded",
+ "http",
+ "jiff",
+ "k8s-openapi 0.27.1",
+ "serde",
+ "serde-value",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2871,7 +2921,7 @@ dependencies = [
  "hashbrown 0.14.5",
  "json-patch",
  "jsonptr",
- "k8s-openapi",
+ "k8s-openapi 0.22.0",
  "kube-client",
  "parking_lot",
  "pin-project",
@@ -4901,7 +4951,7 @@ checksum = "1ef4a652466aa655a1c54581ecf41e6a5f9920203706dbc10f00153976435082"
 dependencies = [
  "aquamarine",
  "bytes",
- "derive_more",
+ "derive_more 1.0.0",
  "dptree",
  "either",
  "futures",
@@ -4928,7 +4978,7 @@ dependencies = [
  "bitflags 2.11.0",
  "bytes",
  "chrono",
- "derive_more",
+ "derive_more 1.0.0",
  "either",
  "futures",
  "log",
