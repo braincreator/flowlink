@@ -21,7 +21,7 @@ git2 = { version = "0.19", default-features = false, features = ["vendored-opens
 notify = { version = "7", features = ["macos_kqueue"] }
 
 # Docker API
-bollard = "0.18"
+bollard = "0.20"
 
 # Backup archives
 tar = "0.4"
