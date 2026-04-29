@@ -15,7 +15,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # Git operations
-git2 = "0.19"
+git2 = { version = "0.19", default-features = false, features = ["vendored-openssl", "vendored-libgit2"] }
 
 # File watching (inotify/FSEvents)
 notify = { version = "7", features = ["macos_kqueue"] }

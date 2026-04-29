@@ -2,6 +2,9 @@
 // Port of internal/agent/tls.go
 
 use std::fs;
+use std::sync::Arc;
+
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 /// TLS configuration for mTLS agent↔relay connections.
 pub struct TlsConfig {
@@ -11,41 +14,96 @@ pub struct TlsConfig {
 }
 
 impl TlsConfig {
-    /// Build a native-tls TLS connector for tungstenite.
-    pub fn build_tls_connector(&self) -> anyhow::Result<native_tls::TlsConnector> {
-        let cert = fs::read(&self.cert_path)?;
-        let key = fs::read(&self.key_path)?;
-        let ca = fs::read(&self.ca_path)?;
-
-        let identity = native_tls::Identity::from_pkcs8(&cert, &key)?;
-
-        let mut builder = native_tls::TlsConnector::builder();
-        builder.identity(identity);
-
-        // Add CA certificate
-        let ca_cert = native_tls::Certificate::from_pem(&ca)?;
-        builder.add_root_certificate(ca_cert);
-
-        // Enforce TLS 1.2+
-        builder.min_protocol_version(Some(native_tls::Protocol::Tlsv12));
-
-        Ok(builder.build()?)
-    }
-
     /// Build a tungstenite connector ready to use.
     pub fn build_connector(&self) -> anyhow::Result<tokio_tungstenite::tungstenite::Connector> {
-        let tls = self.build_tls_connector()?;
-        Ok(tokio_tungstenite::tungstenite::Connector::NativeTls(tls))
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(self.build_root_store()?)
+            .with_client_auth_cert(self.load_certs()?, self.load_key()?)?;
+        Ok(tokio_tungstenite::tungstenite::Connector::Rustls(Arc::new(config)))
+    }
+
+    fn load_certs(&self) -> anyhow::Result<Vec<CertificateDer<'static>>> {
+        let cert = fs::read(&self.cert_path)?;
+        Ok(rustls_pemfile::certs(&mut &*cert).collect::<Result<Vec<_>, _>>()?)
+    }
+
+    fn load_key(&self) -> anyhow::Result<PrivateKeyDer<'static>> {
+        let key = fs::read(&self.key_path)?;
+        let key_der = rustls_pemfile::pkcs8_private_keys(&mut &*key)
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("no private key found"))??;
+        Ok(PrivateKeyDer::Pkcs8(key_der))
+    }
+
+    fn build_root_store(&self) -> anyhow::Result<rustls::RootCertStore> {
+        let ca = fs::read(&self.ca_path)?;
+        let ca_certs: Vec<CertificateDer<'static>> =
+            rustls_pemfile::certs(&mut &*ca).collect::<Result<Vec<_>, _>>()?;
+        let mut root_store = rustls::RootCertStore::empty();
+        for ca_cert in ca_certs {
+            root_store.add(ca_cert)?;
+        }
+        Ok(root_store)
     }
 }
 
 /// Create an insecure TLS connector (dev mode). NOT FOR PRODUCTION.
 pub fn insecure_tls_connector() -> anyhow::Result<tokio_tungstenite::tungstenite::Connector> {
-    let tls = native_tls::TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
-        .build()?;
-    Ok(tokio_tungstenite::tungstenite::Connector::NativeTls(tls))
+    let config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(InsecureVerifier))
+        .with_no_client_auth();
+    Ok(tokio_tungstenite::tungstenite::Connector::Rustls(Arc::new(config)))
+}
+
+/// A verifier that accepts any certificate. For dev mode only.
+#[derive(Debug)]
+struct InsecureVerifier;
+
+impl rustls::client::danger::ServerCertVerifier for InsecureVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        vec![
+            rustls::SignatureScheme::RSA_PKCS1_SHA256,
+            rustls::SignatureScheme::RSA_PKCS1_SHA384,
+            rustls::SignatureScheme::RSA_PKCS1_SHA512,
+            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
+            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
+            rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
+            rustls::SignatureScheme::RSA_PSS_SHA256,
+            rustls::SignatureScheme::RSA_PSS_SHA384,
+            rustls::SignatureScheme::RSA_PSS_SHA512,
+            rustls::SignatureScheme::ED25519,
+        ]
+    }
 }
 
 /// Parse a SHA256 fingerprint string into normalized "sha256:hex" form.

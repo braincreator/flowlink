@@ -21,7 +21,7 @@ dashmap = "6"
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "smtp-transport", "pool", "hostname"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
 teloxide = { version = "0.14", features = ["macros"], optional = true }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 rand = "0.8"
 
 [features]
