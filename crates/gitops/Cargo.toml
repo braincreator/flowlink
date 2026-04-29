@@ -18,7 +18,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 git2 = { version = "0.19", default-features = false, features = ["vendored-openssl", "vendored-libgit2"] }
 
 # File watching (inotify/FSEvents)
-notify = { version = "7", features = ["macos_kqueue"] }
+notify = { version = "8", features = ["macos_kqueue"] }
 
 # Docker API
 bollard = "0.18"
