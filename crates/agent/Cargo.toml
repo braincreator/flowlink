@@ -1,6 +1,6 @@
 [package]
 name = "flowlink-agent"
-version = "0.2.0"
+version = "0.3.3"
 edition = "2021"
 description = "FlowLink agent — connects to relay, executes commands, manages backups"
 

@@ -1,6 +1,6 @@
 [package]
 name = "flowlink-sentinel"
-version = "0.2.0"
+version = "0.3.3"
 edition = "2021"
 description = "FlowLink L0 kernel-level syscall monitoring (eBPF on Linux, ESF on macOS)"
 

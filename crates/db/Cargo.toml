@@ -1,6 +1,6 @@
 [package]
 name = "flowlink-db"
-version = "0.2.0"
+version = "0.3.3"
 edition = "2021"
 description = "FlowLink database layer — PostgreSQL (Supabase) persistence for billing, audit, registry"
 
