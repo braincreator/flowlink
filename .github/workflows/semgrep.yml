@@ -18,6 +18,6 @@ jobs:
     container:
       image: returntocorp/semgrep:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run Semgrep
         run: semgrep --config "p/rust" --config "p/secrets" --config "p/security-audit" --error --metrics=off .
