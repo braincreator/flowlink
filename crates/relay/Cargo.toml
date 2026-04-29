@@ -12,6 +12,10 @@ flowlink-billing = { path = "../billing" }
 flowlink-db = { path = "../db" }
 flowlink-shield = { path = "../shield" }
 flowlink-gitops = { path = "../gitops", optional = true }
+flowlink-service-traits = { path = "../service-traits" }
+flowlink-integrations-core = { path = "../integrations-core" }
+flowlink-integrations-marketplace = { path = "../integrations-marketplace" }
+flowlink-bot-client = { path = "../bot-client" }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
 openssl-sys = { version = "0.9", features = ["vendored"] }
 async-trait = "0.1"

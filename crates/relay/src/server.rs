@@ -1,3 +1,5 @@
+use flowlink_service_traits as service_traits;
+use flowlink_integrations_core::IntegrationManager;
 use axum::{
     extract::{Path, Query, State, Extension, ws::{WebSocket, WebSocketUpgrade, Message as AxumMsg}},
     http::{HeaderMap, StatusCode},
@@ -79,6 +81,10 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// CORS allowed origins (empty = wildcard)
     pub cors_origins: Vec<String>,
+    pub billing_provider: Option<Arc<dyn flowlink_service_traits::BillingProvider>>,
+    pub auth_provider: Option<Arc<dyn flowlink_service_traits::AuthProvider>>,
+    pub service_mode: flowlink_service_traits::ServiceMode,
+    pub integration_manager: Arc<tokio::sync::Mutex<flowlink_integrations_core::IntegrationManager>>,
 }
 
 // ═══════════════════════════════════════════════
@@ -2230,6 +2236,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/billing/check-expiry", axum::routing::post(crate::billing_api::check_expiry))
         // GDPR deletion cleanup (internal, admin-only)
         .route("/api/billing/cleanup-expired-deletions", axum::routing::post(crate::account_deletion_api::cleanup_expired_deletions))
+        // OAuth2 callback for integrations (public — provider redirects here)
+        .route("/api/integrations/oauth/callback", axum::routing::get(crate::crate_adapters::integrations_oauth_callback))
         // Control Plane
         .route("/api/v1/signup", axum::routing::post(crate::control_plane::signup))
         .route("/api/v1/heartbeat", axum::routing::post(crate::control_plane::heartbeat))
@@ -2304,6 +2312,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/billing/subscriptions", axum::routing::get(crate::billing_api::list_subscriptions))
         .route("/api/billing/subscriptions/{id}/cancel", axum::routing::post(crate::billing_api::cancel_subscription))
         .route("/api/billing/orders", axum::routing::get(crate::billing_api::list_orders).post(crate::billing_api::create_order))
+        // Integrations marketplace
+        .route("/api/integrations", axum::routing::get(crate::crate_adapters::integrations_list))
+        .route("/api/integrations", axum::routing::post(crate::crate_adapters::integrations_install))
+        .route("/api/integrations/{id}", axum::routing::delete(crate::crate_adapters::integrations_uninstall))
+        .route("/api/integrations/oauth/begin", axum::routing::post(crate::crate_adapters::integrations_oauth_begin))
+        .route("/api/integrations/catalog", axum::routing::get(crate::crate_adapters::integrations_catalog))
         // Control Plane (agents listing)
         .route("/api/v1/agents", axum::routing::get(crate::control_plane::list_agents))
         .route("/api/v1/agents/{id}", axum::routing::get(crate::control_plane::get_agent))
@@ -2610,6 +2624,10 @@ mod tests {
                 .build().expect("Failed to create shared HTTP client"),
             cors_origins: vec!["*".to_string()], // test: wildcard
             rate_limits_config: Arc::new(std::sync::RwLock::new(crate::rate_limiter::RateLimitsConfig::default())),
+            billing_provider: None,
+            auth_provider: None,
+            service_mode: flowlink_service_traits::ServiceMode::Standalone,
+            integration_manager: Arc::new(tokio::sync::Mutex::new(IntegrationManager::new())),
         }
     }
 

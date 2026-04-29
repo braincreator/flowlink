@@ -19,10 +19,16 @@ reqwest = { version = "0.12", features = ["json"], default-features = false, opt
 sha2 = "0.10"
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt"] }
+axum = { version = "0.8", features = ["macros"], optional = true }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid"], optional = true }
+base64 = { version = "0.22", optional = true }
+hmac = { version = "0.12", optional = true }
+log = { version = "0.4", optional = true }
 
 [features]
 default = ["tochka-live"]
 tochka-live = ["reqwest/rustls-tls"]
+server = ["dep:axum", "dep:sqlx", "dep:base64", "dep:hmac", "dep:log"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

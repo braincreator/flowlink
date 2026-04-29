@@ -908,3 +908,468 @@ All errors follow a consistent format:
 | GET | `/api/v1/discovery/services` | Discovered services catalog |
 | GET | `/api/v1/health/agents` | Agent health overview |
 | GET | `/api/v1/infra/map` | Infrastructure topology map |
+
+## Authentication
+
+All auth endpoints are **public** (no JWT required) unless noted.
+
+### Email Authentication
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/auth/email/send-code` | No | Send email verification code (rate-limited) |
+| POST | `/api/auth/email/verify` | No | Verify email code and get JWT |
+| POST | `/api/auth/email/change-start` | JWT | Start email change flow |
+| POST | `/api/auth/email/change-confirm` | JWT | Confirm email change with code |
+
+### OAuth2 Social Login
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/auth/oauth-url?provider={vk\|yandex\|github}` | No | Get OAuth2 authorization URL |
+| GET | `/api/auth/vk/callback` | No | VK OAuth2 callback |
+| GET | `/api/auth/yandex/callback` | No | Yandex OAuth2 callback |
+| GET | `/api/auth/github/callback` | No | GitHub OAuth2 callback |
+
+### SAML SSO
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/auth/saml/login` | No | Redirect to IdP |
+| POST | `/auth/saml/acs` | No | SAML Assertion Consumer Service |
+| GET | `/auth/saml/metadata` | No | SAML SP metadata XML |
+
+### Session & Account Management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/auth/me` | JWT | Current user info |
+| GET | `/api/auth/account` | JWT | Full account details |
+| POST | `/api/auth/logout` | JWT | Invalidate current session |
+| POST | `/api/auth/refresh` | Refresh Token | Renew access token |
+| GET | `/api/auth/providers` | No | List enabled auth providers |
+| POST | `/api/auth/link-email` | JWT | Link email to social account |
+
+### Two-Factor Authentication (2FA)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/auth/2fa/setup` | JWT | Generate TOTP secret + QR |
+| POST | `/api/auth/2fa/enable` | JWT | Enable 2FA with valid TOTP code |
+| POST | `/api/auth/2fa/complete` | Temp Token | Complete 2FA during login |
+| GET | `/api/auth/2fa/status` | JWT | Check if 2FA is enabled |
+| POST | `/api/auth/2fa/disable` | JWT | Disable 2FA |
+
+### Session Management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/auth/sessions` | JWT | List all active sessions |
+| DELETE | `/api/auth/sessions` | JWT | Revoke all other sessions |
+| DELETE | `/api/auth/sessions/{id}` | JWT | Revoke specific session |
+
+## Account Management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/account` | JWT | Get account info |
+| GET | `/api/account/info` | JWT | Detailed account profile |
+| DELETE | `/api/account` | JWT | Request account deletion (30-day grace) |
+| POST | `/api/account/cancel-deletion` | JWT | Cancel pending deletion |
+| DELETE | `/api/account/hard` | JWT | Immediate hard delete (admin) |
+| GET | `/api/account/settings` | JWT | User preferences |
+| PATCH | `/api/account/settings` | JWT | Update preferences |
+| GET | `/api/account/notifications` | JWT | Account notification history |
+| POST | `/api/account/notifications/{id}/read` | JWT | Mark notification as read |
+
+## Integrations Marketplace
+
+All integration endpoints require JWT authentication.
+
+### Catalog & Discovery
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/integrations/catalog` | JWT | List available integration types |
+| GET | `/api/integrations` | JWT | List installed integrations |
+| POST | `/api/integrations` | JWT | Install an integration |
+| DELETE | `/api/integrations/{id}` | JWT | Uninstall an integration |
+
+**Install request body:**
+```json
+{
+  "kind": "telegram",
+  "name": "My Telegram Bot",
+  "config": { "bot_token": "123456:ABC-DEF" },
+  "subscribed_events": ["shield.alert", "approval.request"],
+  "org_id": "optional-org-id"
+}
+```
+
+**Available kinds:** `telegram`, `slack`, `discord`, `github`, `max`, `webhook`
+
+### OAuth2 Flow
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/integrations/oauth/begin` | JWT | Start OAuth2 (returns `authorize_url`) |
+| GET | `/api/integrations/oauth/callback` | No | OAuth2 callback (provider redirects here) |
+
+**OAuth begin request body:**
+```json
+{
+  "kind": "slack",
+  "redirect_after": "https://app.example.com/integrations"
+}
+```
+
+**OAuth begin response:**
+```json
+{
+  "authorize_url": "https://slack.com/oauth/v2/authorize?...",
+  "integration_id": "uuid"
+}
+```
+
+## Organizations
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/orgs` | JWT | Create organization |
+| POST | `/api/orgs/onboard` | JWT | Onboarding wizard |
+| POST | `/api/orgs/switch` | JWT | Switch active organization |
+| GET | `/api/orgs/invites/accept?code={code}` | JWT | Accept org invitation |
+
+### Organization Management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/orgs/{org_id}` | JWT | Organization details |
+| GET | `/api/orgs/{org_id}/health` | JWT | Organization health status |
+| GET | `/api/orgs/{org_id}/members` | JWT | List org members |
+| DELETE | `/api/orgs/{org_id}/members/{account_id}` | JWT | Remove member |
+| POST | `/api/orgs/{org_id}/members/{account_id}/assign-role` | JWT | Assign RBAC role |
+| GET | `/api/orgs/{org_id}/invites` | JWT | List pending invitations |
+| GET | `/api/orgs/{org_id}/audit` | JWT | Organization audit log |
+
+### Organization RBAC
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/orgs/{org_id}/roles` | JWT | List custom roles |
+| POST | `/api/orgs/{org_id}/roles` | JWT | Create custom role |
+| PUT | `/api/orgs/{org_id}/roles/{role_id}` | JWT | Update role |
+| DELETE | `/api/orgs/{org_id}/roles/{role_id}` | JWT | Delete role |
+
+### Organization Webhooks
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/orgs/{org_id}/webhooks` | JWT | List org webhooks |
+| POST | `/api/orgs/{org_id}/webhooks` | JWT | Create webhook |
+| GET | `/api/orgs/{org_id}/webhooks/{id}` | JWT | Get webhook details |
+| PUT | `/api/orgs/{org_id}/webhooks/{id}` | JWT | Update webhook |
+| DELETE | `/api/orgs/{org_id}/webhooks/{id}` | JWT | Delete webhook |
+| POST | `/api/orgs/{org_id}/webhooks/{id}/test` | JWT | Send test webhook |
+
+### Secrets & Vault
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/orgs/{org_id}/secrets/config` | JWT | Get secrets configuration |
+| POST | `/api/orgs/{org_id}/secrets/config/key-setup` | JWT | Setup encryption key |
+| POST | `/api/orgs/{org_id}/secrets/config/vault-setup` | JWT | Configure external vault |
+| GET | `/api/orgs/{org_id}/secrets/config/vault` | JWT | Get vault config |
+| GET | `/api/orgs/{org_id}/vault/health` | JWT | Vault health check |
+
+### Service Map & Discovery
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/orgs/{org_id}/map/summary` | JWT | Infrastructure summary |
+| GET | `/api/orgs/{org_id}/map/services` | JWT | List discovered services |
+| GET | `/api/orgs/{org_id}/map/service/{service_id}/topology` | JWT | Service topology |
+| GET | `/api/orgs/{org_id}/map/service/{service_id}/secrets` | JWT | Service secrets |
+| POST | `/api/orgs/{org_id}/discovery/start` | JWT | Start infrastructure discovery |
+| GET | `/api/orgs/{org_id}/discovery/results` | JWT | Get discovery results |
+| POST | `/api/orgs/{org_id}/discovery/submit` | JWT | Submit discovery data |
+| POST | `/api/orgs/{org_id}/discovery/{scan_id}/approve` | JWT | Approve discovery scan |
+
+## Billing (Full)
+
+### Public Endpoints (No Auth)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/plans` | No | List available plans |
+| POST | `/api/billing/webhook/tochka` | No | Точка Банк payment webhook (HMAC-verified) |
+| POST | `/api/billing/check-expiry` | API Key | Check and expire overdue subscriptions |
+| POST | `/api/billing/cleanup-expired-deletions` | API Key | GDPR cleanup of expired deletions |
+
+### Subscription Management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/billing` | JWT | Get billing overview |
+| GET | `/api/billing/plans` | JWT | List plans with current subscription |
+| GET | `/api/billing/my-plan` | JWT | Current plan details |
+| GET | `/api/billing/check-feature?feature={name}` | JWT | Check if feature is available on current plan |
+| POST | `/api/billing/change-plan` | JWT | Change plan (upgrade/downgrade) |
+| GET | `/api/billing/subscription` | JWT | Current subscription details |
+| POST | `/api/billing/subscription/change-plan` | JWT | Change subscription plan |
+| POST | `/api/billing/subscription/pause` | JWT | Pause subscription |
+| POST | `/api/billing/subscription/resume` | JWT | Resume subscription |
+| DELETE | `/api/billing/subscription` | JWT | Cancel Точка subscription |
+| GET | `/api/billing/subscriptions` | JWT | List all subscriptions |
+| POST | `/api/billing/subscriptions/{id}/cancel` | JWT | Cancel specific subscription |
+
+### Payments & Invoices
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/billing/subscribe` | JWT | Create subscription (Точка Банк) |
+| POST | `/api/billing/create-payment` | JWT | Create one-time payment |
+| GET | `/api/billing/invoices` | JWT | List invoices |
+| GET | `/api/billing/invoices/{id}` | JWT | Get invoice details |
+| GET | `/api/billing/payments/methods` | JWT | List payment methods |
+| GET | `/api/billing/orders` | JWT | List orders |
+| POST | `/api/billing/orders` | JWT | Create order |
+| GET | `/api/billing/usage` | JWT | Usage statistics |
+
+**5-Tier Plan System:**
+
+| Plan | Price | Agents | Key Features |
+|------|-------|--------|-------------|
+| Free | 0₽ | 1 | Basic shield, approval, audit |
+| Starter | 2,990₽/mo | 3 | Policy engine, E2EE, redaction |
+| Professional | 19,990₽/mo | 10 | RBAC, patterns, SIEM, forensics |
+| Scale | 49,990₽/mo | 30 | SSO, AI ops, service catalog |
+| Enterprise | Custom | Unlimited | On-prem, dedicated support |
+
+## Notifications
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/notifications/channels` | JWT | List notification channels |
+| POST | `/api/notifications/channels` | JWT | Add notification channel |
+| GET | `/api/notifications/channels/{id}` | JWT | Get channel details |
+| PUT | `/api/notifications/channels/{id}` | JWT | Update channel |
+| DELETE | `/api/notifications/channels/{id}` | JWT | Remove channel |
+| POST | `/api/notifications/channels/{id}/verify` | JWT | Verify channel ownership |
+| POST | `/api/notifications/channels/{id}/primary` | JWT | Set as primary channel |
+| POST | `/api/notifications/link-code` | JWT | Generate linking code |
+| POST | `/api/notifications/confirm-code` | JWT | Confirm linking code |
+| POST | `/api/notifications/test` | JWT | Send test notification |
+
+## Devices
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/devices/pair` | JWT | Start device pairing |
+| POST | `/api/devices/confirm` | JWT | Confirm pairing with code |
+| GET | `/api/devices` | JWT | List paired devices |
+| DELETE | `/api/devices/{id}` | JWT | Remove device |
+| POST | `/api/devices/{id}/trust` | JWT | Trust a device |
+
+## Shield
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/shield/alerts` | JWT | List shield alerts |
+| GET | `/api/shield/stats` | JWT | Shield statistics |
+| POST | `/api/shield/resolve` | JWT | Resolve alert |
+| POST | `/api/shield/approve/{pid}` | JWT | Approve process |
+| POST | `/api/shield/reject/{pid}` | JWT | Reject process |
+| POST | `/api/shield/ingest` | JWT | Ingest alert data |
+| GET | `/api/shield/canary` | JWT | Canary token status |
+
+## Admin
+
+All admin endpoints require JWT with `is_admin = true`.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/admin/config` | Admin | Get server configuration |
+| POST | `/api/admin/config/reload` | Admin | Hot-reload configuration |
+| GET | `/api/admin/dashboard-stats` | Admin | Dashboard statistics |
+| GET | `/api/admin/accounts` | Admin | List all accounts |
+| POST | `/api/admin/accounts/{id}/plan` | Admin | Change account plan |
+| POST | `/api/admin/accounts/{id}/toggle` | Admin | Enable/disable account |
+| GET | `/api/admin/clients` | Admin | List registered clients |
+| GET | `/api/admin/orders` | Admin | List all orders |
+| GET | `/api/admin/subscriptions` | Admin | List all subscriptions |
+| GET | `/api/admin/plans` | Admin | Manage plans |
+| PUT | `/api/admin/plans/{id}` | Admin | Update plan |
+| GET | `/api/admin/audit/query` | Admin | Query audit log |
+| GET | `/api/admin/audit/stats` | Admin | Audit statistics |
+| GET | `/api/admin/audit/export` | Admin | Export audit log |
+| GET | `/api/admin/shield/alerts` | Admin | Shield alerts (admin view) |
+| GET | `/api/admin/shield/stats` | Admin | Shield statistics (admin) |
+| GET | `/api/admin/waitlist` | Admin | List waitlist entries |
+| POST | `/api/admin/waitlist/notify` | Admin | Send waitlist notification |
+| GET | `/api/admin/llm/backends` | Admin | List LLM backends |
+| GET | `/api/admin/llm/health` | Admin | LLM backends health |
+
+## API Keys
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/api-keys` | JWT | Create API key |
+| GET | `/api/v1/api-keys` | JWT | List API keys |
+| DELETE | `/api/v1/api-keys/{key_id}` | JWT | Delete API key |
+| POST | `/api/v1/api-keys/{key_id}/revoke` | JWT | Revoke API key |
+| POST | `/api/v1/api-keys/{key_id}/rotate` | JWT | Rotate API key secret |
+
+## Secrets Management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/secrets` | JWT | List secrets |
+| POST | `/api/v1/secrets` | JWT | Create secret |
+| GET | `/api/v1/secrets/{id}` | JWT | Get secret |
+| POST | `/api/v1/secrets/inject` | JWT | Inject secrets into agent |
+| GET | `/api/v1/secret-mappings` | JWT | List secret mappings |
+| POST | `/api/v1/secret-mappings` | JWT | Create secret mapping |
+| DELETE | `/api/v1/secret-mappings/{id}` | JWT | Delete secret mapping |
+
+## Policies
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/policies` | JWT | List policies |
+| POST | `/api/v1/policies` | JWT | Create policy |
+| GET | `/api/v1/policies/{id}` | JWT | Get policy |
+| DELETE | `/api/v1/policies/{id}` | JWT | Delete policy |
+| POST | `/api/v1/policies/bind` | JWT | Bind policy to agent |
+| POST | `/api/v1/policies/unbind` | JWT | Unbind policy from agent |
+
+## Command Patterns & History
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/patterns` | JWT | List learned command patterns |
+| POST | `/api/v1/patterns/apply` | JWT | Apply pattern as policy |
+| GET | `/api/v1/commands/history` | JWT | Command execution history |
+| GET | `/api/v1/commands/history/{id}` | JWT | Get command details |
+| GET | `/api/v1/commands/stats` | JWT | Command statistics |
+
+## Agent Health & Tags
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/agents/health/overview` | JWT | All agents health overview |
+| GET | `/api/v1/agents/{agent_id}/health` | JWT | Single agent health |
+| GET | `/api/v1/agents/{agent_id}/health/timeseries` | JWT | Health metrics timeline |
+| GET | `/api/v1/agents/tags` | JWT | List all tags |
+| POST | `/api/v1/agents/tags` | JWT | Create tag |
+| POST | `/api/v1/agents/{agent_id}/tags` | JWT | Tag an agent |
+| GET | `/api/v1/tags` | JWT | Global tag list |
+
+## Interactive Sessions
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/sessions` | JWT | List interactive sessions |
+| GET | `/api/v1/sessions/{id}` | JWT | Get session details |
+
+## Forensics (Extended)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/forensics/snapshots` | JWT | List forensic snapshots |
+| POST | `/api/v1/forensics/snapshot` | JWT | Create snapshot |
+| GET | `/api/v1/forensics/snapshot/{snapshot_id}` | JWT | Get snapshot |
+| GET | `/api/v1/forensics/diff/{ida}/{idb}` | JWT | Diff two snapshots |
+| POST | `/api/v1/forensics/reconstruct/{agent_id}` | JWT | Reconstruct agent state |
+| GET | `/api/v1/forensics/report` | JWT | Generate forensics report |
+
+## Change Management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/changes` | JWT | List pending changes |
+| POST | `/api/v1/changes/{change_id}/approve` | JWT | Approve change |
+| POST | `/api/v1/changes/{change_id}/rollback` | JWT | Rollback change |
+
+## Service Catalog
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/catalog/services` | JWT | Service catalog |
+| GET | `/api/v1/catalog/summary` | JWT | Catalog summary |
+| GET | `/api/v1/catalog/efficiency` | JWT | Efficiency metrics |
+
+## Compliance Reports
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/compliance/reports` | JWT | List compliance reports |
+| GET | `/api/v1/compliance/reports/{id}` | JWT | Get specific report |
+
+## AI Ops
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/ops/ask` | JWT | Ask AI operations question |
+| POST | `/api/v1/shield/dry-run` | JWT | Dry-run shield policy |
+
+## Control Plane
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/signup` | API Key | Register new agent/client |
+| POST | `/api/v1/heartbeat` | API Key | Agent heartbeat |
+
+## External Webhooks (Public)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/webhooks/alertmanager` | No | Prometheus Alertmanager webhook |
+| POST | `/api/webhooks/generic-alert` | No | Generic alert ingestion (Prometheus/Zabbix/Grafana) |
+| POST | `/api/tg/webhook` | No | Telegram bot webhook (receives updates) |
+
+## Config & Agent Management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/config` | JWT | Get agent configuration |
+| POST | `/api/config/push/{agent_id}` | JWT | Push config to agent |
+| POST | `/api/exec/{agent_id}` | JWT | Execute command on agent |
+| GET | `/api/agents` | JWT | List connected agents |
+| GET | `/api/approvals` | JWT | List pending approvals |
+| POST | `/api/approvals/{id}/approve` | JWT | Approve request |
+| POST | `/api/approvals/{id}/reject` | JWT | Reject request |
+
+## LLM
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/llm` | JWT | LLM proxy status |
+
+## Audit (User)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/audit` | JWT | User audit log |
+| POST | `/api/audit/event` | JWT | Create audit event |
+| GET | `/api/audit/stats` | JWT | Audit statistics |
+| GET | `/api/audit/export` | JWT | Export audit log |
+| GET | `/api/trace/{correlation_id}` | JWT | Trace correlation ID |
+
+## Other
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/playground/scan` | No | Public security playground scan |
+| POST | `/api/waitlist` | No | Waitlist signup |
+| GET | `/api/events` | JWT/SSE Token | SSE event stream |
+| GET | `/health` | No | Detailed health check (DB, agents, shield) |
+| GET | `/healthz` | No | Simple liveness check |
+| GET | `/metrics` | JWT | Prometheus metrics |
+| POST | `/mcp` | JWT | MCP JSON-RPC |
+| GET | `/mcp/stream` | JWT | MCP SSE stream |
+| POST | `/mcp/stream` | JWT | MCP stream POST |
+| DELETE | `/mcp/stream` | JWT | MCP stream close |
+| GET | `/ws` | Token | WebSocket (agent connection) |
+| GET | `/dashboard` | No | Dashboard SPA |
+| GET | `/dashboard/{*path}` | No | Dashboard SPA (all routes) |

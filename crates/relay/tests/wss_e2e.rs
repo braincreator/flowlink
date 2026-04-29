@@ -100,6 +100,10 @@ fn make_state(tmp: &std::path::Path) -> AppState {
         rusiem_config: None,
         http_client: reqwest::Client::new(),
         cors_origins: vec!["*".to_string()],
+        billing_provider: None,
+        auth_provider: None,
+        service_mode: flowlink_service_traits::ServiceMode::Standalone,
+        integration_manager: Arc::new(tokio::sync::Mutex::new(flowlink_integrations_core::IntegrationManager::new())),
     }
 }
 

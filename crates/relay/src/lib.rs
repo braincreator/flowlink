@@ -1,4 +1,6 @@
 #![allow(unexpected_cfgs)]
+pub mod service_local;
+pub mod crate_adapters;
 pub mod pool;
 pub mod auth;
 pub mod auth_oauth;
@@ -48,6 +50,7 @@ pub mod tgbot;
 pub mod gitops_api;
 
 use std::sync::Arc;
+use flowlink_integrations_core::IntegrationManager;
 use std::path::PathBuf;
 use log::info;
 use tokio::sync::RwLock;
@@ -309,6 +312,10 @@ impl Relay {
             vault: None,
             http_client: reqwest::Client::new(),
             cors_origins: self.config.cors_allowed_origins.clone(),
+            billing_provider: None,
+            auth_provider: None,
+            service_mode: flowlink_service_traits::ServiceMode::Standalone,
+            integration_manager: Arc::new(tokio::sync::Mutex::new(IntegrationManager::new())),
         };
 
         // Email queue worker (requires both email_service and db)

@@ -272,11 +272,46 @@ dependencies = [
 
 [[package]]
 name = "axum"
+version = "0.7.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edca88bc138befd0323b20752846e6587272d3b03b0343c8ea28a6f819e6e71f"
+dependencies = [
+ "async-trait",
+ "axum-core 0.4.5",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "itoa",
+ "matchit 0.7.3",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "rustversion",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "tokio",
+ "tower 0.5.3",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b52af3cb4058c895d37317bb27508dccc8e5f2d39454016b297bf4a400597b8"
 dependencies = [
- "axum-core",
+ "axum-core 0.5.6",
+ "axum-macros",
  "base64 0.22.1",
  "bytes",
  "form_urlencoded",
@@ -287,7 +322,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "itoa",
- "matchit",
+ "matchit 0.8.4",
  "memchr",
  "mime",
  "percent-encoding",
@@ -301,6 +336,27 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.28.0",
  "tower 0.5.3",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09f2bd6146b97ae3359fa0cc6d6b376d9539582c7b4220f041a33ec24c226199"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "rustversion",
+ "sync_wrapper",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -323,6 +379,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7aa268c23bfbbd2c4363b9cd302a4f504fb2a9dfe7e3451d66f35dd392e20aca"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1256,10 +1323,10 @@ dependencies = [
 
 [[package]]
 name = "flowlink"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
- "axum",
+ "axum 0.8.8",
  "clap",
  "env_logger 0.11.10",
  "flowlink-agent",
@@ -1283,7 +1350,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-agent"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1316,10 +1383,10 @@ dependencies = [
 
 [[package]]
 name = "flowlink-api"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
- "axum",
+ "axum 0.8.8",
  "flowlink-sentinel",
  "flowlink-shield",
  "serde",
@@ -1331,19 +1398,56 @@ dependencies = [
 ]
 
 [[package]]
-name = "flowlink-billing"
-version = "0.2.0"
+name = "flowlink-auth"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum 0.8.8",
+ "base64 0.22.1",
  "chrono",
  "dashmap",
+ "flate2",
  "flowlink-core",
  "flowlink-db",
+ "hex",
+ "hmac",
+ "jsonwebtoken",
+ "log",
+ "rand 0.8.6",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "totp-rs",
+ "tower 0.5.3",
+ "url",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "flowlink-billing"
+version = "0.3.4"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.8",
+ "base64 0.22.1",
+ "chrono",
+ "dashmap",
+ "flowlink-core",
+ "flowlink-db",
+ "hmac",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1351,8 +1455,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "flowlink-bot-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "flowlink-core"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1368,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-crypto"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1388,7 +1505,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-db"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1406,7 +1523,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-gitops"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1440,11 +1557,49 @@ dependencies = [
 ]
 
 [[package]]
-name = "flowlink-k8s"
-version = "0.2.0"
+name = "flowlink-integrations-core"
+version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
+ "async-trait",
+ "chrono",
+ "flowlink-auth",
+ "flowlink-db",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "flowlink-integrations-marketplace"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.7.9",
+ "chrono",
+ "flowlink-auth",
+ "flowlink-db",
+ "flowlink-integrations-core",
+ "log",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "flowlink-k8s"
+version = "0.3.4"
+dependencies = [
+ "anyhow",
+ "axum 0.8.8",
  "base64 0.21.7",
  "chrono",
  "clap",
@@ -1475,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-mcp"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "flowlink-shield",
@@ -1486,22 +1641,26 @@ dependencies = [
 
 [[package]]
 name = "flowlink-relay"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "aes-gcm",
  "anyhow",
  "async-trait",
- "axum",
+ "axum 0.8.8",
  "base64 0.22.1",
  "chrono",
  "criterion",
  "dashmap",
  "flate2",
  "flowlink-billing",
+ "flowlink-bot-client",
  "flowlink-core",
  "flowlink-crypto",
  "flowlink-db",
  "flowlink-gitops",
+ "flowlink-integrations-core",
+ "flowlink-integrations-marketplace",
+ "flowlink-service-traits",
  "flowlink-shield",
  "futures-util",
  "hex",
@@ -1543,7 +1702,7 @@ dependencies = [
 
 [[package]]
 name = "flowlink-sentinel"
-version = "0.2.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1558,11 +1717,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "flowlink-shield"
-version = "0.2.0"
+name = "flowlink-service-traits"
+version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "flowlink-shield"
+version = "0.3.4"
+dependencies = [
+ "anyhow",
+ "axum 0.8.8",
  "aya",
  "chrono",
  "clap",
@@ -2872,6 +3043,12 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
+
+[[package]]
+name = "matchit"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "matchit"
