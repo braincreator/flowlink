@@ -46,7 +46,7 @@ rustls-pemfile = "2"
 tower-http = { version = "0.6", features = ["cors"] }
 tower = { version = "0.5", features = ["util"] }
 thiserror = "2"
-prometheus = "0.13"
+prometheus = "0.14"
 regex = "1"
 notify = "7"
 teloxide = { version = "0.14", features = ["macros"], optional = true }
