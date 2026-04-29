@@ -36,7 +36,7 @@ reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], defau
 tokio-stream = "0.1"
 rand = "0.8"
 hex = "0.4"
-hmac = "0.12"
+hmac = "0.13"
 sha2 = "0.10"
 aes-gcm = "0.10"
 tempfile = "3"
