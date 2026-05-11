@@ -1,14 +1,20 @@
-MIT License with Additional Terms
+FlowLink License
 
-Copyright (c) 2024-2026 FlowLink
+Copyright (c) 2024-2026 Aleksandr Yudin / FlowLink
 
 Permission is hereby granted to download and use the binary releases
 of this software for evaluation and production purposes.
 
-The source code of FlowLink is proprietary and not publicly available.
+SOURCE CODE: Proprietary. Not publicly distributed.
+CODE AUDIT:  Available under NDA for enterprise customers, security
+             researchers, and compliance teams.
+             Contact: flowlink@flow-masters.ru
 
-Redistribution, reverse engineering, decompilation, or modification
-of the binary releases is strictly prohibited without explicit written
-permission from the copyright holder.
+RESTRICTIONS:
+- Reverse engineering, decompilation, or modification of binaries
+  is prohibited without written permission.
+- Redistribution of binaries is permitted provided this license
+  notice is included.
 
-For licensing inquiries: flowlink@flow-masters.ru
+For commercial licensing, partnerships, or code audit requests:
+flowlink@flow-masters.ru

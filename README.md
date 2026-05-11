@@ -4,15 +4,16 @@
 
 **Governance & Risk Control for Autonomous AI Systems**
 
-[![Latest Release](https://img.shields.io/github/v/release/braincreator/flowlink-ai-firewall?label=latest&color=blue)](https://github.com/braincreator/flowlink-ai-firewall/releases/latest)
-[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos-informational)](https://github.com/braincreator/flowlink-ai-firewall/releases)
+[![Latest Release](https://img.shields.io/github/v/release/braincreator/flowlink?label=latest&color=blue)](https://github.com/braincreator/flowlink/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos-informational)](https://github.com/braincreator/flowlink/releases)
 [![License](https://img.shields.io/badge/license-proprietary-red)]()
+[![Code Audit](https://img.shields.io/badge/code_audit-available_NDA-green)](mailto:flowlink@flow-masters.ru)
 
 *Policy enforcement · Risk scoring · Audit trails · MCP-native governance*
 
 **MCP is becoming the standard protocol for AI agents. FlowLink is the governance layer they need.**
 
-[Download Latest Release →](https://github.com/braincreator/flowlink-ai-firewall/releases/latest)
+[Download Latest Release →](https://github.com/braincreator/flowlink/releases/latest)
 
 </div>
 
@@ -28,14 +29,12 @@ FlowLink sits between your MCP agents and your infrastructure, enforcing policie
 
 ## What It Does
 
-| Feature | Description |
-|---------|-------------|
-| 🔒 **Policy Engine** | Define what agents can and cannot do — file access, network calls, command execution |
-| 🛡️ **Risk Scoring** | Every agent action scored in real-time with configurable thresholds |
-| 📋 **Audit Trail** | Complete, tamper-proof log of every agent interaction for compliance |
-| ✅ **Approval Workflows** | High-risk actions require human approval before execution |
-| 🔐 **E2EE Relay** | Encrypted communication channel between agents and your infrastructure |
-| 🏗️ **MCP-Native** | Built specifically for the Model Context Protocol — not a generic security tool |
+- 🔒 **Policy Engine** — Define what agents can and cannot do: file access, network calls, command execution
+- 🛡️ **Risk Scoring** — Every agent action scored in real-time with configurable thresholds
+- 📋 **Audit Trail** — Complete, tamper-proof log of every agent interaction for compliance
+- ✅ **Approval Workflows** — High-risk actions require human approval before execution
+- 🔐 **E2EE Relay** — Encrypted communication channel between agents and your infrastructure
+- 🏗️ **MCP-Native** — Built specifically for the Model Context Protocol — not a generic security tool
 
 ## Architecture
 
@@ -61,16 +60,15 @@ FlowLink sits between your MCP agents and your infrastructure, enforcing policie
 
 ```bash
 # Linux (x86_64)
-curl -sL https://github.com/braincreator/flowlink-ai-firewall/releases/latest/download/flowlink-linux-amd64.tar.gz | tar xz
+curl -sL https://github.com/braincreator/flowlink/releases/latest/download/flowlink-linux-amd64.tar.gz | tar xz
 
 # macOS (Apple Silicon)
-curl -sL https://github.com/braincreator/flowlink-ai-firewall/releases/latest/download/flowlink-darwin-arm64.tar.gz | tar xz
+curl -sL https://github.com/braincreator/flowlink/releases/latest/download/flowlink-darwin-arm64.tar.gz | tar xz
 ```
 
 ### 2. Configure
 
 ```bash
-# Create a minimal policy
 cat > policy.toml <<EOF
 [default]
 max_file_size = "10MB"
@@ -87,6 +85,17 @@ EOF
 ```bash
 ./flowlink --config policy.toml
 ```
+
+## Security & Trust
+
+FlowLink handles your most sensitive infrastructure access. We take trust seriously:
+
+- **Code Audit Available** — Source code is available for security review under NDA for enterprise customers, partners, and auditors. [Request access →](mailto:flowlink@flow-masters.ru?subject=Code%20Audit%20Request)
+- **eBPF Shield** — Kernel-level monitoring with 11 BPF programs for runtime protection
+- **E2EE Relay** — End-to-end encrypted agent communication, keys never leave your infrastructure
+- **SOC 2 / EU AI Act Ready** — Audit trails and compliance reporting built in
+
+*We believe security software should be verifiable, not just trusted. Reach out for a code audit.*
 
 ## Why This Matters
 
@@ -125,12 +134,13 @@ Start free — upgrade when you need more agents. [Sign up →](https://flowlink
 ## Links
 
 - 🌐 **Website:** [flowlink.flow-masters.ru](https://flowlink.flow-masters.ru)
-- 📥 **Releases:** [Latest binaries](https://github.com/braincreator/flowlink-ai-firewall/releases)
+- 📥 **Releases:** [Latest binaries](https://github.com/braincreator/flowlink/releases)
+- 🔒 **Code Audit:** [Request under NDA](mailto:flowlink@flow-masters.ru?subject=Code%20Audit%20Request)
 - 📧 **Contact:** [flowlink@flow-masters.ru](mailto:flowlink@flow-masters.ru)
 
 ## License
 
-FlowLink is proprietary software. Binary releases are provided for evaluation and production use under the [FlowLink License Terms](LICENSE). Source code is not publicly available.
+Proprietary software. Binary releases provided for evaluation and production use. Source code available for security audit under NDA — [contact us](mailto:flowlink@flow-masters.ru?subject=Code%20Audit%20Request).
 
 ---
 
