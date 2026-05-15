@@ -2,7 +2,7 @@
 
 # 🛡️ FlowLink
 
-**Governance & Risk Control for Autonomous AI Systems**
+**Governance & Risk Control for Autonomous AI Systems — enterprise-grade AI agent security and MCP governance layer.**
 
 [![Latest Release](https://img.shields.io/github/v/release/braincreator/flowlink?label=latest&color=blue)](https://github.com/braincreator/flowlink/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos-informational)](https://github.com/braincreator/flowlink/releases)
@@ -137,6 +137,17 @@ Start free — upgrade when you need more agents. [Sign up →](https://flowlink
 - 📥 **Releases:** [Latest binaries](https://github.com/braincreator/flowlink/releases)
 - 🔒 **Code Audit:** [Request under NDA](mailto:flowlink@flow-masters.ru?subject=Code%20Audit%20Request)
 - 📧 **Contact:** [flowlink@flow-masters.ru](mailto:flowlink@flow-masters.ru)
+
+## Learn More
+
+- 📖 **[Documentation](https://flowlink.flow-masters.ru/docs)** — Full API reference, guides, and tutorials
+- 🎮 **[Playground](https://flowlink.flow-masters.ru/playground)** — Interactive demo and sandbox
+- ✨ **[Features](https://flowlink.flow-masters.ru/features)** — Detailed feature breakdown
+- 💲 **[Pricing](https://flowlink.flow-masters.ru/pricing)** — Plans and billing details
+
+## Comparisons
+
+- 📊 **[FlowLink vs ToolHive](https://flowlink.flow-masters.ru/docs/comparison)** — Security, governance, and feature comparison
 
 ## License
 
