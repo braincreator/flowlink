@@ -1,0 +1,22 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": [
+    "braincreator"
+  ],
+  "name": "flowlink",
+  "description": "Governance & Risk Control for Autonomous AI Systems. MCP-native policy enforcement, 7-level shield engine, credential vault, audit trails, and eBPF kernel monitoring for AI agents.",
+  "keywords": [
+    "mcp",
+    "governance",
+    "security",
+    "ai-agents",
+    "policy-engine",
+    "risk-control",
+    "audit-trail",
+    "ebpf",
+    "credential-vault",
+    "shield",
+    "autonomous-agents",
+    "compliance"
+  ]
+}

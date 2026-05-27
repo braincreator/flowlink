@@ -8,6 +8,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-linux%20%7C%20macos-informational)](https://github.com/braincreator/flowlink/releases)
 [![License](https://img.shields.io/badge/license-proprietary-red)]()
 [![Code Audit](https://img.shields.io/badge/code_audit-available_NDA-green)](mailto:flowlink@flow-masters.ru)
+[![flowlink MCP server](https://glama.ai/mcp/servers/braincreator/flowlink/badges/card.svg)](https://glama.ai/mcp/servers/braincreator/flowlink)
 
 *Policy enforcement · Risk scoring · Audit trails · MCP-native governance*
 
