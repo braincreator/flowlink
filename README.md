@@ -163,3 +163,11 @@ Proprietary software. Binary releases provided for evaluation and production use
 *If your AI agents have access to your infrastructure, you need FlowLink.*
 
 </div>
+
+---
+
+## 🔗 Related Projects
+
+- **[GrowoAI](https://growoai.ru)** — AI employee for business (RAG assistant, bots, marketplace parsing, CRM)
+- **[FlowMasters](https://flow-masters.ru)** — AI automation agency (chatbots, lead generation)
+
